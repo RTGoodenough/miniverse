@@ -1,6 +1,11 @@
 # Prerequisites
 *.d
 
+*.tif
+.clangd
+.vscode
+/temp
+
 # Compiled Object files
 *.slo
 *.lo
@@ -67,3 +72,11 @@ vcpkg_installed/
 # test output & cache
 Testing/
 .cache/
+
+# environment files
+.env
+
+# Python
+__pycache__/
+*.egg-info/
+.venv/

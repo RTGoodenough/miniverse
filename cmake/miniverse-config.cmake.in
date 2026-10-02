@@ -1,0 +1,14 @@
+@PACKAGE_INIT@
+
+# find_package(miniverse [version] [REQUIRED])
+#
+#   miniverse::miniverse   layers of the world in PostGIS, loaded by polygon
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(schemacht)
+find_dependency(Boost 1.74)
+
+include("${CMAKE_CURRENT_LIST_DIR}/miniverse-targets.cmake")
+
+check_required_components(miniverse)
