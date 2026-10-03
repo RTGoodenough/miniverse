@@ -17,15 +17,17 @@
 
 #include "miniverse/miniverse.hpp"
 #include "schemacht/json/json.hpp"
+#include "schemacht/postgres/async_client.hpp"
 #include "schemacht/query/raw_statement.hpp"
 #include "schemacht/schema/field.hpp"
+#include "schemacht/schema/table_name.hpp"
 
 namespace bg = boost::geometry;
 namespace geo = miniverse::geo;
 
 namespace {
 
-struct TestRoads : miniverse::RoadLayer<"miniverse_test_roads"> {};
+struct TestRoads : miniverse::RoadLayer {};
 
 using World = miniverse::Miniverse<TestRoads>;
 
@@ -81,7 +83,7 @@ const geo::Polygon TRIANGLE = polygon("POLYGON((0 0,4 0,0 4,0 0))");
 /** @brief A world with the network in it, its table made fresh and dropped afterwards. */
 class Loaded {
  public:
-  explicit Loaded(const std::string& conninfo) : _world(conninfo) {
+  explicit Loaded(const std::string& conninfo) : _world(conninfo, miniverse::Layer<TestRoads>("miniverse_test_roads")) {
     _world.drop_tables();
     _world.create_tables();
     _world.push<TestRoads>(network()).get();
@@ -98,14 +100,23 @@ class Loaded {
   Loaded& operator=(const Loaded&) = delete;
   Loaded& operator=(Loaded&&) = delete;
   ~Loaded() {
+    // A lost database must not end the run from a destructor, and the next test drops the table first anyway.
     try {
       _world.drop_tables();
-    } catch (
-        ...
-    ) {  // NOLINT(bugprone-empty-catch) -- a lost database must not end the run from a destructor; the next test drops the table first anyway
+    } catch ( ... ) {  // NOLINT(bugprone-empty-catch)
     }
   }
 };
+
+// A kind whose setup fails: a table it makes is dropped again.
+struct BrokenSetup : miniverse::RoadLayer {
+  [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& /*table*/, miniverse::NoSettings /*settings*/) {
+    return {"CREATE INDEX ON miniverse_no_such_table (geom)"};
+  }
+};
+
+using TableExists = schemacht::query::RawStatement<
+    "SELECT to_regclass($1) IS NOT NULL AS found", schemacht::query::RawArguments<std::string>, schemacht::schema::Field<bool, "found">>;
 
 using IndexNames = schemacht::query::RawStatement<
     "SELECT indexname FROM pg_indexes WHERE tablename = $1 ORDER BY indexname", schemacht::query::RawArguments<std::string>,
@@ -153,7 +164,9 @@ TEST_CASE("integration: several loads run at once on one miniverse", "[integrati
 TEST_CASE("integration: create_tables makes the spatial index the loads use", "[integration]") {
   Loaded loaded(test_db());
 
-  const auto rows = loaded.world().database().execute(IndexNames::bind("miniverse_test_roads")).get();
+  World& world = loaded.world();
+
+  const auto rows = world.database().execute(IndexNames::bind(world.table_name<TestRoads>().name())).get();
 
   std::vector<std::string> names;
 
@@ -183,4 +196,15 @@ TEST_CASE("integration: a push that breaks the table's rules writes nothing and 
   CHECK_THROWS(world.push<TestRoads>(std::move(again)).get());  // way 1 is there already
 
   CHECK(ids(world.load<TestRoads>(EVERYWHERE).get()) == std::vector<std::int64_t>{1, 2, 3, 4});
+}
+
+TEST_CASE("integration: a table whose setup fails is dropped again, so it can be made once the setup is fixed", "[integration]") {
+  miniverse::Miniverse world(test_db(), miniverse::Layer<BrokenSetup>("miniverse_test_broken"));
+  world.drop_tables();
+
+  CHECK_THROWS_AS(world.create_tables(), schemacht::postgres::QueryError);
+
+  const auto rows = world.database().execute(TableExists::bind("miniverse_test_broken")).get();
+  REQUIRE(rows.size() == 1);
+  CHECK(! schemacht::schema::get<"found">(rows.front()));
 }

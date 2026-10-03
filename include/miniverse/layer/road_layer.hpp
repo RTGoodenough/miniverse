@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -8,14 +9,14 @@
 #include "miniverse/geo/column_types.hpp"
 #include "miniverse/geo/operations.hpp"
 #include "miniverse/geo/types.hpp"
+#include "miniverse/layer.hpp"
 #include "schemacht/json/json.hpp"
 #include "schemacht/query/predicate.hpp"
 #include "schemacht/query/prepared.hpp"
 #include "schemacht/query/query.hpp"
-#include "schemacht/query/raw_statement.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/schema.hpp"
-#include "schemacht/util/compile_time.hpp"
+#include "schemacht/schema/table_name.hpp"
 
 namespace miniverse {
 
@@ -48,33 +49,36 @@ using Row = std::tuple<WayId, NodeIds, Geom, Tags>;
 }  // namespace road
 
 /**
- * @brief The layer kind of roads stored in the table `table`: one row per way, its geometry a `geometry(LineString,4326)`
- * with a GiST index. A load gives the ways that intersect the location, ordered by id.
+ * @brief The layer kind of roads: one row per way, its geometry a `geometry(LineString,4326)` with a GiST index. A load gives
+ * the ways that intersect the location, ordered by id.
  *
  * @code
- * struct Roads : miniverse::RoadLayer<"osm_roads"> {};
+ * struct Roads : miniverse::RoadLayer {};
+ * miniverse::Miniverse world(conninfo, miniverse::Layer<Roads>("osm_roads"));
  * @endcode
  */
-template <schemacht::util::CTString table>
 struct RoadLayer {
   using result_type = Ways;
-  using schema_type = schemacht::schema::Schema<table, road::WayId, road::NodeIds, road::Geom, road::Tags>;
+  using settings_type = NoSettings;
+  /// The table's layout. Its name, `roads`, is only a placeholder: a layer names its own table (`Layer`).
+  using schema_type = schemacht::schema::Schema<"roads", road::WayId, road::NodeIds, road::Geom, road::Tags>;
 
   /** @brief The ways that intersect argument 0, a polygon, by id (the GiST index answers `ST_Intersects`). */
   static constexpr auto LOAD =
-      schemacht::query::select(schemacht::query::On<schema_type>::template col<"geom">().template apply<geo::Intersects>(schemacht::query::arg<0>()))
-          .order_by(schemacht::query::On<schema_type>::template col<"way_id">().asc());
+      schemacht::query::select(schemacht::query::On<schema_type>::col<"geom">().apply<geo::Intersects>(schemacht::query::arg<0>()))
+          .order_by(schemacht::query::On<schema_type>::col<"way_id">().asc());
   using load_statement_type = schemacht::query::Prepared<LOAD>;
 
   /**
-   * @brief The spatial index that the load's `ST_Intersects` uses. It is not named: PostgreSQL names it (`<table>_geom_idx`),
+   * @return The spatial index that the load's `ST_Intersects` uses. It is not named: PostgreSQL names it (`<table>_geom_idx`),
    * shortening and numbering the name as needed, so it never clashes with another relation's.
    */
-  using setup_statement_type = schemacht::query::RawStatement<
-      schemacht::util::concat_ctstrings<"CREATE INDEX ON ", table, " USING gist (geom)">(), schemacht::query::RawArguments<>>;
+  [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table, NoSettings /*settings*/);
 
-  [[nodiscard]] static std::vector<road::Row> to_rows(Ways ways) { return road::to_rows(std::move(ways)); }
-  [[nodiscard]] static Ways                   from_rows(std::vector<road::Row> rows) { return road::from_rows(std::move(rows)); }
+  [[nodiscard]] static std::vector<road::Row> to_rows(Ways ways, NoSettings /*settings*/) { return road::to_rows(std::move(ways)); }
+
+  /** @return The ways of `rows`, which are already the ones that intersect the location. */
+  [[nodiscard]] static Ways from_rows(std::vector<road::Row> rows, const geo::Polygon& /*location*/) { return road::from_rows(std::move(rows)); }
 };
 
 }  // namespace miniverse

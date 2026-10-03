@@ -39,7 +39,9 @@ find_package(Boost 1.74 REQUIRED)
 add_library(
   miniverse
   STATIC
+  src/geo/raster.cpp
   src/geo/wkb.cpp
+  src/layer/elevation_layer.cpp
   src/layer/road_layer.cpp
 )
 

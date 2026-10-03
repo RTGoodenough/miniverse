@@ -1,20 +1,22 @@
-// What the layer kinds are at compile time: their statements' text, and that they are kinds.
+// What is checked at compile time: which types are layer kinds, the kinds a miniverse deduces, and the geometry columns' types.
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <concepts>
 #include <cstdint>
-#include <string_view>
+#include <string>
 #include <vector>
 
 #include "miniverse/geo/operations.hpp"
 #include "miniverse/miniverse.hpp"
+#include "schemacht/postgres/database.hpp"
 #include "schemacht/query/predicate.hpp"
 #include "schemacht/query/prepared.hpp"
 #include "schemacht/query/query.hpp"
-#include "schemacht/query/raw_statement.hpp"
 #include "schemacht/query/sql_type.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/schema.hpp"
+#include "schemacht/schema/table_name.hpp"
 
 namespace {
 
@@ -22,7 +24,7 @@ namespace geo = miniverse::geo;
 namespace q = schemacht::query;
 namespace sch = schemacht::schema;
 
-struct Roads : miniverse::RoadLayer<"osm_roads"> {};
+struct Roads : miniverse::RoadLayer {};
 
 // A kind written by hand, as a user would: places, as points, loaded by polygon. Its conversions are only declared, since
 // the concept checks their signatures, not their bodies.
@@ -32,13 +34,31 @@ constexpr auto PLACES_IN = q::select(q::On<PlacesSchema>::col<"position">().appl
 
 struct Places {
   using result_type = std::vector<geo::Point>;
+  using settings_type = miniverse::NoSettings;
   using schema_type = PlacesSchema;
   using load_statement_type = q::Prepared<PLACES_IN>;
-  using setup_statement_type = q::RawStatement<"CREATE INDEX ON places USING gist (position)", q::RawArguments<>>;
 
-  static std::vector<schema_type::row_type> to_rows(result_type places);
-  static result_type                        from_rows(std::vector<load_statement_type::result_type> rows);
+  static std::vector<std::string>           setup_sql(const sch::TableName& table, miniverse::NoSettings settings);
+  static std::vector<schema_type::row_type> to_rows(result_type places, miniverse::NoSettings settings);
+  static result_type                        from_rows(std::vector<load_statement_type::result_type> rows, const geo::Polygon& location);
 };
+
+// Places, but loaded by the roads' query, which is written against another schema.
+struct PlacesByRoadQuery : Places {
+  using load_statement_type = miniverse::RoadLayer::load_statement_type;
+
+  static result_type from_rows(std::vector<load_statement_type::result_type> rows, const geo::Polygon& location);
+};
+
+// Places with settings, but no way to read them back.
+struct PlacesWithUnreadSettings : Places {
+  using settings_type = int;
+
+  static std::vector<std::string>           setup_sql(const sch::TableName& table, int settings);
+  static std::vector<schema_type::row_type> to_rows(result_type places, int settings);
+};
+
+struct Elevation : miniverse::ElevationLayer<std::int16_t> {};
 
 struct NotAKind {
   using result_type = int;
@@ -48,14 +68,20 @@ struct NotAKind {
 
 static_assert(miniverse::LayerKind<Roads>);
 static_assert(miniverse::LayerKind<Places>);
+static_assert(miniverse::LayerKind<Elevation>);
+static_assert(miniverse::HasSettings<Elevation>);
+static_assert(! miniverse::HasSettings<Roads>);
+static_assert(! miniverse::LayerKind<PlacesByRoadQuery>);
+static_assert(! miniverse::LayerKind<PlacesWithUnreadSettings>);
 static_assert(! miniverse::LayerKind<NotAKind>);
 
-static_assert(Roads::schema_type::TABLE_NAME == "osm_roads");
-static_assert(
-    Roads::load_statement_type::SQL ==
-    R"(SELECT "way_id", "node_ids", "geom", "tags" FROM "osm_roads" WHERE ST_Intersects("geom", $1::geometry(Polygon,4326)) ORDER BY "way_id")"
-);
-static_assert(Roads::setup_statement_type::SQL == "CREATE INDEX ON osm_roads USING gist (geom)");
+// A miniverse's kinds are deduced from its layers.
+static_assert(std::same_as<decltype(miniverse::Miniverse(std::string(), miniverse::Layer<Roads>("roads"))), miniverse::Miniverse<Roads>>);
+static_assert(std::same_as<
+              decltype(miniverse::Miniverse(
+                  std::string(), schemacht::postgres::Database::Options(), miniverse::Layer<Roads>("roads"), miniverse::Layer<Places>("places")
+              )),
+              miniverse::Miniverse<Roads, Places>>);
 
 static_assert(schemacht::query::sql::type_name<miniverse::geo::Point>() == "geometry(Point,4326)");
 static_assert(schemacht::query::sql::type_name<miniverse::geo::LineString>() == "geometry(LineString,4326)");

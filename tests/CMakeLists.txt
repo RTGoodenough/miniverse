@@ -14,13 +14,18 @@ include(Catch)
 # ==============================================================================
 # Compile-time (static) checks, unit tests and integration tests: one executable
 # ==============================================================================
-# The integration tests skip themselves unless MINIVERSE_TEST_DB holds a libpq connection string to a database with PostGIS.
+# The integration tests skip themselves unless MINIVERSE_TEST_DB holds a libpq connection string to a database with PostGIS
+# and postgis_raster.
 add_executable(
   miniverse_tests
   compile/layer_test.cpp
   unit/wkb_test.cpp
   unit/column_type_test.cpp
+  unit/layer_test.cpp
+  unit/raster_test.cpp
+  unit/elevation_layer_test.cpp
   integration/miniverse_test.cpp
+  integration/elevation_test.cpp
 )
 target_include_directories(miniverse_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miniverse_tests PRIVATE miniverse::miniverse Catch2::Catch2WithMain)
@@ -44,4 +49,5 @@ endfunction()
 
 miniverse_compile_fail(LOAD_LAYER_NOT_HELD "this miniverse has no such layer")
 miniverse_compile_fail(PUSH_LAYER_NOT_HELD "this miniverse has no such layer")
-miniverse_compile_fail(SAME_TABLE "two layers of the miniverse are stored in the same table")
+miniverse_compile_fail(DUPLICATE_KIND "a miniverse holds one layer of each kind")
+miniverse_compile_fail(CREATE_TABLES_WITH_SETTINGS "create_tables makes only tables without settings")

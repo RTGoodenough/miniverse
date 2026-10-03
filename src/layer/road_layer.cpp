@@ -5,9 +5,17 @@
 #include <utility>
 #include <vector>
 
+#include "miniverse/layer.hpp"
 #include "schemacht/schema/field.hpp"
+#include "schemacht/schema/table_name.hpp"
 
-namespace miniverse::road {
+namespace miniverse {
+
+std::vector<std::string> RoadLayer::setup_sql(const schemacht::schema::TableName& table, NoSettings /*settings*/) {
+  return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)"};
+}
+
+namespace road {
 
 std::vector<Row> to_rows(Ways ways) {
   std::vector<Row> rows;
@@ -45,4 +53,6 @@ Ways from_rows(std::vector<Row> rows) {
   return ways;
 }
 
-}  // namespace miniverse::road
+}  // namespace road
+
+}  // namespace miniverse
