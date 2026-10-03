@@ -1,5 +1,7 @@
 #include "miniverse/layer/road_layer.hpp"
 
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -7,17 +9,27 @@
 
 namespace miniverse::road {
 
-std::vector<Row> to_rows(const Ways& ways) {
+std::vector<Row> to_rows(Ways ways) {
   std::vector<Row> rows;
+
   rows.reserve(ways.size());
-  for ( const Way& way : ways ) {
-    rows.emplace_back(WayId{way.id}, NodeIds{way.node_ids}, Geometry{way.coordinates}, Tags{way.tags});
+  for ( Way& way : ways ) {
+    if ( way.node_ids.size() != way.coordinates.size() ) {
+      throw std::invalid_argument(
+          "way " + std::to_string(way.id) + " has " + std::to_string(way.node_ids.size()) + " node ids but " +
+          std::to_string(way.coordinates.size()) + " points: one id per point"
+      );
+    }
+
+    rows.emplace_back(WayId{way.id}, NodeIds{std::move(way.node_ids)}, Geom{std::move(way.coordinates)}, Tags{std::move(way.tags)});
   }
+
   return rows;
 }
 
 Ways from_rows(std::vector<Row> rows) {
   Ways ways;
+
   ways.reserve(rows.size());
   for ( Row& row : rows ) {
     ways.push_back(
@@ -29,6 +41,7 @@ Ways from_rows(std::vector<Row> rows) {
         }
     );
   }
+
   return ways;
 }
 

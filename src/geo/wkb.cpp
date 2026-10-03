@@ -5,12 +5,9 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
-#include <string_view>
-#include <utility>
 #include <vector>
 
 #include "miniverse/geo/types.hpp"
@@ -24,7 +21,6 @@ enum class Kind : std::uint8_t {
   Point = 1,
   LineString = 2,
   Polygon = 3,
-  MultiPolygon = 6,
 };
 
 constexpr std::uint8_t BIG_ENDIAN_MARK = 0;
@@ -45,36 +41,27 @@ constexpr std::size_t   REAL_BYTES = 8;
 constexpr std::size_t   POINT_BYTES = 2 * REAL_BYTES;
 constexpr std::uint64_t BYTE_MASK = 0xFFU;
 
-[[nodiscard]] std::string_view kind_name(Kind kind) {
-  switch ( kind ) {
-    case Kind::Point:
-      return "Point";
-    case Kind::LineString:
-      return "LineString";
-    case Kind::Polygon:
-      return "Polygon";
-    case Kind::MultiPolygon:
-      return "MultiPolygon";
-  }
-  return "geometry";
-}
+/** @brief The points of a line or a ring: Boost.Geometry's `linestring` and `ring` are both a `std::vector` of them. */
+using Points = std::vector<Point>;
 
 template <Geometry geometry_t>
 [[nodiscard]] constexpr Kind kind_of() {
   if constexpr ( std::same_as<geometry_t, Point> ) {
     return Kind::Point;
+
   } else if constexpr ( std::same_as<geometry_t, LineString> ) {
     return Kind::LineString;
-  } else if constexpr ( std::same_as<geometry_t, Polygon> ) {
-    return Kind::Polygon;
+
   } else {
-    return Kind::MultiPolygon;
+    return Kind::Polygon;
   }
 }
 
 [[noreturn]] void malformed(const std::string& what) { throw std::invalid_argument("wkb: " + what); }
 
-/** @brief Reads WKB's numbers from a buffer, in the byte order the current geometry's header names. */
+// ---- Reading --------------------------------------------------------------------------------------------------------
+
+/** @brief Reads WKB's numbers from a buffer, in the byte order the geometry's header names. */
 class Reader {
  public:
   explicit Reader(std::span<const std::byte> bytes) : _bytes(bytes) {}
@@ -88,6 +75,7 @@ class Reader {
     if ( value != LITTLE_ENDIAN_MARK && value != BIG_ENDIAN_MARK ) {
       malformed("byte order mark " + std::to_string(value) + " is neither 0 (big-endian) nor 1 (little-endian)");
     }
+
     _little = value == LITTLE_ENDIAN_MARK;
   }
 
@@ -103,6 +91,7 @@ class Reader {
     if ( items > remaining() / item_bytes ) {
       malformed("a count of " + std::to_string(items) + " is more than the " + std::to_string(remaining()) + " bytes left could hold");
     }
+
     return items;
   }
 
@@ -115,14 +104,17 @@ class Reader {
     if ( size > remaining() ) {
       malformed("the geometry ends early");
     }
+
     const std::span<const std::byte> taken = _bytes.subspan(_at, size);
     _at += size;
+
     return taken;
   }
 
   [[nodiscard]] std::uint64_t unsigned_of(std::span<const std::byte> bytes) const {
     std::uint64_t value = 0;
     std::size_t   shift = 0;
+
     for ( const std::byte part : bytes ) {
       const auto digit = std::to_integer<std::uint64_t>(part);
       if ( _little ) {
@@ -132,6 +124,7 @@ class Reader {
         value = (value << BITS_PER_BYTE) | digit;
       }
     }
+
     return value;
   }
 
@@ -143,8 +136,9 @@ class Reader {
   ~Reader() = default;
 };
 
-/** @brief Reads one geometry's header (byte order, type, SRID) and checks it is a 2D `expected` in `srid` or none. */
-void read_header(Reader& reader, Kind expected, std::int32_t srid) {
+/** @brief Reads the geometry's header (byte order, type, SRID) and checks it is a 2D `geometry_t` in WGS 84. */
+template <Geometry geometry_t>
+void read_header(Reader& reader) {
   reader.set_byte_order(reader.byte());
 
   const std::uint32_t type = reader.word();
@@ -152,195 +146,155 @@ void read_header(Reader& reader, Kind expected, std::int32_t srid) {
     malformed("only two-dimensional geometry is read, not one with Z or M values");
   }
 
-  if ( (type & SRID_FLAG) != 0 ) {
-    const auto found = static_cast<std::int32_t>(reader.word());
-    if ( found != srid ) {
-      malformed("the geometry has SRID " + std::to_string(found) + ", not " + std::to_string(srid));
-    }
+  if ( (type & KIND_MASK) != static_cast<std::uint32_t>(kind_of<geometry_t>()) ) {
+    malformed("expected a " + std::string(type_name<geometry_t>().view()) + ", found geometry type " + std::to_string(type & KIND_MASK));
   }
 
-  if ( (type & KIND_MASK) != static_cast<std::uint32_t>(expected) ) {
-    malformed("expected a " + std::string(kind_name(expected)) + ", found geometry type " + std::to_string(type & KIND_MASK));
+  if ( (type & SRID_FLAG) == 0 ) {
+    malformed("the geometry names no SRID, so its coordinates could be in any system (expected " + std::to_string(WGS84_SRID) + ")");
+  }
+
+  const auto srid = static_cast<std::int32_t>(reader.word());
+  if ( srid != WGS84_SRID ) {
+    malformed("the geometry has SRID " + std::to_string(srid) + ", not " + std::to_string(WGS84_SRID));
   }
 }
 
 [[nodiscard]] Point read_point(Reader& reader) {
   const double lon = reader.real();
   const double lat = reader.real();
+
   return {lon, lat};
 }
 
-template <typename points_t>
-void read_points(Reader& reader, points_t& points) {
+void read_points(Reader& reader, Points& points) {
   const std::size_t size = reader.count(POINT_BYTES);
+
   points.reserve(size);
   for ( std::size_t i = 0; i < size; ++i ) {
     points.push_back(read_point(reader));
   }
 }
 
-[[nodiscard]] Polygon read_polygon(Reader& reader) {
-  const std::size_t rings = reader.count(WORD_BYTES);  // each ring is at least its own count
-  Polygon           polygon;
-
-  if ( rings > 0 ) {
-    read_points(reader, polygon.outer());
-  }
-
-  polygon.inners().resize(rings > 0 ? rings - 1 : 0);
-  for ( auto& inner : polygon.inners() ) {
-    read_points(reader, inner);
-  }
-
-  return polygon;
-}
-
 template <Geometry geometry_t>
-[[nodiscard]] geometry_t read_body(Reader& reader, std::int32_t srid) {
+[[nodiscard]] geometry_t read_body(Reader& reader) {
   if constexpr ( std::same_as<geometry_t, Point> ) {
     const Point point = read_point(reader);
     if ( std::isnan(point.x()) && std::isnan(point.y()) ) {
       malformed("an empty point has no position");  // WKB writes POINT EMPTY as two NaNs
     }
+
     return point;
 
   } else if constexpr ( std::same_as<geometry_t, LineString> ) {
     LineString line;
     read_points(reader, line);
+
     return line;
 
-  } else if constexpr ( std::same_as<geometry_t, Polygon> ) {
-    return read_polygon(reader);
-
   } else {
-    constexpr std::size_t SMALLEST_POLYGON = 1 + WORD_BYTES + WORD_BYTES;  // byte order, type and ring count
-    const std::size_t     size = reader.count(SMALLEST_POLYGON);
-    MultiPolygon          polygons;
-    polygons.reserve(size);
-    for ( std::size_t i = 0; i < size; ++i ) {
-      read_header(reader, Kind::Polygon, srid);  // each part is a whole geometry, with its own byte order
-      polygons.push_back(read_polygon(reader));
+    const std::size_t rings = reader.count(WORD_BYTES);  // each ring is at least its own count
+    Polygon           polygon;
+
+    if ( rings > 0 ) {
+      read_points(reader, polygon.outer());
     }
-    return polygons;
+
+    polygon.inners().resize(rings > 0 ? rings - 1 : 0);
+    for ( auto& inner : polygon.inners() ) {
+      read_points(reader, inner);
+    }
+
+    return polygon;
   }
 }
 
-/** @brief Writes little-endian WKB. */
-class Writer {
- public:
-  Writer() = default;
+// ---- Writing: little-endian, appended to `out` ----------------------------------------------------------------------
 
-  void header(Kind kind, std::optional<std::int32_t> srid) {
-    byte(LITTLE_ENDIAN_MARK);
-    word(static_cast<std::uint32_t>(kind) | (srid ? SRID_FLAG : 0U));
-    if ( srid ) {
-      word(static_cast<std::uint32_t>(*srid));
-    }
+template <std::size_t size>
+void put(std::vector<std::byte>& out, std::uint64_t value) {
+  for ( std::size_t i = 0; i < size; ++i ) {
+    out.push_back(static_cast<std::byte>((value >> (i * BITS_PER_BYTE)) & BYTE_MASK));
   }
-
-  void point(const Point& position) {
-    real(position.x());
-    real(position.y());
-  }
-
-  /** @brief A count of parts, as WKB writes it: a 32-bit word. */
-  void count(std::size_t size) {
-    if ( size > UINT32_MAX ) {
-      throw std::invalid_argument("wkb: a geometry has more parts than WKB can count");
-    }
-    word(static_cast<std::uint32_t>(size));
-  }
-
-  template <typename points_t>
-  void points(const points_t& positions) {
-    count(positions.size());
-    for ( const Point& position : positions ) {
-      point(position);
-    }
-  }
-
-  void polygon(const Polygon& area) {
-    count(area.inners().size() + 1);
-    points(area.outer());
-    for ( const auto& inner : area.inners() ) {
-      points(inner);
-    }
-  }
-
-  void word(std::uint32_t value) { put<WORD_BYTES>(value); }
-
-  [[nodiscard]] std::vector<std::byte> take() && { return std::move(_bytes); }
-
- private:
-  std::vector<std::byte> _bytes;
-
-  void byte(std::uint8_t value) { _bytes.push_back(std::byte{value}); }
-  void real(double value) { put<REAL_BYTES>(std::bit_cast<std::uint64_t>(value)); }
-
-  template <std::size_t size>
-  void put(std::uint64_t value) {
-    for ( std::size_t i = 0; i < size; ++i ) {
-      _bytes.push_back(static_cast<std::byte>((value >> (i * BITS_PER_BYTE)) & BYTE_MASK));
-    }
-  }
-
- public:
-  Writer(const Writer&) = delete;
-  Writer(Writer&&) = delete;
-  Writer& operator=(const Writer&) = delete;
-  Writer& operator=(Writer&&) = delete;
-  ~Writer() = default;
-};
-
-}  // namespace
-
-std::vector<std::byte> write(const Point& point, std::int32_t srid) {
-  Writer writer;
-  writer.header(Kind::Point, srid);
-  writer.point(point);
-  return std::move(writer).take();
 }
 
-std::vector<std::byte> write(const LineString& line, std::int32_t srid) {
-  Writer writer;
-  writer.header(Kind::LineString, srid);
-  writer.points(line);
-  return std::move(writer).take();
-}
+void put_word(std::vector<std::byte>& out, std::uint32_t value) { put<WORD_BYTES>(out, value); }
 
-std::vector<std::byte> write(const Polygon& polygon, std::int32_t srid) {
-  Writer writer;
-  writer.header(Kind::Polygon, srid);
-  writer.polygon(polygon);
-  return std::move(writer).take();
-}
-
-std::vector<std::byte> write(const MultiPolygon& polygons, std::int32_t srid) {
-  Writer writer;
-  writer.header(Kind::MultiPolygon, srid);
-  writer.count(polygons.size());
-  for ( const Polygon& polygon : polygons ) {
-    writer.header(Kind::Polygon, std::nullopt);  // PostGIS writes the SRID once, on the collection
-    writer.polygon(polygon);
+/** @brief A count of parts, as WKB writes it: a 32-bit word. */
+void put_count(std::vector<std::byte>& out, std::size_t size) {
+  if ( size > UINT32_MAX ) {
+    throw std::invalid_argument("wkb: a geometry has more parts than WKB can count");
   }
-  return std::move(writer).take();
+
+  put_word(out, static_cast<std::uint32_t>(size));
+}
+
+void put_point(std::vector<std::byte>& out, const Point& position) {
+  put<REAL_BYTES>(out, std::bit_cast<std::uint64_t>(position.x()));
+  put<REAL_BYTES>(out, std::bit_cast<std::uint64_t>(position.y()));
+}
+
+void put_points(std::vector<std::byte>& out, const Points& positions) {
+  put_count(out, positions.size());
+  for ( const Point& position : positions ) {
+    put_point(out, position);
+  }
 }
 
 template <Geometry geometry_t>
-geometry_t read(std::span<const std::byte> bytes, std::int32_t srid) {
+void put_body(std::vector<std::byte>& out, const geometry_t& geometry) {
+  if constexpr ( std::same_as<geometry_t, Point> ) {
+    put_point(out, geometry);
+
+  } else if constexpr ( std::same_as<geometry_t, LineString> ) {
+    put_points(out, geometry);
+
+  } else {
+    if ( geometry.outer().empty() && geometry.inners().empty() ) {
+      put_count(out, 0);  // no rings, as PostGIS writes POLYGON EMPTY
+      return;
+    }
+
+    put_count(out, geometry.inners().size() + 1);
+    put_points(out, geometry.outer());
+    for ( const auto& inner : geometry.inners() ) {
+      put_points(out, inner);
+    }
+  }
+}
+
+}  // namespace
+
+template <Geometry geometry_t>
+std::vector<std::byte> write(const geometry_t& geometry) {
+  std::vector<std::byte> out;
+  out.push_back(std::byte{LITTLE_ENDIAN_MARK});
+  put_word(out, static_cast<std::uint32_t>(kind_of<geometry_t>()) | SRID_FLAG);
+  put_word(out, static_cast<std::uint32_t>(WGS84_SRID));
+  put_body(out, geometry);
+
+  return out;
+}
+
+template <Geometry geometry_t>
+geometry_t read(std::span<const std::byte> bytes) {
   Reader reader(bytes);
-  read_header(reader, kind_of<geometry_t>(), srid);
-  auto geometry = read_body<geometry_t>(reader, srid);
+  read_header<geometry_t>(reader);
+  auto geometry = read_body<geometry_t>(reader);
 
   if ( ! reader.at_end() ) {
-    malformed(std::to_string(reader.remaining()) + " bytes are left after the " + std::string(kind_name(kind_of<geometry_t>())));
+    malformed(std::to_string(reader.remaining()) + " bytes are left after the " + std::string(type_name<geometry_t>().view()));
   }
+
   return geometry;
 }
 
-template Point        read<Point>(std::span<const std::byte> bytes, std::int32_t srid);
-template LineString   read<LineString>(std::span<const std::byte> bytes, std::int32_t srid);
-template Polygon      read<Polygon>(std::span<const std::byte> bytes, std::int32_t srid);
-template MultiPolygon read<MultiPolygon>(std::span<const std::byte> bytes, std::int32_t srid);
+template std::vector<std::byte> write<Point>(const Point& geometry);
+template std::vector<std::byte> write<LineString>(const LineString& geometry);
+template std::vector<std::byte> write<Polygon>(const Polygon& geometry);
+
+template Point      read<Point>(std::span<const std::byte> bytes);
+template LineString read<LineString>(std::span<const std::byte> bytes);
+template Polygon    read<Polygon>(std::span<const std::byte> bytes);
 
 }  // namespace miniverse::geo::wkb

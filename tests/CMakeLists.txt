@@ -24,7 +24,8 @@ add_executable(
 )
 target_include_directories(miniverse_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miniverse_tests PRIVATE miniverse::miniverse Catch2::Catch2WithMain)
-# The integration tests share the test database's tables, so they run one at a time even under `ctest -j`.
+# The integration tests share the test database's tables, so the tests run one at a time even under `ctest -j` (all of them:
+# the others take milliseconds, so they aren't worth discovering apart).
 catch_discover_tests(miniverse_tests PROPERTIES RESOURCE_LOCK miniverse_test_db)
 
 # ==============================================================================
@@ -37,11 +38,10 @@ function(miniverse_compile_fail case regex)
   target_link_libraries(compile_fail_${case} PRIVATE miniverse::miniverse)
   target_compile_definitions(compile_fail_${case} PRIVATE CASE_${case})
 
-  add_test(NAME compile_fail.${case} COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target compile_fail_${case})
+  add_test(NAME compile_fail.${case} COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --config $<CONFIG> --target compile_fail_${case})
   set_tests_properties(compile_fail.${case} PROPERTIES PASS_REGULAR_EXPRESSION "${regex}")
 endfunction()
 
 miniverse_compile_fail(LOAD_LAYER_NOT_HELD "this miniverse has no such layer")
 miniverse_compile_fail(PUSH_LAYER_NOT_HELD "this miniverse has no such layer")
 miniverse_compile_fail(SAME_TABLE "two layers of the miniverse are stored in the same table")
-miniverse_compile_fail(NOT_A_LAYER_KIND "LayerKind")

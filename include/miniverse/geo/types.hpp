@@ -2,9 +2,7 @@
 
 #include <cstdint>
 
-#include <boost/geometry/geometries/box.hpp>
 #include <boost/geometry/geometries/linestring.hpp>
-#include <boost/geometry/geometries/multi_polygon.hpp>
 #include <boost/geometry/geometries/point_xy.hpp>
 #include <boost/geometry/geometries/polygon.hpp>
 
@@ -31,11 +29,5 @@ using LineString = boost::geometry::model::linestring<Point>;
  * area and validity algorithms do (`boost::geometry::correct` fixes a ring that runs the other way).
  */
 using Polygon = boost::geometry::model::polygon<Point, false, true>;
-
-/** @brief Several areas, such as a country with islands. */
-using MultiPolygon = boost::geometry::model::multi_polygon<Polygon>;
-
-/** @brief An axis-aligned rectangle: `min_corner()` is the south-west corner, `max_corner()` the north-east one. */
-using Box = boost::geometry::model::box<Point>;
 
 }  // namespace miniverse::geo

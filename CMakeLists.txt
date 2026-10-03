@@ -24,7 +24,9 @@ if(NOT schemacht_FOUND)
     message(FATAL_ERROR "schemacht was not found: install it (find_package(schemacht)), or set MINIVERSE_SCHEMACHT_DIR to its source tree.")
   endif()
   # Installing miniverse needs schemacht installed beside it: its package refers to schemacht's.
-  set(SCHEMACHT_INSTALL ${MINIVERSE_INSTALL} CACHE BOOL "" FORCE)
+  if(NOT DEFINED SCHEMACHT_INSTALL)  # a -D of its own wins
+    set(SCHEMACHT_INSTALL ${MINIVERSE_INSTALL})
+  endif()
   add_subdirectory("${MINIVERSE_SCHEMACHT_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/schemacht")
 endif()
 

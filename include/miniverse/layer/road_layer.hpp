@@ -2,11 +2,16 @@
 
 #include <cstdint>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "miniverse/geo/column_types.hpp"
+#include "miniverse/geo/operations.hpp"
 #include "miniverse/geo/types.hpp"
 #include "schemacht/json/json.hpp"
+#include "schemacht/query/predicate.hpp"
+#include "schemacht/query/prepared.hpp"
+#include "schemacht/query/query.hpp"
 #include "schemacht/query/raw_statement.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/schema.hpp"
@@ -30,13 +35,14 @@ namespace road {
 
 using WayId = schemacht::schema::Field<std::int64_t, "way_id", schemacht::schema::KeyRole::Primary>;
 using NodeIds = schemacht::schema::Field<std::vector<std::int64_t>, "node_ids">;
-using Geometry = schemacht::schema::Field<geo::LineString, "geom">;
+using Geom = schemacht::schema::Field<geo::LineString, "geom">;
 using Tags = schemacht::schema::Field<schemacht::json::Json, "tags">;
 
 /** @brief One row of a road table. */
-using Row = std::tuple<WayId, NodeIds, Geometry, Tags>;
+using Row = std::tuple<WayId, NodeIds, Geom, Tags>;
 
-[[nodiscard]] std::vector<Row> to_rows(const Ways& ways);
+/** @throws std::invalid_argument for a way whose node ids and coordinates differ in number. */
+[[nodiscard]] std::vector<Row> to_rows(Ways ways);
 [[nodiscard]] Ways             from_rows(std::vector<Row> rows);
 
 }  // namespace road
@@ -52,22 +58,22 @@ using Row = std::tuple<WayId, NodeIds, Geometry, Tags>;
 template <schemacht::util::CTString table>
 struct RoadLayer {
   using result_type = Ways;
-  using schema_type = schemacht::schema::Schema<table, road::WayId, road::NodeIds, road::Geometry, road::Tags>;
+  using schema_type = schemacht::schema::Schema<table, road::WayId, road::NodeIds, road::Geom, road::Tags>;
 
-  /** @brief The ways that intersect `$1`, a polygon (the index answers `ST_Intersects`). */
-  using load_statement_type = schemacht::query::RawStatement<
-      schemacht::util::concat_ctstrings<
-          "SELECT way_id, node_ids, geom, tags FROM ", table, " WHERE ST_Intersects(geom, $1::geometry) ORDER BY way_id">(),
-      schemacht::query::RawArguments<geo::Polygon>, road::WayId, road::NodeIds, road::Geometry, road::Tags>;
+  /** @brief The ways that intersect argument 0, a polygon, by id (the GiST index answers `ST_Intersects`). */
+  static constexpr auto LOAD =
+      schemacht::query::select(schemacht::query::On<schema_type>::template col<"geom">().template apply<geo::Intersects>(schemacht::query::arg<0>()))
+          .order_by(schemacht::query::On<schema_type>::template col<"way_id">().asc());
+  using load_statement_type = schemacht::query::Prepared<LOAD>;
 
-  /** @brief The spatial index that `load_statement`'s `ST_Intersects` uses. */
+  /**
+   * @brief The spatial index that the load's `ST_Intersects` uses. It is not named: PostgreSQL names it (`<table>_geom_idx`),
+   * shortening and numbering the name as needed, so it never clashes with another relation's.
+   */
   using setup_statement_type = schemacht::query::RawStatement<
-      schemacht::util::concat_ctstrings<"CREATE INDEX IF NOT EXISTS ", table, "_geom_idx ON ", table, " USING gist (geom)">(),
-      schemacht::query::RawArguments<>>;
+      schemacht::util::concat_ctstrings<"CREATE INDEX ON ", table, " USING gist (geom)">(), schemacht::query::RawArguments<>>;
 
-  [[nodiscard]] static auto load_statement(const geo::Polygon& location) { return load_statement_type::bind(location); }
-
-  [[nodiscard]] static std::vector<road::Row> to_rows(const Ways& ways) { return road::to_rows(ways); }
+  [[nodiscard]] static std::vector<road::Row> to_rows(Ways ways) { return road::to_rows(std::move(ways)); }
   [[nodiscard]] static Ways                   from_rows(std::vector<road::Row> rows) { return road::from_rows(std::move(rows)); }
 };
 

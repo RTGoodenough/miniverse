@@ -5,6 +5,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <boost/geometry/io/wkt/read.hpp>
+#include <boost/geometry/io/wkt/write.hpp>
+
 #include <cstdint>
 #include <cstdlib>
 #include <future>
@@ -16,10 +19,9 @@
 #include "schemacht/json/json.hpp"
 #include "schemacht/query/raw_statement.hpp"
 #include "schemacht/schema/field.hpp"
-#include "support/geometry.hpp"
 
+namespace bg = boost::geometry;
 namespace geo = miniverse::geo;
-namespace test = miniverse::test;
 
 namespace {
 
@@ -32,14 +34,24 @@ using World = miniverse::Miniverse<TestRoads>;
   if ( conninfo == nullptr ) {
     SKIP("MINIVERSE_TEST_DB is not set");
   }
+
   return conninfo;
 }
 
-[[nodiscard]] miniverse::Way way(std::int64_t id, std::vector<std::int64_t> node_ids, geo::LineString coordinates, std::string tags) {
+[[nodiscard]] miniverse::Way way(std::int64_t id, std::vector<std::int64_t> node_ids, const std::string& wkt, std::string tags) {
   return miniverse::Way{
-      .id = id, .node_ids = std::move(node_ids), .coordinates = std::move(coordinates), .tags = schemacht::json::Json(std::move(tags))
+      .id = id, .node_ids = std::move(node_ids), .coordinates = bg::from_wkt<geo::LineString>(wkt), .tags = schemacht::json::Json(std::move(tags))
   };
 }
+
+[[nodiscard]] geo::Polygon polygon(const std::string& wkt) { return bg::from_wkt<geo::Polygon>(wkt); }
+
+// The places loaded, as closed rings that run counter-clockwise.
+const geo::Polygon NEAR_ORIGIN = polygon("POLYGON((-1 -1,2 -1,2 4,-1 4,-1 -1))");
+const geo::Polygon NORTH_EAST = polygon("POLYGON((5 5,20 5,20 20,5 20,5 5))");
+const geo::Polygon EVERYWHERE = polygon("POLYGON((-1 -1,20 -1,20 20,-1 20,-1 -1))");
+const geo::Polygon NOWHERE = polygon("POLYGON((30 30,31 30,31 31,30 31,30 30))");
+const geo::Polygon TRIANGLE = polygon("POLYGON((0 0,4 0,0 4,0 0))");
 
 /**
  * The network, in degrees:
@@ -48,19 +60,21 @@ using World = miniverse::Miniverse<TestRoads>;
  */
 [[nodiscard]] miniverse::Ways network() {
   return {
-      way(1, {11, 12}, test::line({{0, 0}, {1, 1}}), R"({"highway": "primary"})"),
-      way(2, {21, 22, 23}, test::line({{10, 10}, {10.5, 10.25}, {11, 11}}), R"({"highway": "residential", "name": "High Street"})"),
-      way(3, {31, 32}, test::line({{0.5, 2}, {0.5, 3}}), "{}"),
-      way(4, {41, 42}, test::line({{3, 3}, {4, 2}}), R"({"highway": "track"})"),
+      way(1, {11, 12}, "LINESTRING(0 0,1 1)", R"({"highway": "primary"})"),
+      way(2, {21, 22, 23}, "LINESTRING(10 10,10.5 10.25,11 11)", R"({"highway": "residential", "name": "High Street"})"),
+      way(3, {31, 32}, "LINESTRING(0.5 2,0.5 3)", "{}"),
+      way(4, {41, 42}, "LINESTRING(3 3,4 2)", R"({"highway": "track"})"),
   };
 }
 
 [[nodiscard]] std::vector<std::int64_t> ids(const miniverse::Ways& ways) {
   std::vector<std::int64_t> result;
+
   result.reserve(ways.size());
   for ( const miniverse::Way& loaded : ways ) {
     result.push_back(loaded.id);
   }
+
   return result;
 }
 
@@ -83,7 +97,14 @@ class Loaded {
   Loaded(Loaded&&) = delete;
   Loaded& operator=(const Loaded&) = delete;
   Loaded& operator=(Loaded&&) = delete;
-  ~Loaded() { _world.drop_tables(); }
+  ~Loaded() {
+    try {
+      _world.drop_tables();
+    } catch (
+        ...
+    ) {  // NOLINT(bugprone-empty-catch) -- a lost database must not end the run from a destructor; the next test drops the table first anyway
+    }
+  }
 };
 
 using IndexNames = schemacht::query::RawStatement<
@@ -96,25 +117,25 @@ TEST_CASE("integration: a load gives the ways that intersect the polygon, ordere
   Loaded loaded(test_db());
   World& world = loaded.world();
 
-  CHECK(ids(world.load<TestRoads>(test::rectangle(-1, -1, 2, 4)).get()) == std::vector<std::int64_t>{1, 3});
-  CHECK(ids(world.load<TestRoads>(test::rectangle(5, 5, 20, 20)).get()) == std::vector<std::int64_t>{2});
-  CHECK(ids(world.load<TestRoads>(test::rectangle(-1, -1, 20, 20)).get()) == std::vector<std::int64_t>{1, 2, 3, 4});
-  CHECK(ids(world.load<TestRoads>(test::rectangle(30, 30, 31, 31)).get()).empty());
+  CHECK(ids(world.load<TestRoads>(NEAR_ORIGIN).get()) == std::vector<std::int64_t>{1, 3});
+  CHECK(ids(world.load<TestRoads>(NORTH_EAST).get()) == std::vector<std::int64_t>{2});
+  CHECK(ids(world.load<TestRoads>(EVERYWHERE).get()) == std::vector<std::int64_t>{1, 2, 3, 4});
+  CHECK(ids(world.load<TestRoads>(NOWHERE).get()).empty());
 
   // The triangle's box holds way 4, the triangle does not.
-  CHECK(ids(world.load<TestRoads>(test::polygon({{0, 0}, {4, 0}, {0, 4}, {0, 0}})).get()) == std::vector<std::int64_t>{1, 3});
+  CHECK(ids(world.load<TestRoads>(TRIANGLE).get()) == std::vector<std::int64_t>{1, 3});
 }
 
 TEST_CASE("integration: a loaded way is the way that was pushed", "[integration]") {
   Loaded loaded(test_db());
 
-  const miniverse::Ways ways = loaded.world().load<TestRoads>(test::rectangle(5, 5, 20, 20)).get();
+  const miniverse::Ways ways = loaded.world().load<TestRoads>(NORTH_EAST).get();
 
   REQUIRE(ways.size() == 1);
   const miniverse::Way& high_street = ways.front();
   CHECK(high_street.id == 2);
   CHECK(high_street.node_ids == std::vector<std::int64_t>{21, 22, 23});
-  CHECK(test::coordinates(high_street.coordinates) == test::Coordinates{{10, 10}, {10.5, 10.25}, {11, 11}});
+  CHECK(bg::to_wkt(high_street.coordinates) == "LINESTRING(10 10,10.5 10.25,11 11)");
   CHECK(high_street.tags.text() == R"({"name": "High Street", "highway": "residential"})");  // jsonb's own order: shorter keys first
 }
 
@@ -122,8 +143,8 @@ TEST_CASE("integration: several loads run at once on one miniverse", "[integrati
   Loaded loaded(test_db());
   World& world = loaded.world();
 
-  std::future<miniverse::Ways> south_west = world.load<TestRoads>(test::rectangle(-1, -1, 2, 4));
-  std::future<miniverse::Ways> north_east = world.load<TestRoads>(test::rectangle(5, 5, 20, 20));
+  std::future<miniverse::Ways> south_west = world.load<TestRoads>(NEAR_ORIGIN);
+  std::future<miniverse::Ways> north_east = world.load<TestRoads>(NORTH_EAST);
 
   CHECK(ids(north_east.get()) == std::vector<std::int64_t>{2});
   CHECK(ids(south_west.get()) == std::vector<std::int64_t>{1, 3});
@@ -135,19 +156,31 @@ TEST_CASE("integration: create_tables makes the spatial index the loads use", "[
   const auto rows = loaded.world().database().execute(IndexNames::bind("miniverse_test_roads")).get();
 
   std::vector<std::string> names;
+
   names.reserve(rows.size());
   for ( const auto& row : rows ) {
     names.push_back(schemacht::schema::get<"indexname">(row));
   }
+
   CHECK(names == std::vector<std::string>{"miniverse_test_roads_geom_idx", "miniverse_test_roads_pkey"});
+}
+
+TEST_CASE("integration: a load that fails reports why through its future", "[integration]") {
+  Loaded loaded(test_db());
+  World& world = loaded.world();
+  world.drop_tables();
+
+  std::future<miniverse::Ways> roads = world.load<TestRoads>(EVERYWHERE);
+
+  CHECK_THROWS_AS(roads.get(), schemacht::postgres::QueryError);  // the table is gone
 }
 
 TEST_CASE("integration: a push that breaks the table's rules writes nothing and reports why", "[integration]") {
   Loaded loaded(test_db());
   World& world = loaded.world();
 
-  const miniverse::Ways again{way(1, {11, 12}, test::line({{0, 0}, {1, 1}}), "{}"), way(5, {51, 52}, test::line({{0, 0}, {1, 1}}), "{}")};
-  CHECK_THROWS(world.push<TestRoads>(again).get());  // way 1 is there already
+  miniverse::Ways again{way(1, {11, 12}, "LINESTRING(0 0,1 1)", "{}"), way(5, {51, 52}, "LINESTRING(0 0,1 1)", "{}")};
+  CHECK_THROWS(world.push<TestRoads>(std::move(again)).get());  // way 1 is there already
 
-  CHECK(ids(world.load<TestRoads>(test::rectangle(-1, -1, 20, 20)).get()) == std::vector<std::int64_t>{1, 2, 3, 4});
+  CHECK(ids(world.load<TestRoads>(EVERYWHERE).get()) == std::vector<std::int64_t>{1, 2, 3, 4});
 }
