@@ -46,6 +46,6 @@ TEST_CASE("layer: a road layer's statements are aimed at its table", "[layer]") 
       R"(SELECT "way_id", "node_ids", "geom", "tags" FROM "osm_roads" WHERE ST_Intersects("geom", $1::geometry(Polygon,4326)) ORDER BY "way_id")"
   );
   CHECK(
-      Roads::setup_sql(layer.table().name(), miniverse::NoSettings()) == std::vector<std::string>{R"(CREATE INDEX ON "osm_roads" USING gist (geom))"}
+      Roads::setup_sql(layer.table().name()) == std::vector<std::string>{R"(CREATE INDEX ON "osm_roads" USING gist (geom))"}
   );
 }

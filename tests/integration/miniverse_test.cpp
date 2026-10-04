@@ -8,6 +8,7 @@
 #include <boost/geometry/io/wkt/read.hpp>
 #include <boost/geometry/io/wkt/write.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <future>
@@ -69,6 +70,21 @@ const geo::Polygon TRIANGLE = polygon("POLYGON((0 0,4 0,0 4,0 0))");
   };
 }
 
+/** @return `WAYS_PER_STATEMENT + 1` ways, one more than a statement holds, with ids from `first_id`, all in the degree from (50, 50). */
+[[nodiscard]] miniverse::Ways many_ways(std::int64_t first_id) {
+  constexpr std::size_t COUNT = miniverse::RoadLayer::WAYS_PER_STATEMENT + 1;
+  miniverse::Ways       ways;
+
+  ways.reserve(COUNT);
+  for ( std::size_t i = 0; i < COUNT; ++i ) {
+    ways.push_back(way(first_id + static_cast<std::int64_t>(i), {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}"));
+  }
+
+  return ways;
+}
+
+const geo::Polygon FAR_EAST = polygon("POLYGON((50 50,51 50,51 51,50 51,50 50))");
+
 [[nodiscard]] std::vector<std::int64_t> ids(const miniverse::Ways& ways) {
   std::vector<std::int64_t> result;
 
@@ -108,9 +124,9 @@ class Loaded {
   }
 };
 
-// A kind whose setup fails: a table it makes is dropped again.
+// A kind whose setup fails: the table made with it is rolled back.
 struct BrokenSetup : miniverse::RoadLayer {
-  [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& /*table*/, miniverse::NoSettings /*settings*/) {
+  [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& /*table*/) {
     return {"CREATE INDEX ON miniverse_no_such_table (geom)"};
   }
 };
@@ -198,7 +214,38 @@ TEST_CASE("integration: a push that breaks the table's rules writes nothing and 
   CHECK(ids(world.load<TestRoads>(EVERYWHERE).get()) == std::vector<std::int64_t>{1, 2, 3, 4});
 }
 
-TEST_CASE("integration: a table whose setup fails is dropped again, so it can be made once the setup is fixed", "[integration]") {
+TEST_CASE("integration: a push of more ways than one statement holds writes them all", "[integration]") {
+  Loaded loaded(test_db());
+  World& world = loaded.world();
+
+  world.push<TestRoads>(many_ways(1000)).get();
+
+  const miniverse::Ways far_east = world.load<TestRoads>(FAR_EAST).get();
+  CHECK(far_east.size() == miniverse::RoadLayer::WAYS_PER_STATEMENT + 1);
+  CHECK(far_east.front().id == 1000);
+  CHECK(far_east.back().id == 1000 + static_cast<std::int64_t>(miniverse::RoadLayer::WAYS_PER_STATEMENT));
+}
+
+TEST_CASE("integration: a push whose later statement breaks the table's rules writes nothing", "[integration]") {
+  Loaded loaded(test_db());
+  World& world = loaded.world();
+
+  miniverse::Ways ways = many_ways(1000);
+  ways.back().id = 1;  // in the second statement: way 1 is there already
+
+  // The error is the second statement's own (a duplicate key), not the commit's "rolled back".
+  try {
+    world.push<TestRoads>(std::move(ways)).get();
+    FAIL("the push succeeded");
+  } catch ( const schemacht::postgres::QueryError& error ) {
+    CHECK(error.sqlstate() == "23505");
+  }
+
+  CHECK(world.load<TestRoads>(FAR_EAST).get().empty());  // the first statement's ways are rolled back too
+  CHECK(ids(world.load<TestRoads>(EVERYWHERE).get()) == std::vector<std::int64_t>{1, 2, 3, 4});
+}
+
+TEST_CASE("integration: a table whose setup fails is rolled back, so it can be made once the setup is fixed", "[integration]") {
   miniverse::Miniverse world(test_db(), miniverse::Layer<BrokenSetup>("miniverse_test_broken"));
   world.drop_tables();
 

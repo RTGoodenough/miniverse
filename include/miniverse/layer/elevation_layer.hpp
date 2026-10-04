@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -53,22 +54,22 @@ struct MergeRaster {
 }  // namespace elevation
 
 /**
- * @brief The layer kind of elevation, or any other raster of one band of `pixel_t`: one row per tile of the layer's grid
+ * @brief The layer kind of elevation, or any other raster of one band of `pixel_t`: one row per tile of the table's grid
  * (`geo::Grid`, its settings), which every source is warped onto. A load gives the pixels in the bounding box of the location,
  * from the tiles that cover it (see `from_rows`).
  *
  * @code
  * struct Elevation : miniverse::ElevationLayer<std::int16_t> {};
  *
- * const miniverse::geo::Grid<std::int16_t> grid{.pixels_per_degree = 3600, .tile_pixels = 256, .nodata = -32768};
- * miniverse::Miniverse world(conninfo, miniverse::Layer<Elevation>("elevation", grid));
- * world.create_table<Elevation>();  // once
+ * miniverse::Miniverse world(conninfo, miniverse::Layer<Elevation>("elevation"));
+ * world.create_table<Elevation>({.pixels_per_degree = 3600, .tile_pixels = 256, .nodata = -32768});  // once
  * miniverse::geo::Raster<std::int16_t> heights = world.load<Elevation>(area).get();
  * @endcode
  *
- * The table keeps its grid in its raster constraints, which PostGIS's `raster_columns` reads, so GDAL and QGIS open the table
- * as one raster, and `Miniverse::table_settings` reads it back from there. The constraints also refuse a tile of another
- * grid, so a layer configured with the wrong grid can't push into the table.
+ * The grid is chosen once, when the table is made, and the table keeps it in its raster constraints, which PostGIS's
+ * `raster_columns` reads: GDAL and QGIS open the table as one raster, `Miniverse::table_settings` gives the grid to a writer to
+ * warp its source onto, and every push reads it before cutting its raster into tiles. The constraints also refuse a tile of
+ * another grid.
  */
 template <geo::Pixel pixel_t>
 struct ElevationLayer {
@@ -86,6 +87,12 @@ struct ElevationLayer {
           .project(schemacht::query::On<schema_type>::template col<"rast">());
   using load_statement_type = schemacht::query::Prepared<LOAD>;
 
+  /**
+   * @brief How many bytes of pixels a push writes in one statement, at most, in whole tiles (at least one): a tile of 1200 by
+   * 1200 `std::int16_t` is 2.9 MB, so 11 of them. As text, which is how it is sent, a statement is about twice this.
+   */
+  static constexpr std::size_t PIXEL_BYTES_PER_STATEMENT = std::size_t{32} << 20U;
+
   /** @brief The grid the table's constraints record, as `raster_columns` reads them: argument 1 is the table's quoted name. */
   using settings_statement_type = schemacht::query::RawStatement<
       "SELECT scale_x, blocksize_x, nodata_values[1] AS nodata FROM raster_columns "
@@ -102,21 +109,22 @@ struct ElevationLayer {
    * SRID 4326, the pixel size, the tile size, alignment to the grid, one band of `pixel_t`, the nodata value, no out-db
    * bands, and an extent of the whole world (and a hair more, for rounding), so it never needs widening.
    *
-   * The function is replaced by every setup, and outlives a dropped table, as other elevation tables share it (see
-   * docs/open-decisions.md). The first setup in a database makes the schema, which needs CREATE on the database; pushing
-   * needs USAGE on the schema `miniverse_functions`.
+   * The function is replaced by every setup, and outlives a dropped table, as other elevation tables share it. The first
+   * setup in a database makes the schema, which needs CREATE on the database; pushing needs USAGE on the schema
+   * `miniverse_functions`. Two setups at once can conflict on it (`CREATE OR REPLACE FUNCTION` and `CREATE SCHEMA IF NOT
+   * EXISTS` are not safe against each other): the second then fails, and can be run again.
    * @throws std::invalid_argument if `grid` is not a grid: see `geo::Grid`.
    */
   [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table, const settings_type& grid);
 
   /**
-   * @return `raster` cut into the tiles of `grid` it covers. Its pixels equal to its own nodata become the grid's nodata, and a
-   * tile with no data at all is left out.
+   * @return `raster` cut into the tiles of `grid`, the table's, it covers, in batches of `PIXEL_BYTES_PER_STATEMENT`, by tile id.
+   * Its pixels equal to its own nodata become the grid's nodata, and a tile with no data at all is left out.
    * @throws std::invalid_argument if `grid` is not a grid (as `setup_sql`), or `raster` is not on it (another pixel size, or
    * not aligned to its pixels), or reaches past the world, or its pixels are not `width * height`, or (when its nodata is not
    * the grid's) a pixel with data has the grid's nodata value.
    */
-  [[nodiscard]] static std::vector<row_type> to_rows(result_type raster, const settings_type& grid);
+  [[nodiscard]] static std::vector<std::vector<row_type>> to_rows(result_type raster, const settings_type& grid);
 
   /** @return The write of `rows`: each tile is inserted, or merged onto the one already there (`elevation::MergeRaster`). */
   [[nodiscard]] static schemacht::postgres::SchemaStatement<schema_type, std::tuple<>> write_statement(const std::vector<row_type>& rows) {

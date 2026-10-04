@@ -19,6 +19,7 @@ include(Catch)
 add_executable(
   miniverse_tests
   compile/layer_test.cpp
+  compile/own_kind_test.cpp
   unit/wkb_test.cpp
   unit/column_type_test.cpp
   unit/layer_test.cpp
@@ -50,3 +51,4 @@ endfunction()
 miniverse_compile_fail(LOAD_LAYER_NOT_HELD "this miniverse has no such layer")
 miniverse_compile_fail(PUSH_LAYER_NOT_HELD "this miniverse has no such layer")
 miniverse_compile_fail(DUPLICATE_KIND "a miniverse holds one layer of each kind")
+miniverse_compile_fail(CREATE_TABLES_NEED_SETTINGS "call create_table<Kind>\\(settings\\) for it")

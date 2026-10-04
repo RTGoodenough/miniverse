@@ -181,8 +181,8 @@ std::vector<std::string> ElevationLayer<pixel_t>::setup_sql(const schemacht::sch
 }
 
 template <geo::Pixel pixel_t>
-std::vector<typename ElevationLayer<pixel_t>::row_type> ElevationLayer<pixel_t>::to_rows(result_type raster, const settings_type& grid) {
-  check_grid(grid);  // a layer's grid comes from configuration
+std::vector<std::vector<typename ElevationLayer<pixel_t>::row_type>> ElevationLayer<pixel_t>::to_rows(result_type raster, const settings_type& grid) {
+  check_grid(grid);  // the table's grid, as read back: cheap to check again
   raster.check_pixel_count();
 
   // A pixel equal to the grid's nodata would be written as having no data, so it would be lost.
@@ -214,11 +214,13 @@ std::vector<typename ElevationLayer<pixel_t>::row_type> ElevationLayer<pixel_t>:
     throw std::invalid_argument("the raster reaches past the world: longitude -180 to 180, latitude -90 to 90");
   }
 
-  const std::int64_t    tile = grid.tile_pixels;
-  const std::int64_t    tiles_across = ceil_div(DEGREES_ACROSS * ppd, tile);
-  std::vector<row_type> rows;
+  const std::int64_t                 tile = grid.tile_pixels;
+  const std::int64_t                 tiles_across = ceil_div(DEGREES_ACROSS * ppd, tile);
+  const std::size_t                  tiles_per_batch = std::max<std::size_t>(1, PIXEL_BYTES_PER_STATEMENT / (static_cast<std::size_t>(tile * tile) * sizeof(pixel_t)));
+  std::vector<std::vector<row_type>> batches;
 
-  // In ascending tile_id order: two pushes that overlap then lock their tiles in the same order, so they can't deadlock.
+  // In ascending tile_id order, across batches too: two pushes that overlap then lock their tiles in the same order within
+  // their transactions (in practice: a statement writes its array of rows in order), so they wait for each other and can't deadlock.
   for ( std::int64_t tile_row = raster_at.row / tile; tile_row * tile < raster_at.row + height; ++tile_row ) {
     for ( std::int64_t tile_column = raster_at.column / tile; tile_column * tile < raster_at.column + width; ++tile_column ) {
       geo::Raster<pixel_t> cut{
@@ -236,11 +238,15 @@ std::vector<typename ElevationLayer<pixel_t>::row_type> ElevationLayer<pixel_t>:
         continue;  // no data to write
       }
 
-      rows.emplace_back(elevation::TileId{(tile_row * tiles_across) + tile_column}, elevation::Rast<pixel_t>{std::move(cut)});
+      if ( batches.empty() || batches.back().size() == tiles_per_batch ) {
+        batches.emplace_back();
+      }
+
+      batches.back().emplace_back(elevation::TileId{(tile_row * tiles_across) + tile_column}, elevation::Rast<pixel_t>{std::move(cut)});
     }
   }
 
-  return rows;
+  return batches;
 }
 
 template <geo::Pixel pixel_t>

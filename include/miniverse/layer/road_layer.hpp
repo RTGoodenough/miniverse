@@ -1,15 +1,14 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <tuple>
-#include <utility>
 #include <vector>
 
 #include "miniverse/geo/column_types.hpp"
 #include "miniverse/geo/operations.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer.hpp"
 #include "schemacht/json/json.hpp"
 #include "schemacht/postgres/statements.hpp"
 #include "schemacht/query/predicate.hpp"
@@ -53,7 +52,6 @@ using Tags = schemacht::schema::Field<schemacht::json::Json, "tags">;
  */
 struct RoadLayer {
   using result_type = Ways;
-  using settings_type = NoSettings;
   /// The table's layout. Its name, `roads`, is only a placeholder: a layer names its own table (`Layer`).
   using schema_type = schemacht::schema::Schema<"roads", road::WayId, road::NodeIds, road::Geom, road::Tags>;
   using row_type = schema_type::row_type;
@@ -64,14 +62,20 @@ struct RoadLayer {
           .order_by(schemacht::query::On<schema_type>::col<"way_id">().asc());
   using load_statement_type = schemacht::query::Prepared<LOAD>;
 
+  /** @brief How many ways a push writes in one statement: a way is some hundreds of bytes to a few kilobytes as text. */
+  static constexpr std::size_t WAYS_PER_STATEMENT = 5000;
+
   /**
    * @return The spatial index that the load's `ST_Intersects` uses. It is not named: PostgreSQL names it (`<table>_geom_idx`),
    * shortening and numbering the name as needed, so it never clashes with another relation's.
    */
-  [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table, NoSettings /*settings*/);
+  [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table);
 
-  /** @throws std::invalid_argument for a way whose node ids and coordinates differ in number. */
-  [[nodiscard]] static std::vector<row_type> to_rows(Ways ways, NoSettings /*settings*/);
+  /**
+   * @return `ways` as rows, in batches of `WAYS_PER_STATEMENT`, in the order given.
+   * @throws std::invalid_argument for a way whose node ids and coordinates differ in number.
+   */
+  [[nodiscard]] static std::vector<std::vector<row_type>> to_rows(Ways ways);
 
   /** @return The insert of `rows`: a way that is already there fails the push, which then writes nothing. */
   [[nodiscard]] static schemacht::postgres::SchemaStatement<schema_type, std::tuple<>> write_statement(const std::vector<row_type>& rows) {

@@ -5,6 +5,8 @@
 // tests make and drop their own table (miniverse_test_elevation), so point it at a scratch database.
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <boost/geometry/io/wkt/read.hpp>
 
@@ -22,6 +24,7 @@
 #include "miniverse/miniverse.hpp"
 #include "schemacht/postgres/async_client.hpp"
 #include "schemacht/postgres/database.hpp"
+#include "schemacht/postgres/statements.hpp"
 #include "schemacht/query/raw_statement.hpp"
 #include "schemacht/schema/field.hpp"
 
@@ -78,9 +81,9 @@ using InsertTiles = schemacht::query::RawStatement<
 class Tiled {
  public:
   explicit Tiled(const std::string& conninfo, const schemacht::postgres::Database::Options& options = {})
-      : _world(conninfo, options, miniverse::Layer<TestElevation>("miniverse_test_elevation", GRID)) {
+      : _world(conninfo, options, miniverse::Layer<TestElevation>("miniverse_test_elevation")) {
     _world.drop_tables();
-    _world.create_table<TestElevation>();
+    _world.create_table<TestElevation>(GRID);
     std::ignore = _world.database().execute(InsertTiles::bind()).get();
   }
 
@@ -306,7 +309,7 @@ TEST_CASE("integration: an elevation load is answered by the index on the tiles'
 
   const geo::Polygon area = polygon("POLYGON((0 0,1 0,1 1,0 1,0 0))");
   const std::string  sql(
-      TestElevation::load_statement_type::bind(area).on(miniverse::Layer<TestElevation>("miniverse_test_elevation", GRID).table()).sql()
+      TestElevation::load_statement_type::bind(area).on(miniverse::Layer<TestElevation>("miniverse_test_elevation").table()).sql()
   );
 
   const std::string plan = plan_of(world.database(), sql, schemacht::ColumnType<geo::Polygon>::format(area));
@@ -329,35 +332,24 @@ TEST_CASE("integration: a push of several new tiles writes them all", "[integrat
   CHECK(world.load<TestElevation>(polygon("POLYGON((10 1,13 1,13 2,10 2,10 1))")).get() == pushed);
 }
 
-TEST_CASE("integration: a layer configured with another grid than its table's can't push into it", "[integration]") {
-  Tiled tiled(test_db());
+TEST_CASE("integration: a push onto a raster table with no grid in its constraints fails through its future", "[integration]") {
+  miniverse::Miniverse world(test_db(), miniverse::Layer<TestElevation>("miniverse_test_bare"));
+  world.drop_tables();
+  std::ignore = world.database().execute(schemacht::postgres::unchecked_sql("CREATE TABLE miniverse_test_bare (tile_id bigint PRIMARY KEY, rast raster)")).get();
 
-  // Two pixels to a degree, in tiles of two degrees: the pushed tile has the table's size, but not its pixel size.
-  World misconfigured(
-      test_db(), miniverse::Layer<TestElevation>("miniverse_test_elevation", {.pixels_per_degree = 2, .tile_pixels = 4, .nodata = NODATA})
-  );
-  const auto pushed = Raster{
-      .west = 10,
-      .north = 2,
-      .pixel_width = 0.5,
-      .pixel_height = 0.5,
-      .width = 4,
-      .height = 4,
-      .nodata = NODATA,
-      .pixels = std::vector<std::int16_t>(16, 1)
-  };
+  Raster pushed{.west = 10, .north = 2, .pixel_width = 0.25, .pixel_height = 0.25, .width = 4, .height = 4, .nodata = NODATA, .pixels = {}};
+  pushed.pixels.assign(16, 1);
 
-  CHECK_THROWS_AS(misconfigured.push<TestElevation>(pushed).get(), schemacht::postgres::QueryError);
-  CHECK(tiled.world().load<TestElevation>(polygon("POLYGON((10 0,12 0,12 2,10 2,10 0))")).get().width == 0);
+  CHECK_THROWS_WITH(world.push<TestElevation>(std::move(pushed)).get(), Catch::Matchers::ContainsSubstring("no grid in its raster constraints"));
+
+  world.drop_tables();
 }
 
 TEST_CASE("integration: on a grid whose arithmetic rounds, the world's last column and row of tiles can be written", "[integration]") {
   // 1/3600 has no exact double, so the far edge of the last tile computes a rounding step past 180 and -90.
-  miniverse::Miniverse world(
-      test_db(), miniverse::Layer<FineElevation>("miniverse_test_elevation_fine", {.pixels_per_degree = 3600, .tile_pixels = 1200, .nodata = NODATA})
-  );
+  miniverse::Miniverse world(test_db(), miniverse::Layer<FineElevation>("miniverse_test_elevation_fine"));
   world.drop_tables();
-  world.create_table<FineElevation>();
+  world.create_table<FineElevation>({.pixels_per_degree = 3600, .tile_pixels = 1200, .nodata = NODATA});
 
   // The world's south-east pixel.
   const double pixel = 1.0 / 3600;

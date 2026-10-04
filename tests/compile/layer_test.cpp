@@ -5,46 +5,22 @@
 #include <concepts>
 #include <cstdint>
 #include <string>
-#include <tuple>
 #include <vector>
 
-#include "miniverse/geo/operations.hpp"
 #include "miniverse/miniverse.hpp"
 #include "schemacht/postgres/database.hpp"
-#include "schemacht/postgres/statements.hpp"
-#include "schemacht/query/predicate.hpp"
-#include "schemacht/query/prepared.hpp"
-#include "schemacht/query/query.hpp"
 #include "schemacht/query/sql_type.hpp"
-#include "schemacht/schema/field.hpp"
-#include "schemacht/schema/schema.hpp"
 #include "schemacht/schema/table_name.hpp"
+#include "support/places.hpp"
 
 namespace {
 
 namespace geo = miniverse::geo;
-namespace q = schemacht::query;
 namespace sch = schemacht::schema;
 
+using test::Places;
+
 struct Roads : miniverse::RoadLayer {};
-
-// A kind written by hand, as a user would: places, as points, loaded by polygon. Its conversions are only declared, since
-// the concept checks their signatures, not their bodies.
-using PlacesSchema = sch::Schema<"places", sch::Field<std::int64_t, "place_id", sch::KeyRole::Primary>, sch::Field<geo::Point, "position">>;
-
-constexpr auto PLACES_IN = q::select(q::On<PlacesSchema>::col<"position">().apply<geo::Intersects>(q::arg<0>()));
-
-struct Places {
-  using result_type = std::vector<geo::Point>;
-  using settings_type = miniverse::NoSettings;
-  using schema_type = PlacesSchema;
-  using load_statement_type = q::Prepared<PLACES_IN>;
-
-  static std::vector<std::string>                                        setup_sql(const sch::TableName& table, miniverse::NoSettings settings);
-  static std::vector<schema_type::row_type>                              to_rows(result_type places, miniverse::NoSettings settings);
-  static schemacht::postgres::SchemaStatement<schema_type, std::tuple<>> write_statement(const std::vector<schema_type::row_type>& rows);
-  static result_type from_rows(std::vector<load_statement_type::result_type> rows, const geo::Polygon& location);
-};
 
 // Places, but loaded by the roads' query, which is written against another schema.
 struct PlacesByRoadQuery : Places {
@@ -53,12 +29,12 @@ struct PlacesByRoadQuery : Places {
   static result_type from_rows(std::vector<load_statement_type::result_type> rows, const geo::Polygon& location);
 };
 
-// Places with settings, but no way to read them back.
+// Places whose table is made with a setting, but with no way to read it back from the table.
 struct PlacesWithUnreadSettings : Places {
   using settings_type = int;
 
   static std::vector<std::string>           setup_sql(const sch::TableName& table, int settings);
-  static std::vector<schema_type::row_type> to_rows(result_type places, int settings);
+  static std::vector<std::vector<schema_type::row_type>> to_rows(result_type places, int settings);
 };
 
 struct Elevation : miniverse::ElevationLayer<std::int16_t> {};
@@ -78,11 +54,11 @@ static_assert(! miniverse::LayerKind<PlacesByRoadQuery>);
 static_assert(! miniverse::LayerKind<PlacesWithUnreadSettings>);
 static_assert(! miniverse::LayerKind<NotAKind>);
 
-// A layer of a kind with settings is made with them; one of a kind without is made from its table alone.
+// A layer is made from its table's name alone, whether or not its kind has settings: the table keeps those.
 static_assert(std::constructible_from<miniverse::Layer<Roads>, const char*>);
-static_assert(std::constructible_from<miniverse::Layer<Elevation>, const char*, miniverse::geo::Grid<std::int16_t>>);
-static_assert(! std::constructible_from<miniverse::Layer<Elevation>, const char*>);
-static_assert(! std::constructible_from<miniverse::Layer<Elevation>, const char*, const char*>);
+static_assert(std::constructible_from<miniverse::Layer<Elevation>, const char*>);
+static_assert(std::constructible_from<miniverse::Layer<Elevation>, const char*, const char*>);
+static_assert(! std::constructible_from<miniverse::Layer<Elevation>, const char*, miniverse::geo::Grid<std::int16_t>>);
 
 // A miniverse's kinds are deduced from its layers.
 static_assert(std::same_as<decltype(miniverse::Miniverse(std::string(), miniverse::Layer<Roads>("roads"))), miniverse::Miniverse<Roads>>);
