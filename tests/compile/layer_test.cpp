@@ -5,11 +5,13 @@
 #include <concepts>
 #include <cstdint>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "miniverse/geo/operations.hpp"
 #include "miniverse/miniverse.hpp"
 #include "schemacht/postgres/database.hpp"
+#include "schemacht/postgres/statements.hpp"
 #include "schemacht/query/predicate.hpp"
 #include "schemacht/query/prepared.hpp"
 #include "schemacht/query/query.hpp"
@@ -38,9 +40,10 @@ struct Places {
   using schema_type = PlacesSchema;
   using load_statement_type = q::Prepared<PLACES_IN>;
 
-  static std::vector<std::string>           setup_sql(const sch::TableName& table, miniverse::NoSettings settings);
-  static std::vector<schema_type::row_type> to_rows(result_type places, miniverse::NoSettings settings);
-  static result_type                        from_rows(std::vector<load_statement_type::result_type> rows, const geo::Polygon& location);
+  static std::vector<std::string>                                        setup_sql(const sch::TableName& table, miniverse::NoSettings settings);
+  static std::vector<schema_type::row_type>                              to_rows(result_type places, miniverse::NoSettings settings);
+  static schemacht::postgres::SchemaStatement<schema_type, std::tuple<>> write_statement(const std::vector<schema_type::row_type>& rows);
+  static result_type from_rows(std::vector<load_statement_type::result_type> rows, const geo::Polygon& location);
 };
 
 // Places, but loaded by the roads' query, which is written against another schema.
@@ -74,6 +77,12 @@ static_assert(! miniverse::HasSettings<Roads>);
 static_assert(! miniverse::LayerKind<PlacesByRoadQuery>);
 static_assert(! miniverse::LayerKind<PlacesWithUnreadSettings>);
 static_assert(! miniverse::LayerKind<NotAKind>);
+
+// A layer of a kind with settings is made with them; one of a kind without is made from its table alone.
+static_assert(std::constructible_from<miniverse::Layer<Roads>, const char*>);
+static_assert(std::constructible_from<miniverse::Layer<Elevation>, const char*, miniverse::geo::Grid<std::int16_t>>);
+static_assert(! std::constructible_from<miniverse::Layer<Elevation>, const char*>);
+static_assert(! std::constructible_from<miniverse::Layer<Elevation>, const char*, const char*>);
 
 // A miniverse's kinds are deduced from its layers.
 static_assert(std::same_as<decltype(miniverse::Miniverse(std::string(), miniverse::Layer<Roads>("roads"))), miniverse::Miniverse<Roads>>);

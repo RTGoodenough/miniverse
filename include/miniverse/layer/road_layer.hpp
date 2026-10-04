@@ -11,6 +11,7 @@
 #include "miniverse/geo/types.hpp"
 #include "miniverse/layer.hpp"
 #include "schemacht/json/json.hpp"
+#include "schemacht/postgres/statements.hpp"
 #include "schemacht/query/predicate.hpp"
 #include "schemacht/query/prepared.hpp"
 #include "schemacht/query/query.hpp"
@@ -39,13 +40,6 @@ using NodeIds = schemacht::schema::Field<std::vector<std::int64_t>, "node_ids">;
 using Geom = schemacht::schema::Field<geo::LineString, "geom">;
 using Tags = schemacht::schema::Field<schemacht::json::Json, "tags">;
 
-/** @brief One row of a road table. */
-using Row = std::tuple<WayId, NodeIds, Geom, Tags>;
-
-/** @throws std::invalid_argument for a way whose node ids and coordinates differ in number. */
-[[nodiscard]] std::vector<Row> to_rows(Ways ways);
-[[nodiscard]] Ways             from_rows(std::vector<Row> rows);
-
 }  // namespace road
 
 /**
@@ -62,6 +56,7 @@ struct RoadLayer {
   using settings_type = NoSettings;
   /// The table's layout. Its name, `roads`, is only a placeholder: a layer names its own table (`Layer`).
   using schema_type = schemacht::schema::Schema<"roads", road::WayId, road::NodeIds, road::Geom, road::Tags>;
+  using row_type = schema_type::row_type;
 
   /** @brief The ways that intersect argument 0, a polygon, by id (the GiST index answers `ST_Intersects`). */
   static constexpr auto LOAD =
@@ -75,10 +70,16 @@ struct RoadLayer {
    */
   [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table, NoSettings /*settings*/);
 
-  [[nodiscard]] static std::vector<road::Row> to_rows(Ways ways, NoSettings /*settings*/) { return road::to_rows(std::move(ways)); }
+  /** @throws std::invalid_argument for a way whose node ids and coordinates differ in number. */
+  [[nodiscard]] static std::vector<row_type> to_rows(Ways ways, NoSettings /*settings*/);
+
+  /** @return The insert of `rows`: a way that is already there fails the push, which then writes nothing. */
+  [[nodiscard]] static schemacht::postgres::SchemaStatement<schema_type, std::tuple<>> write_statement(const std::vector<row_type>& rows) {
+    return schemacht::postgres::insert_statement<schema_type>(rows);
+  }
 
   /** @return The ways of `rows`, which are already the ones that intersect the location. */
-  [[nodiscard]] static Ways from_rows(std::vector<road::Row> rows, const geo::Polygon& /*location*/) { return road::from_rows(std::move(rows)); }
+  [[nodiscard]] static Ways from_rows(std::vector<row_type> rows, const geo::Polygon& /*location*/);
 };
 
 }  // namespace miniverse

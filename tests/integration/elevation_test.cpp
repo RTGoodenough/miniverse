@@ -78,9 +78,9 @@ using InsertTiles = schemacht::query::RawStatement<
 class Tiled {
  public:
   explicit Tiled(const std::string& conninfo, const schemacht::postgres::Database::Options& options = {})
-      : _world(conninfo, options, miniverse::Layer<TestElevation>("miniverse_test_elevation")) {
+      : _world(conninfo, options, miniverse::Layer<TestElevation>("miniverse_test_elevation", GRID)) {
     _world.drop_tables();
-    _world.create_table<TestElevation>(GRID);
+    _world.create_table<TestElevation>();
     std::ignore = _world.database().execute(InsertTiles::bind()).get();
   }
 
@@ -115,6 +115,9 @@ using RasterColumns = schemacht::query::RawStatement<
 using SeqScanOff = schemacht::query::RawStatement<
     "SELECT set_config('enable_seqscan', 'off', false) AS setting", schemacht::query::RawArguments<>, sch::Field<std::string, "setting">>;
 
+using SearchPathPublic = schemacht::query::RawStatement<
+    "SELECT set_config('search_path', 'public', false) AS setting", schemacht::query::RawArguments<>, sch::Field<std::string, "setting">>;
+
 /** @return The plan PostgreSQL makes for `sql` with the one argument `argument`, a line per row, on the pool's next connection. */
 [[nodiscard]] std::string plan_of(schemacht::postgres::Database& database, std::string sql, std::string argument) {
   std::promise<std::string> promise;
@@ -139,6 +142,10 @@ using SeqScanOff = schemacht::query::RawStatement<
 
   return plan.get();
 }
+
+using MergeRasters = schemacht::query::RawStatement<
+    "SELECT ST_AsBinary(miniverse_functions.merge_raster($1::raster, $2::raster)) AS rast", schemacht::query::RawArguments<Raster, Raster>,
+    sch::Field<Raster, "rast">>;
 
 using IndexDefinitions = schemacht::query::RawStatement<
     "SELECT indexdef FROM pg_indexes WHERE tablename = $1 ORDER BY indexname", schemacht::query::RawArguments<std::string>,
@@ -193,7 +200,7 @@ TEST_CASE("integration: an elevation table records its grid where GDAL and miniv
   Tiled  tiled(test_db());
   World& world = tiled.world();
 
-  CHECK(world.settings<TestElevation>().get() == GRID);
+  CHECK(world.table_settings<TestElevation>().get() == GRID);
 
   const auto columns = world.database().execute(RasterColumns::bind(world.table_name<TestElevation>().name())).get();
   REQUIRE(columns.size() == 1);
@@ -241,26 +248,46 @@ TEST_CASE("integration: a pushed raster is cut into the table's tiles and loaded
   CHECK(world.load<TestElevation>(polygon("POLYGON((1 1,2 1,2 2,1 2,1 1))")).get() == pushed);
 }
 
-TEST_CASE("integration: a push onto a tile that is there already writes nothing and reports why", "[integration]") {
+TEST_CASE("integration: a push onto tiles already there merges: new data wins, and where it has none the old pixel stays", "[integration]") {
   Tiled  tiled(test_db());
   World& world = tiled.world();
 
-  // Two degrees, from (0, 2) to (2, 1): the tile 180 across and 88 down is there, the one 181 across is not.
-  Raster pushed{
-      .west = 0,
-      .north = 2,
-      .pixel_width = 0.25,
-      .pixel_height = 0.25,
-      .width = 8,
-      .height = 4,
-      .nodata = NODATA,
-      .pixels = std::vector<std::int16_t>(32, 7)
-  };
+  // Two degrees, from (0, 2) to (2, 1): the tile 180 across and 88 down is there, the one 181 across is not. Every other
+  // column has data (7) and the rest none.
+  Raster pushed{.west = 0, .north = 2, .pixel_width = 0.25, .pixel_height = 0.25, .width = 8, .height = 4, .nodata = NODATA, .pixels = {}};
+  for ( std::size_t pixel = 0; pixel < 32; ++pixel ) {
+    pushed.pixels.push_back(pixel % 2 == 0 ? std::int16_t{7} : NODATA);
+  }
 
-  CHECK_THROWS_AS(world.push<TestElevation>(std::move(pushed)).get(), schemacht::postgres::QueryError);
+  world.push<TestElevation>(pushed).get();
+  const Raster once = world.load<TestElevation>(polygon("POLYGON((0 1,2 1,2 2,0 2,0 1))")).get();
+  world.push<TestElevation>(pushed).get();
+  const Raster twice = world.load<TestElevation>(polygon("POLYGON((0 1,2 1,2 2,0 2,0 1))")).get();
 
-  // Still no tile there: a load inside it finds none.
-  CHECK(world.load<TestElevation>(polygon("POLYGON((1.25 1.25,1.75 1.25,1.75 1.75,1.25 1.75,1.25 1.25))")).get().pixels.empty());
+  REQUIRE(once.width == 8);
+  REQUIRE(once.height == 4);
+  for ( std::size_t row = 0; row < once.height; ++row ) {
+    for ( std::size_t column = 0; column < once.width; ++column ) {
+      CHECK(once.at(column, row) == (column % 2 == 0 ? std::int16_t{7} : made(column, row)));  // made: nodata where no tile was
+    }
+  }
+
+  CHECK(twice == once);  // the same push again changes nothing
+}
+
+TEST_CASE("integration: a push merges through the shared function by its full name, whatever the search path", "[integration]") {
+  // One connection, so the search path set here, without the schema miniverse_functions, holds for the push.
+  Tiled  tiled(test_db(), {.pool = {.connections = 1}, .read = {}});
+  World& world = tiled.world();
+  std::ignore = world.database().execute(SearchPathPublic::bind()).get();
+
+  // The tile 180 across and 88 down is there: this lands on it, so it is merged.
+  Raster pushed{.west = 0, .north = 2, .pixel_width = 0.25, .pixel_height = 0.25, .width = 4, .height = 4, .nodata = NODATA, .pixels = {}};
+  pushed.pixels.assign(16, 7);
+
+  world.push<TestElevation>(pushed).get();
+
+  CHECK(world.load<TestElevation>(polygon("POLYGON((0 1,1 1,1 2,0 2,0 1))")).get() == pushed);
 }
 
 TEST_CASE("integration: a raster not on the table's grid is not pushed", "[integration]") {
@@ -278,7 +305,9 @@ TEST_CASE("integration: an elevation load is answered by the index on the tiles'
   std::ignore = world.database().execute(SeqScanOff::bind()).get();
 
   const geo::Polygon area = polygon("POLYGON((0 0,1 0,1 1,0 1,0 0))");
-  const std::string sql(TestElevation::load_statement_type::bind(area).on(miniverse::Layer<TestElevation>("miniverse_test_elevation").table()).sql());
+  const std::string  sql(
+      TestElevation::load_statement_type::bind(area).on(miniverse::Layer<TestElevation>("miniverse_test_elevation", GRID).table()).sql()
+  );
 
   const std::string plan = plan_of(world.database(), sql, schemacht::ColumnType<geo::Polygon>::format(area));
 
@@ -300,11 +329,35 @@ TEST_CASE("integration: a push of several new tiles writes them all", "[integrat
   CHECK(world.load<TestElevation>(polygon("POLYGON((10 1,13 1,13 2,10 2,10 1))")).get() == pushed);
 }
 
+TEST_CASE("integration: a layer configured with another grid than its table's can't push into it", "[integration]") {
+  Tiled tiled(test_db());
+
+  // Two pixels to a degree, in tiles of two degrees: the pushed tile has the table's size, but not its pixel size.
+  World misconfigured(
+      test_db(), miniverse::Layer<TestElevation>("miniverse_test_elevation", {.pixels_per_degree = 2, .tile_pixels = 4, .nodata = NODATA})
+  );
+  const auto pushed = Raster{
+      .west = 10,
+      .north = 2,
+      .pixel_width = 0.5,
+      .pixel_height = 0.5,
+      .width = 4,
+      .height = 4,
+      .nodata = NODATA,
+      .pixels = std::vector<std::int16_t>(16, 1)
+  };
+
+  CHECK_THROWS_AS(misconfigured.push<TestElevation>(pushed).get(), schemacht::postgres::QueryError);
+  CHECK(tiled.world().load<TestElevation>(polygon("POLYGON((10 0,12 0,12 2,10 2,10 0))")).get().width == 0);
+}
+
 TEST_CASE("integration: on a grid whose arithmetic rounds, the world's last column and row of tiles can be written", "[integration]") {
   // 1/3600 has no exact double, so the far edge of the last tile computes a rounding step past 180 and -90.
-  miniverse::Miniverse world(test_db(), miniverse::Layer<FineElevation>("miniverse_test_elevation_fine"));
+  miniverse::Miniverse world(
+      test_db(), miniverse::Layer<FineElevation>("miniverse_test_elevation_fine", {.pixels_per_degree = 3600, .tile_pixels = 1200, .nodata = NODATA})
+  );
   world.drop_tables();
-  world.create_table<FineElevation>({.pixels_per_degree = 3600, .tile_pixels = 1200, .nodata = NODATA});
+  world.create_table<FineElevation>();
 
   // The world's south-east pixel.
   const double pixel = 1.0 / 3600;
@@ -325,4 +378,24 @@ TEST_CASE("integration: on a grid whose arithmetic rounds, the world's last colu
   CHECK(world.load<FineElevation>(around).get().pixels.back() == 42);
 
   world.drop_tables();
+}
+
+TEST_CASE("integration: the merge function a table's setup makes keeps old pixels where the new tile has none", "[integration]") {
+  Tiled tiled(test_db());
+
+  const auto tile = [](std::vector<std::int16_t> pixels) {
+    return Raster{
+        .west = 10, .north = 2, .pixel_width = 0.25, .pixel_height = 0.25, .width = 2, .height = 2, .nodata = NODATA, .pixels = std::move(pixels)
+    };
+  };
+  const Raster current = tile({1, NODATA, 3, NODATA});
+  const Raster incoming = tile({NODATA, 20, 30, NODATA});
+
+  const auto merged = tiled.world().database().execute(MergeRasters::bind(current, incoming)).get();
+  const auto twice = tiled.world().database().execute(MergeRasters::bind(current, current)).get();
+
+  REQUIRE(merged.size() == 1);
+  CHECK(sch::get<"rast">(merged.front()) == tile({1, 20, 30, NODATA}));  // new data wins; where neither has data, none
+  REQUIRE(twice.size() == 1);
+  CHECK(sch::get<"rast">(twice.front()) == current);
 }

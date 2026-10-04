@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <exception>
 #include <future>
-#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -23,7 +22,6 @@
 #include "miniverse/layer.hpp"                  // IWYU pragma: export
 #include "miniverse/layer/elevation_layer.hpp"  // IWYU pragma: export
 #include "miniverse/layer/road_layer.hpp"       // IWYU pragma: export
-#include "schemacht/postgres/async_client.hpp"
 #include "schemacht/postgres/database.hpp"
 #include "schemacht/postgres/statements.hpp"
 #include "schemacht/schema/table.hpp"
@@ -73,7 +71,7 @@ class Miniverse {
   [[nodiscard]] const schemacht::schema::TableName& table_name() const noexcept {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
 
-    return table_of<kind_t>().name();
+    return layer<kind_t>().table().name();
   }
 
   /**
@@ -85,14 +83,17 @@ class Miniverse {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
 
     return execute_as<typename kind_t::result_type>(
-        [&] { return kind_t::load_statement_type::bind(location).on(table_of<kind_t>()); },
+        [&] { return kind_t::load_statement_type::bind(location).on(layer<kind_t>().table()); },
         [location](auto rows) { return kind_t::from_rows(std::move(rows), location); }
     );
   }
 
-  /** @return A future for the settings the layer `kind_t`'s table was made with (an elevation's grid), read from the database. */
+  /**
+   * @return A future for the settings the layer `kind_t`'s table was made with (an elevation's grid), read from the database:
+   * to check the layer's own settings against, when they come from configuration.
+   */
   template <HasSettings kind_t>
-  [[nodiscard]] std::future<typename kind_t::settings_type> settings() {
+  [[nodiscard]] std::future<typename kind_t::settings_type> table_settings() {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
 
     return execute_as<typename kind_t::settings_type>(
@@ -105,58 +106,47 @@ class Miniverse {
    * @return A future that completes once `data` is written to the layer `kind_t`'s table, or holds the error (nothing is then
    * written). `data` is taken by value and moved into the rows: pass it with `std::move` unless it is still needed.
    *
-   * A kind with settings (`HasSettings`) is written with the settings read from its table: an elevation raster is cut into
-   * the table's tiles. The insert is started from the settings' completion, so the miniverse must outlive the future.
+   * The rows are made with the layer's settings, on the calling thread: an elevation raster is cut into the tiles of the
+   * layer's grid (and an elevation table refuses tiles of a grid other than its own). The kind's `write_statement` says what
+   * happens to a row already there: a `RoadLayer`'s way fails the push, and an `ElevationLayer`'s tile is merged with it (new
+   * pixels win, and where the new tile has no data the old pixel stays). Pushes that overlap are merged in the order they
+   * commit: where both have data, the last to commit wins.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<void> push(kind_t::result_type data) {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
 
-    try {
-      return schemacht::util::future_from<void>([&](schemacht::util::Settler<void> done) {
-        if constexpr ( HasSettings<kind_t> ) {
-          _database.execute(
-              kind_t::settings_statement_type::bind(table_name<kind_t>().quoted()),
-              [this, data = std::move(data), done](SettingsRows<kind_t> rows, const std::exception_ptr& error) mutable {
-                if ( error ) {
-                  done(error);
-                  return;
-                }
-
-                try {
-                  insert<kind_t>(kind_t::to_rows(std::move(data), kind_t::settings_from_rows(std::move(rows))), done);
-                } catch ( ... ) {
-                  done(std::current_exception());  // the settings or rows couldn't be made, or the insert couldn't start
-                }
-              }
-          );
-        } else {
-          insert<kind_t>(kind_t::to_rows(std::move(data), NoSettings{}), done);
-        }
-      });
-    } catch ( ... ) {
-      return failed(std::current_exception());  // the kind's to_rows threw, or the first statement couldn't start
-    }
+    return schemacht::util::future_from<void>([&](const schemacht::util::Settler<void>& done) {
+      try {
+        const auto rows = kind_t::to_rows(std::move(data), layer<kind_t>().settings());
+        _database.execute(
+            kind_t::write_statement(rows).on(layer<kind_t>().table()),
+            [done](std::uint64_t /*count*/, const std::exception_ptr& error) { done(error); }
+        );
+      } catch ( ... ) {
+        done(std::current_exception());  // the kind's to_rows threw, or the write couldn't start
+      }
+    });
   }
 
   /**
-   * @brief Makes the layer `kind_t`'s table with `settings` (an elevation's grid), and runs its kind's setup (a spatial index,
-   * say), and waits for them: for tests and a first start. PostGIS must already be enabled in the database (`CREATE EXTENSION
-   * postgis`, and `postgis_raster` for a raster).
+   * @brief Makes the layer `kind_t`'s table with the layer's settings (an elevation's grid), and runs its kind's setup (a
+   * spatial index, say), and waits for them: for tests and a first start. PostGIS must already be enabled in the database
+   * (`CREATE EXTENSION postgis`, and `postgis_raster` for a raster).
    * @throws schemacht::postgres::QueryError if the table exists already, or can't be made, or its setup fails (the table is
    * then dropped again).
-   * @throws std::invalid_argument if the kind refuses `settings`.
+   * @throws std::invalid_argument if the kind refuses the layer's settings.
    */
   template <LayerKind kind_t>
-  void create_table(const kind_t::settings_type& settings) {
+  void create_table() {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
 
-    std::vector<std::string> setup = kind_t::setup_sql(table_name<kind_t>(), settings);  // checks the settings first
-    _database.execute(schemacht::postgres::create_table_statement<typename kind_t::schema_type>().on(table_of<kind_t>())).get();
+    std::vector<std::string> setup = kind_t::setup_sql(table_name<kind_t>(), layer<kind_t>().settings());  // checks the settings first
+    _database.execute(schemacht::postgres::create_table_statement<typename kind_t::schema_type>().on(layer<kind_t>().table())).get();
 
     try {
       for ( std::string& sql : setup ) {
-        run_text(std::move(sql)).get();
+        _database.execute(schemacht::postgres::unchecked_sql(std::move(sql))).get();
       }
     } catch ( ... ) {
       // Without its setup the table can't be used, and it would stop the next create_table: drop it, and report why.
@@ -170,24 +160,8 @@ class Miniverse {
     }
   }
 
-  /** @brief As above, for a kind without settings. */
-  template <LayerKind kind_t>
-    requires(! HasSettings<kind_t>)
-  void create_table() {
-    create_table<kind_t>(NoSettings{});
-  }
-
-  /** @brief Makes every layer's table, as `create_table`, when no kind has settings. */
-  void create_tables() {
-    static_assert(
-        (! HasSettings<kind_ts> && ...),
-        "create_tables makes only tables without settings: make a kind with settings with create_table<Kind>(settings)"
-    );
-
-    if constexpr ( (! HasSettings<kind_ts> && ...) ) {  // else only the assertion's error, not a second one
-      (create_table<kind_ts>(NoSettings{}), ...);
-    }
-  }
+  /** @brief Makes every layer's table, as `create_table`. */
+  void create_tables() { (create_table<kind_ts>(), ...); }
 
   /** @brief Drops every layer's table, those that exist, and waits for it. */
   void drop_tables() { (drop_table<kind_ts>(), ...); }
@@ -223,73 +197,39 @@ class Miniverse {
   }
 
   template <LayerKind kind_t>
-  [[nodiscard]] const schemacht::schema::Table<typename kind_t::schema_type>& table_of() const noexcept {
-    return std::get<Layer<kind_t>>(_layers).table();
+  [[nodiscard]] const Layer<kind_t>& layer() const noexcept {
+    return std::get<Layer<kind_t>>(_layers);
   }
 
   template <LayerKind kind_t>
   void drop_table() {
-    _database.execute(schemacht::postgres::drop_table_statement<typename kind_t::schema_type>().on(table_of<kind_t>())).get();
-  }
-
-  /** @brief Inserts `rows` into `kind_t`'s table, settling `done` with the outcome. */
-  template <LayerKind kind_t>
-  void insert(std::vector<typename kind_t::schema_type::row_type> rows, const schemacht::util::Settler<void>& done) {
-    _database.execute(
-        schemacht::postgres::insert_statement<typename kind_t::schema_type>(rows).on(table_of<kind_t>()),
-        [done](std::uint64_t /*count*/, const std::exception_ptr& error) { done(error); }
-    );
+    _database.execute(schemacht::postgres::drop_table_statement<typename kind_t::schema_type>().on(layer<kind_t>().table())).get();
   }
 
   /**
    * @return A future for the rows of the statement `make()` gives, made into a `result_t` by `convert`. It holds the error
    * instead if the statement could not be made or run, or `convert` threw.
    */
-  template <typename result_t, std::invocable make_t, std::invocable<RowsOf<std::invoke_result_t<make_t>>> convert_t>
+  template <schemacht::util::FutureValue result_t, std::invocable make_t, std::invocable<RowsOf<std::invoke_result_t<make_t>>> convert_t>
   [[nodiscard]] std::future<result_t> execute_as(make_t make, convert_t convert) {
-    const auto            promise = std::make_shared<std::promise<result_t>>();
-    std::future<result_t> future = promise->get_future();
+    return schemacht::util::future_from<result_t>([&](const schemacht::util::Settler<result_t>& done) {
+      try {
+        _database.execute(make(), [done, convert = std::move(convert)](RowsOf<std::invoke_result_t<make_t>> rows, const std::exception_ptr& error) {
+          if ( error ) {
+            done.fail(error);
+            return;
+          }
 
-    try {
-      _database.execute(make(), [promise, convert = std::move(convert)](RowsOf<std::invoke_result_t<make_t>> rows, const std::exception_ptr& error) {
-        if ( error ) {
-          promise->set_exception(error);
-          return;
-        }
-
-        try {
-          promise->set_value(convert(std::move(rows)));
-        } catch ( ... ) {
-          promise->set_exception(std::current_exception());
-        }
-      });
-    } catch ( ... ) {
-      promise->set_exception(std::current_exception());  // the statement could not be made: an argument could not be bound
-    }
-
-    return future;
-  }
-
-  /**
-   * @return A future for a statement given as text that returns no rows (a kind's setup). It repeats schemacht's private
-   * `run_without_rows` until schemacht has a public call for it (docs/open-decisions.md).
-   */
-  [[nodiscard]] std::future<void> run_text(std::string sql) {
-    const auto        promise = std::make_shared<std::promise<void>>();
-    std::future<void> future = promise->get_future();
-
-    _database.pool().run(std::move(sql), {}, [promise](const schemacht::postgres::QueryResult& /*result*/, const std::exception_ptr& error) {
-      schemacht::util::settle(*promise, error);
+          try {
+            done(convert(std::move(rows)), nullptr);
+          } catch ( ... ) {
+            done.fail(std::current_exception());
+          }
+        });
+      } catch ( ... ) {
+        done.fail(std::current_exception());  // the statement could not be made: an argument could not be bound
+      }
     });
-
-    return future;
-  }
-
-  [[nodiscard]] static std::future<void> failed(const std::exception_ptr& error) {
-    std::promise<void> promise;
-    promise.set_exception(error);
-
-    return promise.get_future();
   }
 
  public:

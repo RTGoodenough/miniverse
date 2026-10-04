@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <vector>
 
@@ -9,6 +10,7 @@
 #include "miniverse/geo/operations.hpp"
 #include "miniverse/geo/raster.hpp"
 #include "miniverse/geo/types.hpp"
+#include "schemacht/postgres/statements.hpp"
 #include "schemacht/query/predicate.hpp"
 #include "schemacht/query/prepared.hpp"
 #include "schemacht/query/query.hpp"
@@ -34,23 +36,39 @@ using TileId = schemacht::schema::Field<std::int64_t, "tile_id", schemacht::sche
 template <geo::Pixel pixel_t>
 using Rast = schemacht::schema::Field<geo::Raster<pixel_t>, "rast">;
 
+/**
+ * @brief How a push merges a tile onto the one already at its grid position: `miniverse_functions.merge_raster(current, incoming)`,
+ * which the table's setup makes. A pixel with data in the new tile wins; one with no data there keeps the old pixel.
+ *
+ * The function is called by its full name, so a push finds it whatever its search path. It is one function in the schema
+ * `miniverse_functions`, shared by every elevation table in the database, whatever their schemas: it takes nothing from a
+ * table. The schema is not named `miniverse`: a role of that name (`"$user"`, first on the default search path) would then
+ * make every table it names without a schema in it, not in `public`.
+ */
+struct MergeRaster {
+  static constexpr std::string_view SCHEMA = "miniverse_functions";
+  static constexpr std::string_view FUNCTION = "miniverse_functions.merge_raster";
+};
+
 }  // namespace elevation
 
 /**
- * @brief The layer kind of elevation, or any other raster of one band of `pixel_t`: one row per tile of the table's grid
- * (`geo::Grid`), which every source is warped onto. A load gives the pixels in the bounding box of the location, from the
- * tiles that cover it (see `from_rows`).
+ * @brief The layer kind of elevation, or any other raster of one band of `pixel_t`: one row per tile of the layer's grid
+ * (`geo::Grid`, its settings), which every source is warped onto. A load gives the pixels in the bounding box of the location,
+ * from the tiles that cover it (see `from_rows`).
  *
  * @code
  * struct Elevation : miniverse::ElevationLayer<std::int16_t> {};
  *
- * miniverse::Miniverse world(conninfo, miniverse::Layer<Elevation>("elevation"));
- * world.create_table<Elevation>({.pixels_per_degree = 3600, .tile_pixels = 256, .nodata = -32768});  // once
+ * const miniverse::geo::Grid<std::int16_t> grid{.pixels_per_degree = 3600, .tile_pixels = 256, .nodata = -32768};
+ * miniverse::Miniverse world(conninfo, miniverse::Layer<Elevation>("elevation", grid));
+ * world.create_table<Elevation>();  // once
  * miniverse::geo::Raster<std::int16_t> heights = world.load<Elevation>(area).get();
  * @endcode
  *
- * The grid is kept in the table's raster constraints, which PostGIS's `raster_columns` reads, so GDAL and QGIS open the table
- * as one raster, and `Miniverse::settings` reads it back from there.
+ * The table keeps its grid in its raster constraints, which PostGIS's `raster_columns` reads, so GDAL and QGIS open the table
+ * as one raster, and `Miniverse::table_settings` reads it back from there. The constraints also refuse a tile of another
+ * grid, so a layer configured with the wrong grid can't push into the table.
  */
 template <geo::Pixel pixel_t>
 struct ElevationLayer {
@@ -79,9 +97,14 @@ struct ElevationLayer {
       schemacht::schema::Field<double, "nodata">>;
 
   /**
-   * @return The table's spatial index, and its raster constraints, which record `grid` for `raster_columns` (and so GDAL):
+   * @return The schema `miniverse_functions` and the function in it a push merges a tile with (`elevation::MergeRaster`), each made if
+   * missing; the table's spatial index; and its raster constraints, which record `grid` for `raster_columns` (and so GDAL):
    * SRID 4326, the pixel size, the tile size, alignment to the grid, one band of `pixel_t`, the nodata value, no out-db
    * bands, and an extent of the whole world (and a hair more, for rounding), so it never needs widening.
+   *
+   * The function is replaced by every setup, and outlives a dropped table, as other elevation tables share it (see
+   * docs/open-decisions.md). The first setup in a database makes the schema, which needs CREATE on the database; pushing
+   * needs USAGE on the schema `miniverse_functions`.
    * @throws std::invalid_argument if `grid` is not a grid: see `geo::Grid`.
    */
   [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table, const settings_type& grid);
@@ -89,11 +112,16 @@ struct ElevationLayer {
   /**
    * @return `raster` cut into the tiles of `grid` it covers. Its pixels equal to its own nodata become the grid's nodata, and a
    * tile with no data at all is left out.
-   * @throws std::invalid_argument if `raster` is not on `grid` (another pixel size, or not aligned to its pixels), or reaches
-   * past the world, or its pixels are not `width * height`, or (when its nodata is not the grid's) a pixel with data has the
-   * grid's nodata value.
+   * @throws std::invalid_argument if `grid` is not a grid (as `setup_sql`), or `raster` is not on it (another pixel size, or
+   * not aligned to its pixels), or reaches past the world, or its pixels are not `width * height`, or (when its nodata is not
+   * the grid's) a pixel with data has the grid's nodata value.
    */
   [[nodiscard]] static std::vector<row_type> to_rows(result_type raster, const settings_type& grid);
+
+  /** @return The write of `rows`: each tile is inserted, or merged onto the one already there (`elevation::MergeRaster`). */
+  [[nodiscard]] static schemacht::postgres::SchemaStatement<schema_type, std::tuple<>> write_statement(const std::vector<row_type>& rows) {
+    return schemacht::postgres::upsert_statement<schema_type, schemacht::postgres::MergeWith<"rast", elevation::MergeRaster>>(rows);
+  }
 
   /**
    * @return The pixels of the tiles `rows` in the bounding box of `location`, widened to whole pixels of the tiles' grid.

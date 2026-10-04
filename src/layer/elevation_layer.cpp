@@ -48,6 +48,13 @@ constexpr double SIZE_TOLERANCE = 1e-9;
 // How far 1 / pixel size may be from a whole number of pixels per degree. raster_columns gives the size rounded to 10 places.
 constexpr double PIXELS_PER_DEGREE_TOLERANCE = 0.25;
 
+// The tile `incoming` merged onto `current`, two tiles of one grid position: a pixel with data in `incoming` wins, and one with
+// no data there keeps `current`'s. ST_Union's LAST runs in C: about 4 times as fast as an ST_MapAlgebra expression on a tile
+// of 1200 by 1200 pixels.
+constexpr std::string_view MERGE_FUNCTION_DEFINITION =
+    "(current raster, incoming raster) RETURNS raster LANGUAGE sql IMMUTABLE PARALLEL SAFE "
+    "AS $$ SELECT ST_Union(tile, 'LAST' ORDER BY n) FROM unnest(ARRAY[current, incoming]) WITH ORDINALITY AS tiles (tile, n) $$";
+
 /** @brief Where a raster's north-west pixel lies, in pixels, in a frame that another raster shares. */
 struct PixelAt {
   std::int64_t column = 0;
@@ -165,11 +172,17 @@ std::vector<std::string> ElevationLayer<pixel_t>::setup_sql(const schemacht::sch
     separator = ", ";
   }
 
-  return {"CREATE INDEX ON " + table.quoted() + " USING gist (ST_ConvexHull(rast))", std::move(alter)};
+  return {
+      std::format("CREATE SCHEMA IF NOT EXISTS {}", elevation::MergeRaster::SCHEMA),
+      std::format("CREATE OR REPLACE FUNCTION {}{}", elevation::MergeRaster::FUNCTION, MERGE_FUNCTION_DEFINITION),
+      "CREATE INDEX ON " + table.quoted() + " USING gist (ST_ConvexHull(rast))",
+      std::move(alter),
+  };
 }
 
 template <geo::Pixel pixel_t>
 std::vector<typename ElevationLayer<pixel_t>::row_type> ElevationLayer<pixel_t>::to_rows(result_type raster, const settings_type& grid) {
+  check_grid(grid);  // a layer's grid comes from configuration
   raster.check_pixel_count();
 
   // A pixel equal to the grid's nodata would be written as having no data, so it would be lost.
@@ -205,6 +218,7 @@ std::vector<typename ElevationLayer<pixel_t>::row_type> ElevationLayer<pixel_t>:
   const std::int64_t    tiles_across = ceil_div(DEGREES_ACROSS * ppd, tile);
   std::vector<row_type> rows;
 
+  // In ascending tile_id order: two pushes that overlap then lock their tiles in the same order, so they can't deadlock.
   for ( std::int64_t tile_row = raster_at.row / tile; tile_row * tile < raster_at.row + height; ++tile_row ) {
     for ( std::int64_t tile_column = raster_at.column / tile; tile_column * tile < raster_at.column + width; ++tile_column ) {
       geo::Raster<pixel_t> cut{
@@ -277,7 +291,7 @@ geo::Raster<pixel_t> ElevationLayer<pixel_t>::from_rows(std::vector<typename loa
 template <geo::Pixel pixel_t>
 geo::Grid<pixel_t> ElevationLayer<pixel_t>::settings_from_rows(std::vector<typename settings_statement_type::row_type> rows) {
   if ( rows.size() != 1 ) {
-    throw std::runtime_error("the table has no grid in its raster constraints: make it with Miniverse::create_table<Kind>(grid)");
+    throw std::runtime_error("the table has no grid in its raster constraints: make it with Miniverse::create_table");
   }
 
   const double scale = schemacht::schema::get<"scale_x">(rows.front());

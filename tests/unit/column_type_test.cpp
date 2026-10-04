@@ -47,7 +47,7 @@ TEST_CASE("road layer: ways become rows and back", "[road]") {
       {.id = 9, .node_ids = {3, 4, 5}, .coordinates = bg::from_wkt<geo::LineString>("LINESTRING(2 2,3 3,4 4)"), .tags = schemacht::json::Json("{}")}
   );
 
-  const miniverse::Ways back = miniverse::road::from_rows(miniverse::road::to_rows(miniverse::Ways(ways)));
+  const miniverse::Ways back = miniverse::RoadLayer::from_rows(miniverse::RoadLayer::to_rows(miniverse::Ways(ways), {}), {});
 
   REQUIRE(back.size() == ways.size());
   for ( std::size_t i = 0; i < ways.size(); ++i ) {
@@ -64,5 +64,5 @@ TEST_CASE("road layer: a way needs one node id per point", "[road]") {
       {.id = 7, .node_ids = {1, 2, 3}, .coordinates = bg::from_wkt<geo::LineString>("LINESTRING(0 0,1 1)"), .tags = schemacht::json::Json("{}")}
   );
 
-  CHECK_THROWS_AS(miniverse::road::to_rows(std::move(ways)), std::invalid_argument);
+  CHECK_THROWS_AS(miniverse::RoadLayer::to_rows(std::move(ways), {}), std::invalid_argument);
 }

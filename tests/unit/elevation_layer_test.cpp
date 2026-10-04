@@ -64,11 +64,16 @@ constexpr geo::Grid<std::int16_t> GRID{.pixels_per_degree = 4, .tile_pixels = 4,
 
 }  // namespace
 
-TEST_CASE("elevation: the table's setup is its index and the raster constraints that record its grid", "[elevation]") {
+TEST_CASE("elevation: the table's setup is the shared merge function, its index and the raster constraints that record its grid", "[elevation]") {
   const schemacht::schema::TableName table("srtm");
 
+  const std::vector<std::string> setup = Elevation::setup_sql(table, GRID);
+
+  REQUIRE(setup.size() == 4);
+  CHECK(setup.at(0) == "CREATE SCHEMA IF NOT EXISTS miniverse_functions");
+  CHECK(setup.at(1).starts_with("CREATE OR REPLACE FUNCTION miniverse_functions.merge_raster("));  // what it does: tests/integration
   CHECK(
-      Elevation::setup_sql(table, GRID) ==
+      std::vector<std::string>(setup.begin() + 2, setup.end()) ==
       std::vector<std::string>{
           R"(CREATE INDEX ON "srtm" USING gist (ST_ConvexHull(rast)))",
           R"(ALTER TABLE "srtm" ADD CONSTRAINT enforce_srid_rast CHECK (ST_SRID(rast) = 4326))"
@@ -170,6 +175,11 @@ TEST_CASE("elevation: a raster not on the grid is not cut", "[elevation]") {
   CHECK_THROWS_AS(Elevation::to_rows(std::move(wrong_count), GRID), std::invalid_argument);
 }
 
+TEST_CASE("elevation: a layer's grid, which comes from configuration, is checked before a raster is cut with it", "[elevation]") {
+  CHECK_THROWS_AS(Elevation::to_rows(numbered(0, 1, 2, 2), {.pixels_per_degree = 4, .tile_pixels = 0, .nodata = NODATA}), std::invalid_argument);
+  CHECK_THROWS_AS(Elevation::to_rows(numbered(0, 1, 2, 2), {.pixels_per_degree = 0, .tile_pixels = 4, .nodata = NODATA}), std::invalid_argument);
+}
+
 TEST_CASE("elevation: tiles stitched over a raster's own box give the raster back", "[elevation]") {
   const Raster raster = numbered(0.5, 1, 6, 6);
 
@@ -228,7 +238,7 @@ TEST_CASE("elevation: the grid is read back from raster_columns", "[elevation]")
 }
 
 TEST_CASE("elevation: the load is aimed at the layer's table and reads tiles as raster WKB", "[elevation]") {
-  const miniverse::Layer<Elevation> layer("srtm");
+  const miniverse::Layer<Elevation> layer("srtm", {.pixels_per_degree = 3600, .tile_pixels = 256, .nodata = NODATA});
 
   const std::string load = std::string(Elevation::load_statement_type::bind(polygon("POLYGON((0 0,1 0,1 1,0 0))")).on(layer.table()).sql());
 

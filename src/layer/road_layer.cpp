@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include "miniverse/geo/types.hpp"
 #include "miniverse/layer.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/table_name.hpp"
@@ -15,10 +16,8 @@ std::vector<std::string> RoadLayer::setup_sql(const schemacht::schema::TableName
   return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)"};
 }
 
-namespace road {
-
-std::vector<Row> to_rows(Ways ways) {
-  std::vector<Row> rows;
+std::vector<RoadLayer::row_type> RoadLayer::to_rows(Ways ways, NoSettings /*settings*/) {
+  std::vector<row_type> rows;
 
   rows.reserve(ways.size());
   for ( Way& way : ways ) {
@@ -29,17 +28,19 @@ std::vector<Row> to_rows(Ways ways) {
       );
     }
 
-    rows.emplace_back(WayId{way.id}, NodeIds{std::move(way.node_ids)}, Geom{std::move(way.coordinates)}, Tags{std::move(way.tags)});
+    rows.emplace_back(
+        road::WayId{way.id}, road::NodeIds{std::move(way.node_ids)}, road::Geom{std::move(way.coordinates)}, road::Tags{std::move(way.tags)}
+    );
   }
 
   return rows;
 }
 
-Ways from_rows(std::vector<Row> rows) {
+Ways RoadLayer::from_rows(std::vector<row_type> rows, const geo::Polygon& /*location*/) {
   Ways ways;
 
   ways.reserve(rows.size());
-  for ( Row& row : rows ) {
+  for ( row_type& row : rows ) {
     ways.push_back(
         Way{
             .id = schemacht::schema::get<"way_id">(row),
@@ -52,7 +53,5 @@ Ways from_rows(std::vector<Row> rows) {
 
   return ways;
 }
-
-}  // namespace road
 
 }  // namespace miniverse

@@ -18,7 +18,8 @@
  *
  * A kind says:
  * - `result_type`: what a load gives, decoded (`Ways`, say), for the worker to build what it wants from.
- * - `settings_type`: what its table is made with and keeps (an elevation's grid), or `NoSettings`.
+ * - `settings_type`: what a layer of it is configured with, beside its table's name (an elevation's grid), or `NoSettings`.
+ *   The table is made with them, and rows are written with them.
  * - `schema_type`: its table's layout, as a schemacht `Schema`. The schema's own name is only a placeholder.
  * - `load_statement_type`: the query that reads what lies in a location, a `schemacht::query::Prepared` written against
  *   `schema_type`, whose one argument is a polygon in WGS 84 (with `geo::Intersects`, say). It runs on the layer's table (`on`).
@@ -26,8 +27,10 @@
  *   table's quoted name.
  * - `from_rows(rows, location)`: the load statement's rows made into a `result_type`, and `to_rows(result, settings)` the other
  *   way, for writing.
+ * - `write_statement(rows)`: the statement that writes those rows, a schemacht insert (`insert_statement`: a row already there
+ *   fails the push) or upsert (`upsert_statement`: it is merged), aimed at the layer's table (`on`).
  *
- * A kind with settings also says how to read them back from the database (`HasSettings`).
+ * A kind with settings also says how to read its table's back from the database (`HasSettings`), to check a layer's against.
  *
  * miniverse's own kinds (`RoadLayer`, `ElevationLayer`) are built this way, and a kind of your own needs only to meet
  * `LayerKind` to be loaded and pushed like them.
@@ -63,15 +66,16 @@ concept LayerKind =
     requires(
         const geo::Polygon& location, const schemacht::schema::TableName& table,
         const schemacht::schema::Table<typename kind_t::schema_type>& schema_table, kind_t::result_type data, const kind_t::settings_type& settings,
-        std::vector<typename kind_t::load_statement_type::result_type> rows
+        std::vector<typename kind_t::load_statement_type::result_type> rows, const std::vector<typename kind_t::schema_type::row_type>& written
     ) {
       // `.on` takes only a table of the statement's own schema: for another's it returns void, so this also checks the schema.
       { kind_t::load_statement_type::bind(location).on(schema_table) } -> schemacht::postgres::RunnableStatement;
       { kind_t::setup_sql(table, settings) } -> std::same_as<std::vector<std::string>>;
       { kind_t::to_rows(std::move(data), settings) } -> std::same_as<std::vector<typename kind_t::schema_type::row_type>>;
       { kind_t::from_rows(std::move(rows), location) } -> std::same_as<typename kind_t::result_type>;
+      { kind_t::write_statement(written).on(schema_table) } -> schemacht::postgres::CommandStatement;
     } &&
-    // Either no settings, or settings it can read back. `HasSettings` tests for `NoSettings` too, as `push` asks it alone.
+    // Either no settings, or settings it can read back. `HasSettings` tests for `NoSettings` too, as `table_settings` asks it alone.
     (std::same_as<typename kind_t::settings_type, NoSettings> || HasSettings<kind_t>);
 
 }  // namespace miniverse

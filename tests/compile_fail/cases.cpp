@@ -1,6 +1,5 @@
 // Each block must fail to compile, with the message tests/CMakeLists.txt expects for it. Compiled one case at a time.
 
-#include <cstdint>
 #include <string>
 #include <tuple>
 
@@ -8,7 +7,6 @@
 
 struct Roads : miniverse::RoadLayer {};
 struct Tracks : miniverse::RoadLayer {};
-struct Elevation : miniverse::ElevationLayer<std::int16_t> {};
 
 #if defined(CASE_LOAD_LAYER_NOT_HELD)
 void load_tracks(miniverse::Miniverse<Roads>& world) { std::ignore = world.load<Tracks>(miniverse::geo::Polygon()); }
@@ -22,8 +20,4 @@ void push_tracks(miniverse::Miniverse<Roads>& world) { std::ignore = world.push<
 void open(const std::string& conninfo) {
   miniverse::Miniverse<Roads, Roads> world(conninfo, miniverse::Layer<Roads>("roads"), miniverse::Layer<Roads>("more_roads"));
 }
-#endif
-
-#if defined(CASE_CREATE_TABLES_WITH_SETTINGS)
-void create(miniverse::Miniverse<Roads, Elevation>& world) { world.create_tables(); }
 #endif
