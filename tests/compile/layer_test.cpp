@@ -4,7 +4,9 @@
 
 #include <concepts>
 #include <cstdint>
+#include <future>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "miniverse/miniverse.hpp"
@@ -82,6 +84,10 @@ static_assert(miniverse::ChunkCallback<void (*)(miniverse::Ways), Roads>);
 static_assert(miniverse::ChunkCallback<bool (*)(const miniverse::Ways&), Roads>);
 static_assert(! miniverse::ChunkCallback<int (*)(miniverse::Ways), Roads>);
 static_assert(! miniverse::ChunkCallback<void (*)(geo::Raster<std::int16_t>), Roads>);
+
+// A push in parts is of one kind, and is handed on, not copied: it is one transaction.
+static_assert(std::movable<miniverse::PushInParts<Roads>> && ! std::copyable<miniverse::PushInParts<Roads>>);
+static_assert(std::same_as<decltype(std::declval<miniverse::Miniverse<Roads, Elevation>&>().begin_push<Elevation>()), std::future<miniverse::PushInParts<Elevation>>>);
 
 // A layer is made from its table's name alone, whether or not its kind has settings: the table keeps those.
 static_assert(std::constructible_from<miniverse::Layer<Roads>, const char*>);

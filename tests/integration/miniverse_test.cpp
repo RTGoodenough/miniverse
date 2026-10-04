@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <future>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -254,6 +255,83 @@ TEST_CASE("integration: a push whose later statement breaks the table's rules wr
 
   CHECK(world.load<TestRoads>(FAR_EAST).get().empty());  // the first statement's ways are rolled back too
   CHECK(ids(world.load<TestRoads>(EVERYWHERE).get()) == std::vector<std::int64_t>{1, 2, 3, 4});
+}
+
+TEST_CASE("integration: a push in parts is there for everyone once it commits, and for no one before", "[integration]") {
+  Loaded loaded(test_db());
+  World& world = loaded.world();
+
+  miniverse::PushInParts<TestRoads> parts = world.begin_push<TestRoads>().get();
+  parts.add({way(10, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}"), way(11, {2, 3}, "LINESTRING(50.2 50.2,50.3 50.3)", "{}")}).get();
+  parts.add({way(12, {3, 4}, "LINESTRING(50.3 50.3,50.4 50.4)", "{}")}).get();
+  const std::vector<std::int64_t> before = ids(world.load<TestRoads>(FAR_EAST).get());  // on another of the pool's connections
+  parts.commit().get();
+
+  CHECK(before.empty());
+  CHECK(ids(world.load<TestRoads>(FAR_EAST).get()) == std::vector<std::int64_t>{10, 11, 12});
+}
+
+TEST_CASE("integration: a push in parts that is dropped without a commit writes nothing", "[integration]") {
+  Loaded loaded(test_db());
+  World& world = loaded.world();
+
+  {
+    miniverse::PushInParts<TestRoads> parts = world.begin_push<TestRoads>().get();
+    parts.add({way(10, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get();
+  }
+
+  CHECK(world.load<TestRoads>(FAR_EAST).get().empty());
+  CHECK(ids(world.load<TestRoads>(EVERYWHERE).get()) == std::vector<std::int64_t>{1, 2, 3, 4});
+}
+
+TEST_CASE("integration: a part that fails ends a push in parts, which then writes nothing", "[integration]") {
+  Loaded loaded(test_db());
+  World& world = loaded.world();
+
+  miniverse::PushInParts<TestRoads> parts = world.begin_push<TestRoads>().get();
+  parts.add({way(10, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get();
+
+  // Way 1 is there already: the part fails with its own error, a duplicate key.
+  try {
+    parts.add({way(1, {11, 12}, "LINESTRING(0 0,1 1)", "{}")}).get();
+    FAIL("the part was added");
+  } catch ( const schemacht::postgres::QueryError& error ) {
+    CHECK(error.sqlstate() == "23505");
+  }
+
+  // The push has ended: every later call fails with that part's error, and an empty part too.
+  CHECK_THROWS_AS(parts.add({way(13, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get(), schemacht::postgres::QueryError);
+  CHECK_THROWS_AS(parts.add({}).get(), schemacht::postgres::QueryError);
+  CHECK_THROWS_AS(parts.commit().get(), schemacht::postgres::QueryError);
+  CHECK(world.load<TestRoads>(FAR_EAST).get().empty());  // not even the first part
+}
+
+TEST_CASE("integration: a part whose rows can't be made ends a push in parts too", "[integration]") {
+  Loaded loaded(test_db());
+  World& world = loaded.world();
+
+  miniverse::PushInParts<TestRoads> parts = world.begin_push<TestRoads>().get();
+  parts.add({way(10, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get();
+
+  // Three node ids for two points: refused before anything is sent. The file would have a hole if the push went on.
+  CHECK_THROWS_AS(parts.add({way(11, {1, 2, 3}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get(), std::invalid_argument);
+  CHECK_THROWS_AS(parts.add({way(12, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get(), std::invalid_argument);
+  CHECK_THROWS_AS(parts.commit().get(), std::invalid_argument);
+  CHECK(world.load<TestRoads>(FAR_EAST).get().empty());
+}
+
+TEST_CASE("integration: a push in parts that was moved from takes no more calls", "[integration]") {
+  Loaded loaded(test_db());
+  World& world = loaded.world();
+
+  miniverse::PushInParts<TestRoads> first = world.begin_push<TestRoads>().get();
+  miniverse::PushInParts<TestRoads> second = std::move(first);
+  second.add({way(10, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get();
+
+  CHECK_THROWS_AS(first.add({}).get(), std::logic_error);  // NOLINT(bugprone-use-after-move) -- what is under test
+  CHECK_THROWS_AS(first.commit().get(), std::logic_error);
+  second.commit().get();
+  CHECK(ids(world.load<TestRoads>(FAR_EAST).get()) == std::vector<std::int64_t>{10});
 }
 
 TEST_CASE("integration: a table whose setup fails is rolled back, so it can be made once the setup is fixed", "[integration]") {

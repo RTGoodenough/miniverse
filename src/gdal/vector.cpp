@@ -18,13 +18,13 @@
 #include <functional>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "common.hpp"
 #include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/geo/types.hpp"
 #include "miniverse/geo/wkb.hpp"
@@ -37,33 +37,9 @@ namespace {
 
 constexpr int NO_FIELD = -1;  // OGR's own feature id is the id, not a field
 
-/** @brief Throws `std::runtime_error` with `what` and, if GDAL reported one, its own message. */
-[[noreturn]] void fail(const std::string& what) {
-  const std::string detail = CPLGetLastErrorMsg();
-
-  throw std::runtime_error(detail.empty() ? what : what + ": " + detail);
-}
-
-/** @brief While one lives, GDAL keeps its errors as its last message (which `fail` reports), and does not print them. */
-class QuietErrors {
- public:
-  QuietErrors() {
-    CPLPushErrorHandler(CPLQuietErrorHandler);
-    CPLErrorReset();
-  }
-
-  QuietErrors(const QuietErrors&) = delete;
-  QuietErrors(QuietErrors&&) = delete;
-  QuietErrors& operator=(const QuietErrors&) = delete;
-  QuietErrors& operator=(QuietErrors&&) = delete;
-  ~QuietErrors() { CPLPopErrorHandler(); }
-};
-
-/** @brief Registers GDAL's drivers, once in the program. */
-void register_drivers() {
-  static std::once_flag registered;
-  std::call_once(registered, [] { GDALAllRegister(); });
-}
+using detail::fail;
+using detail::QuietErrors;
+using detail::register_drivers;
 
 /** @return The OGR type that is `geometry_t`. */
 template <geo::wkb::Geometry geometry_t>
@@ -320,7 +296,7 @@ VectorRead read_features(const VectorSource& source, std::size_t chunk_features,
   register_drivers();
   const QuietErrors quiet;
 
-  const GDALDatasetUniquePtr dataset(GDALDataset::Open(source.path.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY));
+  const GDALDatasetUniquePtr dataset(GDALDataset::Open(source.path.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR));
   if ( ! dataset ) {
     fail("'" + source.path + "' can't be opened as a vector file");
   }

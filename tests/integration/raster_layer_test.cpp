@@ -310,6 +310,32 @@ TEST_CASE("integration: a push onto tiles already there merges: new data wins, a
   CHECK(twice == once);  // the same push again changes nothing
 }
 
+TEST_CASE("integration: a raster pushed in parts is cut with the table's grid, and is there once it commits", "[integration]") {
+  Tiled  tiled(test_db());
+  World& world = tiled.world();
+
+  // Two degrees side by side from (10, 2), a degree to a part.
+  const auto degree_from = [](double west, std::int16_t value) {
+    return Raster{
+        .west = west, .north = 2, .pixel_width = 0.25, .pixel_height = 0.25, .width = 4, .height = 4, .nodata = NODATA,
+        .pixels = std::vector<std::int16_t>(16, value)
+    };
+  };
+
+  miniverse::PushInParts<TestElevation> parts = world.begin_push<TestElevation>().get();
+  parts.add(degree_from(10, 7)).get();
+  parts.add(degree_from(11, 8)).get();
+  const Raster before = world.load<TestElevation>(polygon("POLYGON((10 1,12 1,12 2,10 2,10 1))")).get();
+  parts.commit().get();
+  const Raster after = world.load<TestElevation>(polygon("POLYGON((10 1,12 1,12 2,10 2,10 1))")).get();
+
+  CHECK(before.width == 0);  // no tiles there yet, for anyone else
+  REQUIRE(after.width == 8);
+  REQUIRE(after.height == 4);
+  CHECK(after.at(0, 0) == 7);
+  CHECK(after.at(7, 3) == 8);
+}
+
 TEST_CASE("integration: a push merges through the shared function by its full name, whatever the search path", "[integration]") {
   // One connection, so the search path set here, without the schema miniverse_functions, holds for the push.
   Tiled  tiled(test_db(), {.pool = {.connections = 1}, .read = {}});
@@ -373,6 +399,7 @@ TEST_CASE("integration: a push onto a raster table with no grid in its constrain
   pushed.pixels.assign(16, 1);
 
   CHECK_THROWS_WITH(world.push<TestElevation>(std::move(pushed)).get(), Catch::Matchers::ContainsSubstring("no grid in its raster constraints"));
+  CHECK_THROWS_WITH(world.begin_push<TestElevation>().get(), Catch::Matchers::ContainsSubstring("no grid in its raster constraints"));
 
   world.drop_tables();
 }
@@ -402,6 +429,30 @@ TEST_CASE("integration: on a grid whose arithmetic rounds, the world's last colu
   CHECK(world.load<FineElevation>(around).get().pixels.back() == 42);
 
   world.drop_tables();
+}
+
+TEST_CASE("integration: two raster tables made at the same time are both made", "[integration]") {
+  // Two writers starting together, each with its own pool and its own table: both make the shared schema and replace the
+  // shared merge function, which PostgreSQL does not let two transactions do at once.
+  constexpr int ROUNDS = 10;
+  miniverse::Miniverse one(test_db(), miniverse::Layer<TestElevation>("miniverse_test_elevation_one"));
+  miniverse::Miniverse other(test_db(), miniverse::Layer<FineElevation>("miniverse_test_elevation_other"));
+
+  for ( int round = 0; round < ROUNDS; ++round ) {
+    one.drop_tables();
+    other.drop_tables();
+    // As in a new database: the schema is not there yet, so both make it.
+    std::ignore = one.database().execute(schemacht::postgres::unchecked_sql("DROP SCHEMA IF EXISTS miniverse_functions CASCADE")).get();
+
+    std::future<void> making_one = std::async(std::launch::async, [&] { one.create_table<TestElevation>(GRID); });
+    std::future<void> making_other = std::async(std::launch::async, [&] { other.create_table<FineElevation>(GRID); });
+
+    CHECK_NOTHROW(making_one.get());
+    CHECK_NOTHROW(making_other.get());
+  }
+
+  one.drop_tables();
+  other.drop_tables();
 }
 
 TEST_CASE("integration: the merge function a table's setup makes keeps old pixels where the new tile has none", "[integration]") {

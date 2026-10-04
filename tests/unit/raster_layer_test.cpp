@@ -76,16 +76,17 @@ constexpr geo::Grid<std::int16_t> GRID{.pixels_per_degree = 4, .tile_pixels = 4,
 
 }  // namespace
 
-TEST_CASE("raster layer: the table's setup is the shared merge function, its index and the raster constraints that record its grid", "[raster_layer]") {
+TEST_CASE("raster layer: the table's setup is a lock, the shared merge function, its index and the constraints that record its grid", "[raster_layer]") {
   const schemacht::schema::TableName table("srtm");
 
   const std::vector<std::string> setup = Elevation::setup_sql(table, GRID);
 
-  REQUIRE(setup.size() == 4);
-  CHECK(setup.at(0) == "CREATE SCHEMA IF NOT EXISTS miniverse_functions");
-  CHECK(setup.at(1).starts_with("CREATE OR REPLACE FUNCTION miniverse_functions.merge_raster("));  // what it does: tests/integration
+  REQUIRE(setup.size() == 5);
+  CHECK(setup.at(0).contains("pg_advisory_xact_lock"));  // first: setups take turns at what follows
+  CHECK(setup.at(1) == "CREATE SCHEMA IF NOT EXISTS miniverse_functions");
+  CHECK(setup.at(2).starts_with("CREATE OR REPLACE FUNCTION miniverse_functions.merge_raster("));  // what it does: tests/integration
   CHECK(
-      std::vector<std::string>(setup.begin() + 2, setup.end()) ==
+      std::vector<std::string>(setup.begin() + 3, setup.end()) ==
       std::vector<std::string>{
           R"(CREATE INDEX ON "srtm" USING gist (ST_ConvexHull(rast)))",
           R"(ALTER TABLE "srtm" ADD CONSTRAINT enforce_srid_rast CHECK (ST_SRID(rast) = 4326))"

@@ -27,10 +27,10 @@ namespace miniverse {
 namespace {
 
 // The grid's corner, and the world's size in degrees.
-constexpr double       WEST = -180;
-constexpr double       NORTH = 90;
-constexpr std::int64_t DEGREES_ACROSS = 360;
-constexpr std::int64_t DEGREES_DOWN = 180;
+constexpr double WEST = geo::GRID_WEST;
+constexpr double NORTH = geo::GRID_NORTH;
+using geo::DEGREES_ACROSS;
+using geo::DEGREES_DOWN;
 
 constexpr std::int32_t MAX_TILE_PIXELS = std::numeric_limits<std::uint16_t>::max();  // raster WKB's width and height
 
@@ -47,6 +47,10 @@ constexpr double SIZE_TOLERANCE = 1e-9;
 
 // How far 1 / pixel size may be from a whole number of pixels per degree. raster_columns gives the size rounded to 10 places.
 constexpr double PIXELS_PER_DEGREE_TOLERANCE = 0.25;
+
+// Taken first by every setup, and held until its transaction ends: PostgreSQL lets no two transactions make one schema, or
+// replace one function, at the same time (the second fails), so setups take turns. The key is the schema's name, hashed.
+constexpr std::string_view SETUP_LOCK = "DO $$ BEGIN PERFORM pg_advisory_xact_lock(hashtext('miniverse_functions')); END $$";
 
 // The tile `incoming` merged onto `current`, two tiles of one grid position: a pixel with data in `incoming` wins, and one with
 // no data there keeps `current`'s. ST_Union's LAST runs in C: about 4 times as fast as an ST_MapAlgebra expression on a tile
@@ -173,6 +177,7 @@ std::vector<std::string> RasterLayer<pixel_t>::setup_sql(const schemacht::schema
   }
 
   return {
+      std::string(SETUP_LOCK),
       std::format("CREATE SCHEMA IF NOT EXISTS {}", raster::MergeRaster::SCHEMA),
       std::format("CREATE OR REPLACE FUNCTION {}{}", raster::MergeRaster::FUNCTION, MERGE_FUNCTION_DEFINITION),
       "CREATE INDEX ON " + table.quoted() + " USING gist (ST_ConvexHull(rast))",

@@ -17,24 +17,24 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <filesystem>
-#include <fstream>
-#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "support/files.hpp"
 #include "miniverse/gdal/vector.hpp"
 #include "miniverse/miniverse.hpp"
 
 namespace bg = boost::geometry;
 namespace geo = miniverse::geo;
 namespace gdal = miniverse::gdal;
+
+using test::Files;
+using test::test_db;
 
 using Catch::Matchers::ContainsSubstring;
 using Catch::Matchers::WithinAbs;
@@ -75,37 +75,6 @@ constexpr std::string_view MERCATOR_PATH = R"({"type": "FeatureCollection",
   {"type": "Feature", "id": 1, "properties": {}, "geometry": {"type": "LineString", "coordinates": [[0, 0], [111319.49079327357, 111325.14286638486]]}}
 ]})";
 
-/** @brief A directory of its own for a test's files, removed with everything in it afterwards. */
-class Files {
- public:
-  Files() : _directory(std::filesystem::temp_directory_path() / ("miniverse_gdal_test_" + std::to_string(std::random_device()()))) {
-    std::filesystem::create_directories(_directory);
-  }
-
-  /** @return The path of a file named `name` holding `text`. */
-  [[nodiscard]] std::string write(const std::string& name, std::string_view text) const {
-    const std::filesystem::path path = _directory / name;
-    std::ofstream(path) << text;
-
-    return path.string();
-  }
-
-  [[nodiscard]] std::string path_of(const std::string& name) const { return (_directory / name).string(); }
-
- private:
-  std::filesystem::path _directory;
-
- public:
-  Files(const Files&) = delete;
-  Files(Files&&) = delete;
-  Files& operator=(const Files&) = delete;
-  Files& operator=(Files&&) = delete;
-  ~Files() {
-    std::error_code ignored;
-    std::filesystem::remove_all(_directory, ignored);
-  }
-};
-
 /** @brief Copies the vector file `from` to a GeoPackage at `to`, keeping its feature ids: a file made by GDAL itself. */
 void to_geopackage(const std::string& from, const std::string& to) {
   GDALAllRegister();
@@ -127,15 +96,6 @@ void to_geopackage(const std::string& from, const std::string& to) {
   REQUIRE(made != nullptr);
   GDALClose(made);
   GDALClose(source);
-}
-
-[[nodiscard]] std::string test_db() {
-  const char* conninfo = std::getenv("MINIVERSE_TEST_DB");
-  if ( conninfo == nullptr ) {
-    SKIP("MINIVERSE_TEST_DB is not set");
-  }
-
-  return conninfo;
 }
 
 struct Buildings : miniverse::FeatureLayer<geo::MultiPolygon> {};
@@ -336,6 +296,46 @@ TEST_CASE("integration: a GeoPackage pushed a chunk at a time loads back as it w
   }
   CHECK(loaded.at(0).tags.text() == R"({"name": "Town hall", "height": 12.5, "levels": 3})");  // jsonb's own order: shorter keys first
   CHECK(loaded.at(1).tags.text() == R"({"name": "Depot", "height": 4.0})");
+
+  world.drop_tables();
+}
+
+TEST_CASE("integration: a file pushed in parts is written whole, or not at all", "[gdal][integration]") {
+  const Files       files;
+  const std::string path = files.write("buildings.geojson", BUILDINGS);
+  const gdal::VectorSource source{.path = path, .layer = {}, .id_field = {}};
+  const auto               everywhere = bg::from_wkt<geo::Polygon>("POLYGON((-1 -1,30 -1,30 30,-1 30,-1 -1))");
+
+  miniverse::Miniverse world(test_db(), miniverse::Layer<Buildings>("miniverse_test_gdal_buildings"));
+  world.drop_tables();
+  world.create_tables();
+
+  // A chunk to a part. The first time the reader stops after its first chunk, as a file damaged half way would: nothing is written.
+  {
+    auto        parts = world.begin_push<Buildings>().get();
+    std::size_t chunks = 0;
+    CHECK_THROWS_WITH(
+        gdal::read_features<geo::MultiPolygon>(
+            source, 1,
+            [&](auto chunk) {
+              parts.add(std::move(chunk)).get();
+              if ( ++chunks == 1 ) {
+                throw std::runtime_error("the file ends here");
+              }
+            }
+        ),
+        ContainsSubstring("ends here")
+    );
+  }
+  const auto after_half = world.load<Buildings>(everywhere).get();
+
+  auto parts = world.begin_push<Buildings>().get();
+  std::ignore = gdal::read_features<geo::MultiPolygon>(source, 1, [&](auto chunk) { parts.add(std::move(chunk)).get(); });
+  parts.commit().get();
+  const auto after_all = world.load<Buildings>(everywhere).get();
+
+  CHECK(after_half.empty());
+  CHECK(after_all.size() == 2);
 
   world.drop_tables();
 }

@@ -106,15 +106,17 @@ struct RasterLayer {
       schemacht::schema::Field<double, "nodata">>;
 
   /**
-   * @return The schema `miniverse_functions` and the function in it a push merges a tile with (`raster::MergeRaster`), each made if
-   * missing; the table's spatial index; and its raster constraints, which record `grid` for `raster_columns` (and so GDAL):
+   * @return A lock that setups take turns by; the schema `miniverse_functions` and the function in it a push merges a tile with
+   * (`raster::MergeRaster`), each made if missing; the table's spatial index; and its raster constraints, which record `grid` for `raster_columns` (and so GDAL):
    * SRID 4326, the pixel size, the tile size, alignment to the grid, one band of `pixel_t`, the nodata value, no out-db
    * bands, and an extent of the whole world (and a hair more, for rounding), so it never needs widening.
    *
    * The function is replaced by every setup, and outlives a dropped table, as other raster tables share it. The first
    * setup in a database makes the schema, which needs CREATE on the database; pushing needs USAGE on the schema
-   * `miniverse_functions`. Two setups at once can conflict on it (`CREATE OR REPLACE FUNCTION` and `CREATE SCHEMA IF NOT
-   * EXISTS` are not safe against each other): the second then fails, and can be run again.
+   * `miniverse_functions`. Two setups at once take turns: PostgreSQL lets no two transactions make one schema or replace
+   * one function at the same time, so each first takes an advisory lock, held until its transaction ends (`create_table`
+   * runs them in one), and the second waits for the first. Run outside a transaction, each statement is one of its own, and
+   * the lock is let go at once: run them all in one.
    * @throws std::invalid_argument if `grid` is not a grid: see `geo::Grid`.
    */
   [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table, const settings_type& grid);

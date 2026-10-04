@@ -15,6 +15,12 @@
  */
 namespace miniverse::geo {
 
+/** @brief Where every grid starts, its north-west corner, and how many degrees the world spans from there: see `Grid`. */
+inline constexpr double       GRID_WEST = -180;
+inline constexpr double       GRID_NORTH = 90;
+inline constexpr std::int64_t DEGREES_ACROSS = 360;
+inline constexpr std::int64_t DEGREES_DOWN = 180;
+
 /**
  * @brief The fixed grid a raster table's tiles lie on: `pixels_per_degree` pixels to a degree in both directions, counted from
  * the corner at longitude -180, latitude 90, in square tiles of `tile_pixels` pixels a side. Every source is warped onto it.
