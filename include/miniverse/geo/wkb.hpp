@@ -17,12 +17,14 @@
  * - **Read** from EWKB in either byte order, and only with SRID 4326. A geometry in another system, or with no SRID at all,
  *   is an error rather than coordinates silently read in the wrong system.
  * - **Two-dimensional only.** A geometry with Z or M values is refused, in EWKB's flags and ISO WKB's type numbers alike.
+ * - **A multi-geometry's members** are written without an SRID of their own, as PostGIS writes them: they have the whole's.
+ *   One that names an SRID all the same is read only if it is 4326.
  *
  * Malformed input (a wrong type, a short buffer, bytes left over, an empty point) throws `std::invalid_argument`.
  */
 namespace miniverse::geo::wkb {
 
-/** @return The name WKB and PostGIS give `geometry_t`: `"Point"`, `"LineString"` or `"Polygon"`. */
+/** @return The name WKB and PostGIS give `geometry_t`: `"Point"`, `"LineString"`, `"Polygon"`, `"MultiLineString"` or `"MultiPolygon"`. */
 template <Geometry geometry_t>
 [[nodiscard]] consteval auto type_name() {
   if constexpr ( std::same_as<geometry_t, Point> ) {
@@ -31,8 +33,16 @@ template <Geometry geometry_t>
   } else if constexpr ( std::same_as<geometry_t, LineString> ) {
     return schemacht::util::CTString("LineString");
 
-  } else {
+  } else if constexpr ( std::same_as<geometry_t, Polygon> ) {
     return schemacht::util::CTString("Polygon");
+
+  } else if constexpr ( std::same_as<geometry_t, MultiLineString> ) {
+    return schemacht::util::CTString("MultiLineString");
+
+  } else {
+    static_assert(std::same_as<geometry_t, MultiPolygon>, "a new geometry type needs its name here");
+
+    return schemacht::util::CTString("MultiPolygon");
   }
 }
 
@@ -50,9 +60,13 @@ template <Geometry geometry_t>
 extern template std::vector<std::byte> write<Point>(const Point& geometry);
 extern template std::vector<std::byte> write<LineString>(const LineString& geometry);
 extern template std::vector<std::byte> write<Polygon>(const Polygon& geometry);
+extern template std::vector<std::byte> write<MultiLineString>(const MultiLineString& geometry);
+extern template std::vector<std::byte> write<MultiPolygon>(const MultiPolygon& geometry);
 
 extern template Point      read<Point>(std::span<const std::byte> bytes);
 extern template LineString read<LineString>(std::span<const std::byte> bytes);
 extern template Polygon    read<Polygon>(std::span<const std::byte> bytes);
+extern template MultiLineString read<MultiLineString>(std::span<const std::byte> bytes);
+extern template MultiPolygon    read<MultiPolygon>(std::span<const std::byte> bytes);
 
 }  // namespace miniverse::geo::wkb

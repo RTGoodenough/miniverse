@@ -25,6 +25,7 @@ add_executable(
   unit/layer_test.cpp
   unit/raster_test.cpp
   unit/elevation_layer_test.cpp
+  integration/geometry_test.cpp
   integration/miniverse_test.cpp
   integration/elevation_test.cpp
 )

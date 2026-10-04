@@ -71,5 +71,7 @@ static_assert(std::same_as<
 static_assert(schemacht::query::sql::type_name<miniverse::geo::Point>() == "geometry(Point,4326)");
 static_assert(schemacht::query::sql::type_name<miniverse::geo::LineString>() == "geometry(LineString,4326)");
 static_assert(schemacht::query::sql::type_name<miniverse::geo::Polygon>() == "geometry(Polygon,4326)");
+static_assert(schemacht::query::sql::type_name<miniverse::geo::MultiLineString>() == "geometry(MultiLineString,4326)");
+static_assert(schemacht::query::sql::type_name<miniverse::geo::MultiPolygon>() == "geometry(MultiPolygon,4326)");
 
 TEST_CASE("layer kinds are checked at compile time", "[compile]") { SUCCEED("the static_asserts above compiled"); }

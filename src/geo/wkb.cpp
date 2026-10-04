@@ -21,6 +21,14 @@ enum class Kind : std::uint8_t {
   Point = 1,
   LineString = 2,
   Polygon = 3,
+  MultiLineString = 5,
+  MultiPolygon = 6,
+};
+
+// Where a geometry is: on its own, or a member of a multi-geometry. A member need name no SRID of its own: it has the whole's.
+enum class Place : std::uint8_t {
+  Whole,
+  Member,
 };
 
 // EWKB's flags in the type word's high bits, and the bits left for the type number.
@@ -34,6 +42,7 @@ constexpr std::uint32_t LAST_2D_KIND = 7;
 
 constexpr std::size_t WORD_BYTES = 4;
 constexpr std::size_t POINT_BYTES = 2 * sizeof(double);
+constexpr std::size_t MEMBER_BYTES = 1 + WORD_BYTES + WORD_BYTES;  // a member is at least its byte order, type and count
 
 /** @brief The points of a line or a ring: Boost.Geometry's `linestring` and `ring` are both a `std::vector` of them. */
 using Points = std::vector<Point>;
@@ -46,16 +55,27 @@ template <Geometry geometry_t>
   } else if constexpr ( std::same_as<geometry_t, LineString> ) {
     return Kind::LineString;
 
-  } else {
+  } else if constexpr ( std::same_as<geometry_t, Polygon> ) {
     return Kind::Polygon;
+
+  } else if constexpr ( std::same_as<geometry_t, MultiLineString> ) {
+    return Kind::MultiLineString;
+
+  } else {
+    static_assert(std::same_as<geometry_t, MultiPolygon>, "a new geometry type needs its WKB type number here");
+
+    return Kind::MultiPolygon;
   }
 }
 
 // ---- Reading --------------------------------------------------------------------------------------------------------
 
-/** @brief Reads the geometry's header (byte order, type, SRID) and checks it is a 2D `geometry_t` in WGS 84. */
+/**
+ * @brief Reads the geometry's header (byte order, type, SRID) and checks it is a 2D `geometry_t` in WGS 84. A whole geometry
+ * must name its SRID; a member of a multi-geometry need not.
+ */
 template <Geometry geometry_t>
-void read_header(Reader& reader) {
+void read_header(Reader& reader, Place place) {
   reader.byte_order();
 
   const auto type = reader.number<std::uint32_t>();
@@ -68,7 +88,11 @@ void read_header(Reader& reader) {
   }
 
   if ( (type & SRID_FLAG) == 0 ) {
-    malformed("the geometry names no SRID, so its coordinates could be in any system (expected " + std::to_string(WGS84_SRID) + ")");
+    if ( place == Place::Whole ) {
+      malformed("the geometry names no SRID, so its coordinates could be in any system (expected " + std::to_string(WGS84_SRID) + ")");
+    }
+
+    return;
   }
 
   const auto srid = reader.number<std::int32_t>();
@@ -109,7 +133,7 @@ template <Geometry geometry_t>
 
     return line;
 
-  } else {
+  } else if constexpr ( std::same_as<geometry_t, Polygon> ) {
     const std::size_t rings = reader.count(WORD_BYTES);  // each ring is at least its own count
     Polygon           polygon;
 
@@ -123,6 +147,20 @@ template <Geometry geometry_t>
     }
 
     return polygon;
+
+  } else {  // a multi-geometry: a count, then each member as a geometry of its own, in a byte order of its own
+    using member_t = geometry_t::value_type;
+
+    const std::size_t members = reader.count(MEMBER_BYTES);
+    geometry_t        multi;
+
+    multi.reserve(members);
+    for ( std::size_t i = 0; i < members; ++i ) {
+      read_header<member_t>(reader, Place::Member);
+      multi.push_back(read_body<member_t>(reader));
+    }
+
+    return multi;
   }
 }
 
@@ -148,7 +186,7 @@ void put_body(Writer& out, const geometry_t& geometry) {
   } else if constexpr ( std::same_as<geometry_t, LineString> ) {
     put_points(out, geometry);
 
-  } else {
+  } else if constexpr ( std::same_as<geometry_t, Polygon> ) {
     if ( geometry.outer().empty() && geometry.inners().empty() ) {
       out.count(0);  // no rings, as PostGIS writes POLYGON EMPTY
       return;
@@ -158,6 +196,16 @@ void put_body(Writer& out, const geometry_t& geometry) {
     put_points(out, geometry.outer());
     for ( const auto& inner : geometry.inners() ) {
       put_points(out, inner);
+    }
+
+  } else {  // a multi-geometry: each member with a header of its own, without an SRID, as PostGIS writes them
+    using member_t = geometry_t::value_type;
+
+    out.count(geometry.size());
+    for ( const member_t& member : geometry ) {
+      out.byte(std::byte{Reader::LITTLE_ENDIAN_MARK});
+      out.number(static_cast<std::uint32_t>(kind_of<member_t>()));
+      put_body(out, member);
     }
   }
 }
@@ -177,7 +225,7 @@ std::vector<std::byte> write(const geometry_t& geometry) {
 template <Geometry geometry_t>
 geometry_t read(std::span<const std::byte> bytes) {
   Reader reader(bytes);
-  read_header<geometry_t>(reader);
+  read_header<geometry_t>(reader, Place::Whole);
   auto geometry = read_body<geometry_t>(reader);
 
   if ( ! reader.at_end() ) {
@@ -190,9 +238,13 @@ geometry_t read(std::span<const std::byte> bytes) {
 template std::vector<std::byte> write<Point>(const Point& geometry);
 template std::vector<std::byte> write<LineString>(const LineString& geometry);
 template std::vector<std::byte> write<Polygon>(const Polygon& geometry);
+template std::vector<std::byte> write<MultiLineString>(const MultiLineString& geometry);
+template std::vector<std::byte> write<MultiPolygon>(const MultiPolygon& geometry);
 
 template Point      read<Point>(std::span<const std::byte> bytes);
 template LineString read<LineString>(std::span<const std::byte> bytes);
 template Polygon    read<Polygon>(std::span<const std::byte> bytes);
+template MultiLineString read<MultiLineString>(std::span<const std::byte> bytes);
+template MultiPolygon    read<MultiPolygon>(std::span<const std::byte> bytes);
 
 }  // namespace miniverse::geo::wkb

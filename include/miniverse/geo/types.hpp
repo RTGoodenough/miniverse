@@ -3,6 +3,8 @@
 #include <cstdint>
 
 #include <boost/geometry/geometries/linestring.hpp>
+#include <boost/geometry/geometries/multi_linestring.hpp>
+#include <boost/geometry/geometries/multi_polygon.hpp>
 #include <boost/geometry/geometries/point_xy.hpp>
 #include <boost/geometry/geometries/polygon.hpp>
 
@@ -29,5 +31,11 @@ using LineString = boost::geometry::model::linestring<Point>;
  * area and validity algorithms do (`boost::geometry::correct` fixes a ring that runs the other way).
  */
 using Polygon = boost::geometry::model::polygon<Point, false, true>;
+
+/** @brief Several lines as one geometry, such as a river with its branches: a `std::vector` of `LineString`. */
+using MultiLineString = boost::geometry::model::multi_linestring<LineString>;
+
+/** @brief Several areas as one geometry, such as a country with its islands: a `std::vector` of `Polygon`. */
+using MultiPolygon = boost::geometry::model::multi_polygon<Polygon>;
 
 }  // namespace miniverse::geo
