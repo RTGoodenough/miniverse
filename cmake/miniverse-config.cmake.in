@@ -1,13 +1,19 @@
 @PACKAGE_INIT@
 
-# find_package(miniverse [version] [REQUIRED])
+# find_package(miniverse [version] [REQUIRED] [COMPONENTS gdal])
 #
 #   miniverse::miniverse   layers of the world in PostGIS, loaded by polygon
+#   miniverse::gdal        files read with GDAL, if miniverse was built with it (the component `gdal`)
 
 include(CMakeFindDependencyMacro)
 
 find_dependency(schemacht)
 find_dependency(Boost 1.74)
+
+set(miniverse_gdal_FOUND @MINIVERSE_HAS_GDAL@)
+if(miniverse_gdal_FOUND)
+  find_dependency(GDAL CONFIG)
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/miniverse-targets.cmake")
 

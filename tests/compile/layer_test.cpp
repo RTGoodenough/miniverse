@@ -22,6 +22,13 @@ using test::Places;
 
 struct Roads : miniverse::RoadLayer {};
 
+// A feature layer of each geometry type: each is one line.
+struct Shops : miniverse::FeatureLayer<geo::Point> {};
+struct Paths : miniverse::FeatureLayer<geo::LineString> {};
+struct Parks : miniverse::FeatureLayer<geo::Polygon> {};
+struct Rivers : miniverse::FeatureLayer<geo::MultiLineString> {};
+struct Buildings : miniverse::FeatureLayer<geo::MultiPolygon> {};
+
 // Places, but loaded by the roads' query, which is written against another schema.
 struct PlacesByRoadQuery : Places {
   using load_statement_type = miniverse::RoadLayer::load_statement_type;
@@ -37,7 +44,12 @@ struct PlacesWithUnreadSettings : Places {
   static std::vector<std::vector<schema_type::row_type>> to_rows(result_type places, int settings);
 };
 
-struct Elevation : miniverse::ElevationLayer<std::int16_t> {};
+// Places that name a chunk of their own, but don't make one: their streams would fall back to from_rows unnoticed.
+struct PlacesWithUnmadeChunks : Places {
+  using chunk_type = int;
+};
+
+struct Elevation : miniverse::RasterLayer<std::int16_t> {};
 
 struct NotAKind {
   using result_type = int;
@@ -46,13 +58,30 @@ struct NotAKind {
 }  // namespace
 
 static_assert(miniverse::LayerKind<Roads>);
+static_assert(miniverse::LayerKind<Shops> && miniverse::LayerKind<Paths> && miniverse::LayerKind<Parks>);
+static_assert(miniverse::LayerKind<Rivers> && miniverse::LayerKind<Buildings>);
+static_assert(miniverse::HasNoSettings<Buildings>);
+static_assert(std::same_as<Buildings::result_type, std::vector<miniverse::Feature<geo::MultiPolygon>>>);
 static_assert(miniverse::LayerKind<Places>);
 static_assert(miniverse::LayerKind<Elevation>);
 static_assert(miniverse::HasSettings<Elevation>);
 static_assert(! miniverse::HasSettings<Roads>);
 static_assert(! miniverse::LayerKind<PlacesByRoadQuery>);
 static_assert(! miniverse::LayerKind<PlacesWithUnreadSettings>);
+static_assert(! miniverse::LayerKind<PlacesWithUnmadeChunks>);
 static_assert(! miniverse::LayerKind<NotAKind>);
+
+// A streamed load hands over chunks: some of what a load gives, or for a raster some of its tiles.
+static_assert(std::same_as<miniverse::ChunkOf<Roads>, miniverse::Ways>);
+static_assert(std::same_as<miniverse::ChunkOf<Buildings>, miniverse::Features<geo::MultiPolygon>>);
+static_assert(miniverse::HasOwnChunks<Elevation> && ! miniverse::HasOwnChunks<Roads>);
+static_assert(std::same_as<miniverse::ChunkOf<Elevation>, std::vector<geo::Raster<std::int16_t>>>);
+
+// Its callback takes a chunk, and returns nothing or whether it wants more.
+static_assert(miniverse::ChunkCallback<void (*)(miniverse::Ways), Roads>);
+static_assert(miniverse::ChunkCallback<bool (*)(const miniverse::Ways&), Roads>);
+static_assert(! miniverse::ChunkCallback<int (*)(miniverse::Ways), Roads>);
+static_assert(! miniverse::ChunkCallback<void (*)(geo::Raster<std::int16_t>), Roads>);
 
 // A layer is made from its table's name alone, whether or not its kind has settings: the table keeps those.
 static_assert(std::constructible_from<miniverse::Layer<Roads>, const char*>);

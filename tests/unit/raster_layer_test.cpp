@@ -1,4 +1,4 @@
-// The elevation kind without a database: the table's setup, a raster cut into the grid's tiles, and tiles stitched into the
+// The raster kind without a database: the table's setup, a raster cut into the grid's tiles, and tiles stitched into the
 // window a load asks for.
 
 #include <catch2/catch_test_macros.hpp>
@@ -23,7 +23,7 @@ namespace geo = miniverse::geo;
 
 namespace {
 
-struct Elevation : miniverse::ElevationLayer<std::int16_t> {};
+struct Elevation : miniverse::RasterLayer<std::int16_t> {};
 
 using Raster = geo::Raster<std::int16_t>;
 using LoadedRow = Elevation::load_statement_type::result_type;
@@ -68,7 +68,7 @@ constexpr geo::Grid<std::int16_t> GRID{.pixels_per_degree = 4, .tile_pixels = 4,
 
   tiles.reserve(rows.size());
   for ( Elevation::row_type& row : rows ) {
-    tiles.emplace_back(miniverse::elevation::Rast<std::int16_t>{std::move(schemacht::schema::get<"rast">(row))});
+    tiles.emplace_back(miniverse::raster::Rast<std::int16_t>{std::move(schemacht::schema::get<"rast">(row))});
   }
 
   return tiles;
@@ -76,7 +76,7 @@ constexpr geo::Grid<std::int16_t> GRID{.pixels_per_degree = 4, .tile_pixels = 4,
 
 }  // namespace
 
-TEST_CASE("elevation: the table's setup is the shared merge function, its index and the raster constraints that record its grid", "[elevation]") {
+TEST_CASE("raster layer: the table's setup is the shared merge function, its index and the raster constraints that record its grid", "[raster_layer]") {
   const schemacht::schema::TableName table("srtm");
 
   const std::vector<std::string> setup = Elevation::setup_sql(table, GRID);
@@ -105,7 +105,7 @@ TEST_CASE("elevation: the table's setup is the shared merge function, its index 
   );
 }
 
-TEST_CASE("elevation: the extent covers whole tiles, past the world's edge when tiles don't divide it", "[elevation]") {
+TEST_CASE("raster layer: the extent covers whole tiles, past the world's edge when tiles don't divide it", "[raster_layer]") {
   // 360 * 4 = 1440 pixels across is 41.14 tiles of 35, so 42 tiles: 1470 pixels, to longitude 187.5. 720 down is 21 tiles: 735, to -93.75.
   const std::string sql =
       Elevation::setup_sql(schemacht::schema::TableName("srtm"), {.pixels_per_degree = 4, .tile_pixels = 35, .nodata = NODATA}).back();
@@ -116,7 +116,7 @@ TEST_CASE("elevation: the extent covers whole tiles, past the world's edge when 
   ));
 }
 
-TEST_CASE("elevation: a grid that is not one is refused", "[elevation]") {
+TEST_CASE("raster layer: a grid that is not one is refused", "[raster_layer]") {
   const schemacht::schema::TableName table("srtm");
 
   CHECK_THROWS_AS(Elevation::setup_sql(table, {.pixels_per_degree = 0, .tile_pixels = 4, .nodata = NODATA}), std::invalid_argument);
@@ -125,11 +125,11 @@ TEST_CASE("elevation: a grid that is not one is refused", "[elevation]") {
   CHECK_THROWS_AS(Elevation::setup_sql(table, {.pixels_per_degree = 4, .tile_pixels = 0, .nodata = NODATA}), std::invalid_argument);
   CHECK_THROWS_AS(Elevation::setup_sql(table, {.pixels_per_degree = 4, .tile_pixels = 65536, .nodata = NODATA}), std::invalid_argument);
   CHECK_THROWS_AS(
-      miniverse::ElevationLayer<float>::setup_sql(table, {.pixels_per_degree = 4, .tile_pixels = 4, .nodata = NAN}), std::invalid_argument
+      miniverse::RasterLayer<float>::setup_sql(table, {.pixels_per_degree = 4, .tile_pixels = 4, .nodata = NAN}), std::invalid_argument
   );
 }
 
-TEST_CASE("elevation: a raster is cut into the grid's tiles it covers", "[elevation]") {
+TEST_CASE("raster layer: a raster is cut into the grid's tiles it covers", "[raster_layer]") {
   // 6 by 6 pixels from (0.5, 1): columns 722 to 727 of the grid and rows 356 to 361, so tiles 180 and 181 across, 89 and 90 down.
   const auto batches = Elevation::to_rows(numbered(0.5, 1, 6, 6), GRID);
 
@@ -153,7 +153,7 @@ TEST_CASE("elevation: a raster is cut into the grid's tiles it covers", "[elevat
   CHECK(schemacht::schema::get<"rast">(rows.back()).at(0, 0) == 204);  // the raster's column 2, row 4
 }
 
-TEST_CASE("elevation: a raster's own nodata becomes the grid's, and a tile with no data is left out", "[elevation]") {
+TEST_CASE("raster layer: a raster's own nodata becomes the grid's, and a tile with no data is left out", "[raster_layer]") {
   Raster raster = numbered(0.5, 1, 2, 1);
   raster.nodata = 0;  // the first pixel has no data, and now the second too: the one tile they are in is left out
   raster.pixels.at(1) = 0;
@@ -168,7 +168,7 @@ TEST_CASE("elevation: a raster's own nodata becomes the grid's, and a tile with 
   CHECK(schemacht::schema::get<"rast">(tiles.front()).at(3, 0) == 7);
 }
 
-TEST_CASE("elevation: tiles are written in batches of PIXEL_BYTES_PER_STATEMENT, by tile id", "[elevation]") {
+TEST_CASE("raster layer: tiles are written in batches of PIXEL_BYTES_PER_STATEMENT, by tile id", "[raster_layer]") {
   // Tiles of 2048 by 2048 int16 are 8 MB each, so a statement holds 4. Five tiles across from the world's north-west corner.
   constexpr geo::Grid<std::int16_t> COARSE_TILES{.pixels_per_degree = 3600, .tile_pixels = 2048, .nodata = NODATA};
   constexpr std::size_t             TILE = 2048;
@@ -187,7 +187,7 @@ TEST_CASE("elevation: tiles are written in batches of PIXEL_BYTES_PER_STATEMENT,
   CHECK(schemacht::schema::get<"tile_id">(batches.back().front()) == 4);
 }
 
-TEST_CASE("elevation: a pixel with data equal to the grid's nodata is refused, not lost", "[elevation]") {
+TEST_CASE("raster layer: a pixel with data equal to the grid's nodata is refused, not lost", "[raster_layer]") {
   Raster raster = numbered(0.5, 1, 2, 1);
   raster.nodata = 0;
   raster.pixels.at(1) = NODATA;  // has data in this raster, but would have none on the grid
@@ -195,7 +195,7 @@ TEST_CASE("elevation: a pixel with data equal to the grid's nodata is refused, n
   CHECK_THROWS_AS(Elevation::to_rows(raster, GRID), std::invalid_argument);
 }
 
-TEST_CASE("elevation: a raster not on the grid is not cut", "[elevation]") {
+TEST_CASE("raster layer: a raster not on the grid is not cut", "[raster_layer]") {
   Raster other_size = numbered(0, 1, 2, 2);
   other_size.pixel_width = other_size.pixel_height = 0.5;
   Raster wrong_count = numbered(0, 1, 2, 2);
@@ -208,18 +208,18 @@ TEST_CASE("elevation: a raster not on the grid is not cut", "[elevation]") {
   CHECK_THROWS_AS(Elevation::to_rows(std::move(wrong_count), GRID), std::invalid_argument);
 }
 
-TEST_CASE("elevation: a grid that is not one is refused before a raster is cut with it", "[elevation]") {
+TEST_CASE("raster layer: a grid that is not one is refused before a raster is cut with it", "[raster_layer]") {
   CHECK_THROWS_AS(Elevation::to_rows(numbered(0, 1, 2, 2), {.pixels_per_degree = 4, .tile_pixels = 0, .nodata = NODATA}), std::invalid_argument);
   CHECK_THROWS_AS(Elevation::to_rows(numbered(0, 1, 2, 2), {.pixels_per_degree = 0, .tile_pixels = 4, .nodata = NODATA}), std::invalid_argument);
 }
 
-TEST_CASE("elevation: tiles stitched over a raster's own box give the raster back", "[elevation]") {
+TEST_CASE("raster layer: tiles stitched over a raster's own box give the raster back", "[raster_layer]") {
   const Raster raster = numbered(0.5, 1, 6, 6);
 
   CHECK(Elevation::from_rows(loaded(rows(Elevation::to_rows(raster, GRID))), polygon("POLYGON((0.5 -0.5,2 -0.5,2 1,0.5 1,0.5 -0.5))")) == raster);
 }
 
-TEST_CASE("elevation: a box is widened to whole pixels, and pixels no tile covers are nodata", "[elevation]") {
+TEST_CASE("raster layer: a box is widened to whole pixels, and pixels no tile covers are nodata", "[raster_layer]") {
   const std::vector<LoadedRow> tiles = loaded(rows(Elevation::to_rows(numbered(0, 1, 4, 4), GRID)));  // the one tile from (0, 1) to (1, 0)
 
   // Inside the tile, off its pixels' edges: pixels 1 to 2 across (0.25 to 0.75) and 1 to 2 down (latitude 0.75 to 0.25).
@@ -241,7 +241,7 @@ TEST_CASE("elevation: a box is widened to whole pixels, and pixels no tile cover
   CHECK(Elevation::from_rows(tiles, polygon("POLYGON((0.3 0.6,0.3 0.6,0.3 0.6,0.3 0.6))")).pixels == std::vector<std::int16_t>{101});
 }
 
-TEST_CASE("elevation: with no tiles there is no grid, so the window is empty", "[elevation]") {
+TEST_CASE("raster layer: with no tiles there is no grid, so the window is empty", "[raster_layer]") {
   const Raster empty = Elevation::from_rows({}, polygon("POLYGON((0 0,1 0,1 1,0 1,0 0))"));
 
   CHECK(empty.width == 0);
@@ -249,7 +249,18 @@ TEST_CASE("elevation: with no tiles there is no grid, so the window is empty", "
   CHECK(empty.pixels.empty());
 }
 
-TEST_CASE("elevation: tiles that don't share a grid are not stitched", "[elevation]") {
+TEST_CASE("raster layer: a streamed chunk is its tiles, each whole", "[raster_layer]") {
+  // Two tiles side by side, from (0, 1) and from (1, 1).
+  const std::vector<Raster> tiles = Elevation::chunk_from_rows(loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID))), {});
+
+  REQUIRE(tiles.size() == 2);
+  CHECK(tiles.front().west == 0);
+  CHECK(tiles.back().west == 1);
+  CHECK(tiles.back().width == 4);
+  CHECK(tiles.back().at(0, 0) == 400);  // the raster's column 4, row 0
+}
+
+TEST_CASE("raster layer: tiles that don't share a grid are not stitched", "[raster_layer]") {
   std::vector<LoadedRow> tiles = loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID)));
   REQUIRE(tiles.size() == 2);
   std::get<0>(tiles.back()).value.west += 0.1;
@@ -257,7 +268,7 @@ TEST_CASE("elevation: tiles that don't share a grid are not stitched", "[elevati
   CHECK_THROWS_AS(Elevation::from_rows(tiles, polygon("POLYGON((0 0,2 0,2 1,0 1,0 0))")), std::invalid_argument);
 }
 
-TEST_CASE("elevation: the grid is read back from raster_columns", "[elevation]") {
+TEST_CASE("raster layer: the grid is read back from raster_columns", "[raster_layer]") {
   // raster_columns gives the pixel size rounded to 10 places, as the constraint compares it.
   CHECK(
       Elevation::settings_from_rows({SettingsRow{0.0002777778, 256, -32768}}) ==
@@ -270,7 +281,7 @@ TEST_CASE("elevation: the grid is read back from raster_columns", "[elevation]")
   CHECK_THROWS_AS(Elevation::settings_from_rows({SettingsRow{0.25, 256, 1.5}}), std::runtime_error);    // not an int16
 }
 
-TEST_CASE("elevation: the load is aimed at the layer's table and reads tiles as raster WKB", "[elevation]") {
+TEST_CASE("raster layer: the load is aimed at the layer's table and reads tiles as raster WKB", "[raster_layer]") {
   const miniverse::Layer<Elevation> layer("srtm");
 
   const std::string load = std::string(Elevation::load_statement_type::bind(polygon("POLYGON((0 0,1 0,1 1,0 0))")).on(layer.table()).sql());

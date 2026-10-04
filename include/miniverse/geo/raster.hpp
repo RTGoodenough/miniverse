@@ -11,7 +11,7 @@
 
 /**
  * Rasters in WGS 84: a grid of pixels in longitude and latitude, north up, as PostGIS stores them (`raster`) and a load of an
- * elevation layer gives them.
+ * raster layer gives them.
  */
 namespace miniverse::geo {
 

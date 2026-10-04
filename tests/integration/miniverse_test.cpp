@@ -194,6 +194,17 @@ TEST_CASE("integration: create_tables makes the spatial index the loads use", "[
   CHECK(names == std::vector<std::string>{"miniverse_test_roads_geom_idx", "miniverse_test_roads_pkey"});
 }
 
+TEST_CASE("integration: a stream of roads hands the ways over a chunk at a time, ordered by id", "[integration]") {
+  Loaded loaded(test_db());
+
+  // On a pool thread, one call at a time: read here only once the future is done.
+  std::vector<std::vector<std::int64_t>> chunks;
+
+  loaded.world().stream<TestRoads>(EVERYWHERE, [&](const miniverse::Ways& chunk) { chunks.push_back(ids(chunk)); }, {.chunk_rows = 3}).get();
+
+  CHECK(chunks == std::vector<std::vector<std::int64_t>>{{1, 2, 3}, {4}});
+}
+
 TEST_CASE("integration: a load that fails reports why through its future", "[integration]") {
   Loaded loaded(test_db());
   World& world = loaded.world();

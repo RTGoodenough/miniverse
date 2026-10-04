@@ -34,8 +34,8 @@ namespace sch = schemacht::schema;
 
 namespace {
 
-struct TestElevation : miniverse::ElevationLayer<std::int16_t> {};
-struct FineElevation : miniverse::ElevationLayer<std::int16_t> {};
+struct TestElevation : miniverse::RasterLayer<std::int16_t> {};
+struct FineElevation : miniverse::RasterLayer<std::int16_t> {};
 
 using World = miniverse::Miniverse<TestElevation>;
 using Raster = geo::Raster<std::int16_t>;
@@ -188,6 +188,38 @@ TEST_CASE("integration: an elevation load inside one tile is widened to whole pi
   CHECK(heights.width == 2);
   CHECK(heights.height == 2);
   CHECK(heights.pixels == std::vector<std::int16_t>{101, 201, 102, 202});
+}
+
+TEST_CASE("integration: an elevation stream hands the tiles over whole, a chunk at a time", "[integration]") {
+  Tiled tiled(test_db());
+
+  // On a pool thread, one call at a time: read here only once the future is done.
+  std::vector<std::size_t> chunk_sizes;
+  std::vector<Raster>      tiles;
+
+  tiled.world()
+      .stream<TestElevation>(
+          polygon("POLYGON((0 0,2 0,2 2,0 2,0 0))"),
+          [&](std::vector<Raster> chunk) {
+            chunk_sizes.push_back(chunk.size());
+            tiles.insert(tiles.end(), chunk.begin(), chunk.end());
+          },
+          {.chunk_rows = 2}
+      )
+      .get();
+
+  CHECK(chunk_sizes == std::vector<std::size_t>{2, 1});  // the three tiles there are, two at a time
+  REQUIRE(tiles.size() == 3);
+  for ( const Raster& tile : tiles ) {
+    CHECK(tile.width == 4);
+    CHECK(tile.height == 4);
+
+    // Where the tile lies, in pixels from (0, 2): its first pixel is the one made there.
+    const auto column = static_cast<std::size_t>(tile.west * 4);
+    const auto row = static_cast<std::size_t>((2 - tile.north) * 4);
+    CHECK(tile.at(0, 0) == made(column, row));
+    CHECK(tile.at(3, 3) == made(column + 3, row + 3));
+  }
 }
 
 TEST_CASE("integration: an elevation load where there are no tiles is empty", "[integration]") {

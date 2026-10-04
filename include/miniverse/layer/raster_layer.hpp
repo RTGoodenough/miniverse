@@ -22,8 +22,8 @@
 
 namespace miniverse {
 
-/** @brief The columns of an elevation table, the same in every `ElevationLayer` but for the pixel type. */
-namespace elevation {
+/** @brief The columns of a raster table, the same in every `RasterLayer` but for the pixel type. */
+namespace raster {
 
 /**
  * Which tile of the grid a row is: `tile_row * tiles_across + tile_col`, where tiles are counted east from longitude -180
@@ -42,7 +42,7 @@ using Rast = schemacht::schema::Field<geo::Raster<pixel_t>, "rast">;
  * which the table's setup makes. A pixel with data in the new tile wins; one with no data there keeps the old pixel.
  *
  * The function is called by its full name, so a push finds it whatever its search path. It is one function in the schema
- * `miniverse_functions`, shared by every elevation table in the database, whatever their schemas: it takes nothing from a
+ * `miniverse_functions`, shared by every raster table in the database, whatever their schemas: it takes nothing from a
  * table. The schema is not named `miniverse`: a role of that name (`"$user"`, first on the default search path) would then
  * make every table it names without a schema in it, not in `public`.
  */
@@ -51,15 +51,15 @@ struct MergeRaster {
   static constexpr std::string_view FUNCTION = "miniverse_functions.merge_raster";
 };
 
-}  // namespace elevation
+}  // namespace raster
 
 /**
- * @brief The layer kind of elevation, or any other raster of one band of `pixel_t`: one row per tile of the table's grid
+ * @brief The layer kind of rasters of one band of `pixel_t`, such as elevation: one row per tile of the table's grid
  * (`geo::Grid`, its settings), which every source is warped onto. A load gives the pixels in the bounding box of the location,
  * from the tiles that cover it (see `from_rows`).
  *
  * @code
- * struct Elevation : miniverse::ElevationLayer<std::int16_t> {};
+ * struct Elevation : miniverse::RasterLayer<std::int16_t> {};
  *
  * miniverse::Miniverse world(conninfo, miniverse::Layer<Elevation>("elevation"));
  * world.create_table<Elevation>({.pixels_per_degree = 3600, .tile_pixels = 256, .nodata = -32768});  // once
@@ -72,11 +72,13 @@ struct MergeRaster {
  * another grid.
  */
 template <geo::Pixel pixel_t>
-struct ElevationLayer {
+struct RasterLayer {
   using result_type = geo::Raster<pixel_t>;
+  /// What a streamed load hands its callback: some of the tiles, each a raster of its own, since a window needs them all.
+  using chunk_type = std::vector<geo::Raster<pixel_t>>;
   using settings_type = geo::Grid<pixel_t>;
-  /// The table's layout. Its name, `elevation`, is only a placeholder: a layer names its own table (`Layer`).
-  using schema_type = schemacht::schema::Schema<"elevation", elevation::TileId, elevation::Rast<pixel_t>>;
+  /// The table's layout. Its name, `raster`, is only a placeholder: a layer names its own table (`Layer`).
+  using schema_type = schemacht::schema::Schema<"raster", raster::TileId, raster::Rast<pixel_t>>;
   using row_type = schema_type::row_type;
 
   /** @brief The tiles whose outline's box meets argument 0's box (the GiST index on `ST_ConvexHull(rast)` answers `&&`). */
@@ -104,12 +106,12 @@ struct ElevationLayer {
       schemacht::schema::Field<double, "nodata">>;
 
   /**
-   * @return The schema `miniverse_functions` and the function in it a push merges a tile with (`elevation::MergeRaster`), each made if
+   * @return The schema `miniverse_functions` and the function in it a push merges a tile with (`raster::MergeRaster`), each made if
    * missing; the table's spatial index; and its raster constraints, which record `grid` for `raster_columns` (and so GDAL):
    * SRID 4326, the pixel size, the tile size, alignment to the grid, one band of `pixel_t`, the nodata value, no out-db
    * bands, and an extent of the whole world (and a hair more, for rounding), so it never needs widening.
    *
-   * The function is replaced by every setup, and outlives a dropped table, as other elevation tables share it. The first
+   * The function is replaced by every setup, and outlives a dropped table, as other raster tables share it. The first
    * setup in a database makes the schema, which needs CREATE on the database; pushing needs USAGE on the schema
    * `miniverse_functions`. Two setups at once can conflict on it (`CREATE OR REPLACE FUNCTION` and `CREATE SCHEMA IF NOT
    * EXISTS` are not safe against each other): the second then fails, and can be run again.
@@ -126,9 +128,9 @@ struct ElevationLayer {
    */
   [[nodiscard]] static std::vector<std::vector<row_type>> to_rows(result_type raster, const settings_type& grid);
 
-  /** @return The write of `rows`: each tile is inserted, or merged onto the one already there (`elevation::MergeRaster`). */
+  /** @return The write of `rows`: each tile is inserted, or merged onto the one already there (`raster::MergeRaster`). */
   [[nodiscard]] static schemacht::postgres::SchemaStatement<schema_type, std::tuple<>> write_statement(const std::vector<row_type>& rows) {
-    return schemacht::postgres::upsert_statement<schema_type, schemacht::postgres::MergeWith<"rast", elevation::MergeRaster>>(rows);
+    return schemacht::postgres::upsert_statement<schema_type, schemacht::postgres::MergeWith<"rast", raster::MergeRaster>>(rows);
   }
 
   /**
@@ -139,17 +141,23 @@ struct ElevationLayer {
    */
   [[nodiscard]] static result_type from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location);
 
+  /**
+   * @return The tiles `rows`, each as it is stored, in no particular order: whole tiles, not cut to `location`'s box. A tile is
+   * megabytes, so stream them a few at a time (`Miniverse::stream`'s `read.chunk_rows`).
+   */
+  [[nodiscard]] static chunk_type chunk_from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& /*location*/);
+
   /** @throws std::runtime_error if the table has no grid in its constraints: it was not made by `create_table`. */
   [[nodiscard]] static settings_type settings_from_rows(std::vector<typename settings_statement_type::row_type> rows);
 };
 
-extern template struct ElevationLayer<std::int8_t>;
-extern template struct ElevationLayer<std::uint8_t>;
-extern template struct ElevationLayer<std::int16_t>;
-extern template struct ElevationLayer<std::uint16_t>;
-extern template struct ElevationLayer<std::int32_t>;
-extern template struct ElevationLayer<std::uint32_t>;
-extern template struct ElevationLayer<float>;
-extern template struct ElevationLayer<double>;
+extern template struct RasterLayer<std::int8_t>;
+extern template struct RasterLayer<std::uint8_t>;
+extern template struct RasterLayer<std::int16_t>;
+extern template struct RasterLayer<std::uint16_t>;
+extern template struct RasterLayer<std::int32_t>;
+extern template struct RasterLayer<std::uint32_t>;
+extern template struct RasterLayer<float>;
+extern template struct RasterLayer<double>;
 
 }  // namespace miniverse

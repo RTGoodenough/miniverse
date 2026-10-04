@@ -28,7 +28,7 @@
 
 /**
  * A miniverse: the layers of the world a worker reads, each a kind of data in its own PostGIS table, loaded by polygon.
- * This header holds the `Miniverse` alone; miniverse.hpp adds the built-in kinds (`RoadLayer`, `ElevationLayer`).
+ * This header holds the `Miniverse` alone; miniverse.hpp adds the built-in kinds (`FeatureLayer`, `RoadLayer`, `RasterLayer`).
  *
  * @code
  * struct Roads : miniverse::RoadLayer {};  // layer/road_layer.hpp
@@ -43,9 +43,10 @@
  * The kinds of layer are the template's arguments: asking for one the miniverse does not hold does not compile. Each layer
  * names its table when the miniverse is made, so one program serves whichever tables configuration names. The miniverse
  * owns one pool of connections (a schemacht `postgres::Database`) that every layer shares, and every call returns a
- * `std::future`, so a worker can start loading several layers at once and wait for them together. Errors, including one
- * from a kind's own conversions, arrive through the future, never as a throw from the call itself. The miniverse must outlive
- * the futures it hands out: wait on them before it is destroyed.
+ * `std::future`, so a worker can start loading several layers at once and wait for them together. A `load` gives the whole
+ * result; a `stream` hands it to a callback a chunk at a time, for a worker that builds a structure of its own from it.
+ * Errors, including one from a kind's own conversions, arrive through the future, never as a throw from the call itself. The
+ * miniverse must outlive the futures it hands out: wait on them before it is destroyed.
  */
 namespace miniverse {
 
@@ -88,6 +89,47 @@ class Miniverse {
   }
 
   /**
+   * @return A future that completes once what the layer `kind_t` holds in `location` has been handed to `on_chunk`, a chunk at a
+   * time, or `on_chunk` stopped it; or holds the error. Nothing holds the whole result, so a worker can build its own structure
+   * from a large area as the rows arrive.
+   *
+   * A chunk is what a load would give, of `read.chunk_rows` rows (the last of what is left), as `ChunkOf` says:
+   * - for a feature or road layer, that many features, in the load's order (by id);
+   * - for a raster layer, that many tiles, in no particular order, each whole: the tiles that meet `location`'s box, not cut
+   *   to it. A tile is megabytes, and about `chunk_rows` times `max_buffered_chunks` + 2 of them are held at once, so ask for a
+   *   few at a time.
+   *
+   * `on_chunk` is called with one chunk at a time, never from two threads at once, on a thread of the pool's, not the
+   * caller's. It returns `void`, or a `bool` where `false` stops the load, which is then cancelled. What it throws is the load's
+   * error; chunks it was handed before an error stay handed. It must not wait on another of this miniverse's futures.
+   */
+  template <LayerKind kind_t, ChunkCallback<kind_t> callback_t>
+  [[nodiscard]] std::future<void> stream(const geo::Polygon& location, callback_t on_chunk, const schemacht::postgres::ReadOptions& read) {
+    static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
+
+    return schemacht::util::future_from<void>([&](const schemacht::util::Settler<void>& done) {
+      guarded(done, [&] {
+        _database.stream_chunks(
+            kind_t::load_statement_type::bind(location).on(layer<kind_t>().table()),
+            [on_chunk = std::move(on_chunk), location](LoadedRows<kind_t>&& rows) mutable {
+              return on_chunk(chunk_of<kind_t>(std::move(rows), location));  // nothing, or whether it wants more
+            },
+            read, done
+        );
+      });
+    });
+  }
+
+  /**
+   * @brief As above, with chunks of the size the miniverse's pool reads by default (`Database::Options::read`): 1000 rows
+   * unless it was made with another, which suits features and is far too many for a raster's tiles.
+   */
+  template <LayerKind kind_t, ChunkCallback<kind_t> callback_t>
+  [[nodiscard]] std::future<void> stream(const geo::Polygon& location, callback_t on_chunk) {
+    return stream<kind_t>(location, std::move(on_chunk), _database.read_options());
+  }
+
+  /**
    * @return A future for the settings the layer `kind_t`'s table was made with (an elevation's grid), read from the database:
    * for a writer to warp its source onto before pushing. It holds the error instead if the table does not exist, or has no
    * settings (it was not made by `create_table`).
@@ -112,7 +154,7 @@ class Miniverse {
    * pool's connections until it ends (with one connection, nothing else runs during a push).
    *
    * The kind's `write_statement` says what happens to a row already there: a `RoadLayer`'s way fails the push, and an
-   * `ElevationLayer`'s tile is merged with it (new pixels win, and where the new tile has no data the old pixel stays). Pushes
+   * `RasterLayer`'s tile is merged with it (new pixels win, and where the new tile has no data the old pixel stays). Pushes
    * that overlap are merged in the order they commit: where both have data, the last to commit wins.
    */
   template <LayerKind kind_t>
@@ -224,6 +266,16 @@ class Miniverse {
   template <HasSettings kind_t>
   [[nodiscard]] auto settings_statement() const {
     return kind_t::settings_statement_type::bind(table_name<kind_t>().quoted());
+  }
+
+  /** @return What a streamed load of `kind_t` hands over for `rows`, one chunk's: the kind's own chunk, or its result of them. */
+  template <LayerKind kind_t>
+  [[nodiscard]] static ChunkOf<kind_t> chunk_of(LoadedRows<kind_t> rows, const geo::Polygon& location) {
+    if constexpr ( HasOwnChunks<kind_t> ) {
+      return kind_t::chunk_from_rows(std::move(rows), location);
+    } else {
+      return kind_t::from_rows(std::move(rows), location);
+    }
   }
 
   /** @brief A push's write while it runs: its batches, sent one statement at a time inside one transaction. */

@@ -12,6 +12,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
 
 option(MINIVERSE_INSTALL "Generate the install rules: the library, its headers and a CMake package (find_package(miniverse))" ${PROJECT_IS_TOP_LEVEL})
 option(MINIVERSE_BUILD_TESTS "Build the tests" ${PROJECT_IS_TOP_LEVEL})
+set(MINIVERSE_BUILD_GDAL "AUTO" CACHE STRING "Build miniverse::gdal, which reads files with GDAL: AUTO (if GDAL is found), ON or OFF")
+set_property(CACHE MINIVERSE_BUILD_GDAL PROPERTY STRINGS AUTO ON OFF)
 set(MINIVERSE_SCHEMACHT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../schemacht" CACHE PATH "schemacht's source tree, used when no installed schemacht is found")
 
 # ==============================================================================
@@ -41,7 +43,8 @@ add_library(
   STATIC
   src/geo/raster.cpp
   src/geo/wkb.cpp
-  src/layer/elevation_layer.cpp
+  src/layer/feature_layer.cpp
+  src/layer/raster_layer.cpp
   src/layer/road_layer.cpp
 )
 
@@ -59,6 +62,32 @@ add_library(miniverse::miniverse ALIAS miniverse)
 set_target_properties(miniverse PROPERTIES EXPORT_NAME miniverse)
 
 # ==============================================================================
+# Optional: miniverse::gdal, files read with GDAL
+# ==============================================================================
+# Its own library, so that the core never needs GDAL. Its headers are in include/miniverse/gdal.
+set(MINIVERSE_HAS_GDAL FALSE)
+string(TOUPPER "${MINIVERSE_BUILD_GDAL}" MINIVERSE_BUILD_GDAL_CHOICE)
+if(MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "ON")
+  find_package(GDAL CONFIG REQUIRED)
+elseif(MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "AUTO")
+  find_package(GDAL CONFIG QUIET)
+elseif(NOT MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "OFF")
+  message(FATAL_ERROR "MINIVERSE_BUILD_GDAL is '${MINIVERSE_BUILD_GDAL}': AUTO, ON or OFF")
+endif()
+
+# Not for OFF, even if a project around this one has found GDAL for itself.
+if(GDAL_FOUND AND NOT MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "OFF")
+  set(MINIVERSE_HAS_GDAL TRUE)
+
+  add_library(miniverse_gdal STATIC src/gdal/vector.cpp)
+  target_link_libraries(miniverse_gdal PUBLIC miniverse::miniverse PRIVATE GDAL::GDAL)
+
+  add_library(miniverse::gdal ALIAS miniverse_gdal)
+  set_target_properties(miniverse_gdal PROPERTIES EXPORT_NAME gdal)
+endif()
+message(STATUS "miniverse::gdal (MINIVERSE_BUILD_GDAL=${MINIVERSE_BUILD_GDAL}): ${MINIVERSE_HAS_GDAL}")
+
+# ==============================================================================
 # Tests
 # ==============================================================================
 if(MINIVERSE_BUILD_TESTS)
@@ -70,15 +99,22 @@ endif()
 # Install
 # ==============================================================================
 # `cmake --install <build> --prefix <dir>` puts under <dir>:
-#   lib/libminiverse.a        the library
+#   lib/libminiverse.a        the library (and lib/libminiverse_gdal.a, if built)
 #   include/miniverse/...     its headers
-#   lib/cmake/miniverse/      the package: find_package(miniverse) gives miniverse::miniverse
+#   lib/cmake/miniverse/      the package: find_package(miniverse) gives miniverse::miniverse (and miniverse::gdal, if built)
 if(MINIVERSE_INSTALL)
   set(MINIVERSE_INSTALL_CMAKEDIR ${CMAKE_INSTALL_LIBDIR}/cmake/miniverse)
 
   install(TARGETS miniverse EXPORT miniverse-targets ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  if(MINIVERSE_HAS_GDAL)
+    install(TARGETS miniverse_gdal EXPORT miniverse-targets ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  endif()
   install(EXPORT miniverse-targets NAMESPACE miniverse:: DESTINATION ${MINIVERSE_INSTALL_CMAKEDIR})
-  install(DIRECTORY include/miniverse DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} FILES_MATCHING PATTERN "*.hpp")
+  if(MINIVERSE_HAS_GDAL)
+    install(DIRECTORY include/miniverse DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} FILES_MATCHING PATTERN "*.hpp")
+  else()  # without the headers of a library that was not built
+    install(DIRECTORY include/miniverse DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} FILES_MATCHING PATTERN "*.hpp" PATTERN "gdal" EXCLUDE)
+  endif()
 
   configure_package_config_file(
     cmake/miniverse-config.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/miniverse-config.cmake

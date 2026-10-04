@@ -8,10 +8,16 @@
 
 struct Roads : miniverse::RoadLayer {};
 struct Tracks : miniverse::RoadLayer {};
-struct Elevation : miniverse::ElevationLayer<std::int16_t> {};
+struct Elevation : miniverse::RasterLayer<std::int16_t> {};
 
 #if defined(CASE_LOAD_LAYER_NOT_HELD)
 void load_tracks(miniverse::Miniverse<Roads>& world) { std::ignore = world.load<Tracks>(miniverse::geo::Polygon()); }
+#endif
+
+#if defined(CASE_STREAM_LAYER_NOT_HELD)
+void stream_tracks(miniverse::Miniverse<Roads>& world) {
+  std::ignore = world.stream<Tracks>(miniverse::geo::Polygon(), [](const miniverse::Ways& /*chunk*/) {});
+}
 #endif
 
 #if defined(CASE_PUSH_LAYER_NOT_HELD)

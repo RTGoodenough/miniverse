@@ -23,17 +23,30 @@ add_executable(
   unit/wkb_test.cpp
   unit/column_type_test.cpp
   unit/layer_test.cpp
+  unit/feature_layer_test.cpp
   unit/raster_test.cpp
-  unit/elevation_layer_test.cpp
+  unit/raster_layer_test.cpp
+  integration/feature_layer_test.cpp
   integration/geometry_test.cpp
   integration/miniverse_test.cpp
-  integration/elevation_test.cpp
+  integration/raster_layer_test.cpp
+  integration/stream_test.cpp
 )
 target_include_directories(miniverse_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miniverse_tests PRIVATE miniverse::miniverse Catch2::Catch2WithMain)
 # The integration tests share the test database's tables, so the tests run one at a time even under `ctest -j` (all of them:
 # the others take milliseconds, so they aren't worth discovering apart).
 catch_discover_tests(miniverse_tests PROPERTIES RESOURCE_LOCK miniverse_test_db)
+
+# ==============================================================================
+# miniverse::gdal, if it was built: its own executable, so the tests above stay free of GDAL
+# ==============================================================================
+if(TARGET miniverse_gdal)
+  add_executable(miniverse_gdal_tests gdal/vector_test.cpp)
+  target_include_directories(miniverse_gdal_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(miniverse_gdal_tests PRIVATE miniverse::gdal GDAL::GDAL Catch2::Catch2WithMain)
+  catch_discover_tests(miniverse_gdal_tests PROPERTIES RESOURCE_LOCK miniverse_test_db)
+endif()
 
 # ==============================================================================
 # Compile-fail tests
@@ -50,6 +63,7 @@ function(miniverse_compile_fail case regex)
 endfunction()
 
 miniverse_compile_fail(LOAD_LAYER_NOT_HELD "this miniverse has no such layer")
+miniverse_compile_fail(STREAM_LAYER_NOT_HELD "this miniverse has no such layer")
 miniverse_compile_fail(PUSH_LAYER_NOT_HELD "this miniverse has no such layer")
 miniverse_compile_fail(DUPLICATE_KIND "a miniverse holds one layer of each kind")
 miniverse_compile_fail(CREATE_TABLES_NEED_SETTINGS "call create_table<Kind>\\(settings\\) for it")

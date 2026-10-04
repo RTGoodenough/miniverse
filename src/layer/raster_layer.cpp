@@ -1,4 +1,4 @@
-#include "miniverse/layer/elevation_layer.hpp"
+#include "miniverse/layer/raster_layer.hpp"
 
 #include <boost/geometry/algorithms/envelope.hpp>  // IWYU pragma: keep
 #include <boost/geometry/geometries/box.hpp>
@@ -134,7 +134,7 @@ std::size_t paste(const geo::Raster<pixel_t>& source, PixelAt source_at, geo::Ra
 }  // namespace
 
 template <geo::Pixel pixel_t>
-std::vector<std::string> ElevationLayer<pixel_t>::setup_sql(const schemacht::schema::TableName& table, const settings_type& grid) {
+std::vector<std::string> RasterLayer<pixel_t>::setup_sql(const schemacht::schema::TableName& table, const settings_type& grid) {
   check_grid(grid);
 
   const std::int64_t ppd = grid.pixels_per_degree;
@@ -173,15 +173,15 @@ std::vector<std::string> ElevationLayer<pixel_t>::setup_sql(const schemacht::sch
   }
 
   return {
-      std::format("CREATE SCHEMA IF NOT EXISTS {}", elevation::MergeRaster::SCHEMA),
-      std::format("CREATE OR REPLACE FUNCTION {}{}", elevation::MergeRaster::FUNCTION, MERGE_FUNCTION_DEFINITION),
+      std::format("CREATE SCHEMA IF NOT EXISTS {}", raster::MergeRaster::SCHEMA),
+      std::format("CREATE OR REPLACE FUNCTION {}{}", raster::MergeRaster::FUNCTION, MERGE_FUNCTION_DEFINITION),
       "CREATE INDEX ON " + table.quoted() + " USING gist (ST_ConvexHull(rast))",
       std::move(alter),
   };
 }
 
 template <geo::Pixel pixel_t>
-std::vector<std::vector<typename ElevationLayer<pixel_t>::row_type>> ElevationLayer<pixel_t>::to_rows(result_type raster, const settings_type& grid) {
+std::vector<std::vector<typename RasterLayer<pixel_t>::row_type>> RasterLayer<pixel_t>::to_rows(result_type raster, const settings_type& grid) {
   check_grid(grid);  // the table's grid, as read back: cheap to check again
   raster.check_pixel_count();
 
@@ -242,7 +242,7 @@ std::vector<std::vector<typename ElevationLayer<pixel_t>::row_type>> ElevationLa
         batches.emplace_back();
       }
 
-      batches.back().emplace_back(elevation::TileId{(tile_row * tiles_across) + tile_column}, elevation::Rast<pixel_t>{std::move(cut)});
+      batches.back().emplace_back(raster::TileId{(tile_row * tiles_across) + tile_column}, raster::Rast<pixel_t>{std::move(cut)});
     }
   }
 
@@ -250,7 +250,7 @@ std::vector<std::vector<typename ElevationLayer<pixel_t>::row_type>> ElevationLa
 }
 
 template <geo::Pixel pixel_t>
-geo::Raster<pixel_t> ElevationLayer<pixel_t>::from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location) {
+geo::Raster<pixel_t> RasterLayer<pixel_t>::from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location) {
   // Boost declares return_envelope in a detail header; algorithms/envelope.hpp is the public one.
   const auto box = boost::geometry::return_envelope<boost::geometry::model::box<geo::Point>>(location);  // NOLINT(misc-include-cleaner)
 
@@ -295,7 +295,21 @@ geo::Raster<pixel_t> ElevationLayer<pixel_t>::from_rows(std::vector<typename loa
 }
 
 template <geo::Pixel pixel_t>
-geo::Grid<pixel_t> ElevationLayer<pixel_t>::settings_from_rows(std::vector<typename settings_statement_type::row_type> rows) {
+std::vector<geo::Raster<pixel_t>> RasterLayer<pixel_t>::chunk_from_rows(
+    std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& /*location*/
+) {
+  chunk_type tiles;
+
+  tiles.reserve(rows.size());
+  for ( auto& row : rows ) {
+    tiles.push_back(std::move(schemacht::schema::get<"rast">(row)));
+  }
+
+  return tiles;
+}
+
+template <geo::Pixel pixel_t>
+geo::Grid<pixel_t> RasterLayer<pixel_t>::settings_from_rows(std::vector<typename settings_statement_type::row_type> rows) {
   if ( rows.size() != 1 ) {
     throw std::runtime_error("the table has no grid in its raster constraints: make it with Miniverse::create_table");
   }
@@ -322,13 +336,13 @@ geo::Grid<pixel_t> ElevationLayer<pixel_t>::settings_from_rows(std::vector<typen
   };
 }
 
-template struct ElevationLayer<std::int8_t>;
-template struct ElevationLayer<std::uint8_t>;
-template struct ElevationLayer<std::int16_t>;
-template struct ElevationLayer<std::uint16_t>;
-template struct ElevationLayer<std::int32_t>;
-template struct ElevationLayer<std::uint32_t>;
-template struct ElevationLayer<float>;
-template struct ElevationLayer<double>;
+template struct RasterLayer<std::int8_t>;
+template struct RasterLayer<std::uint8_t>;
+template struct RasterLayer<std::int16_t>;
+template struct RasterLayer<std::uint16_t>;
+template struct RasterLayer<std::int32_t>;
+template struct RasterLayer<std::uint32_t>;
+template struct RasterLayer<float>;
+template struct RasterLayer<double>;
 
 }  // namespace miniverse
