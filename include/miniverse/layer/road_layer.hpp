@@ -28,7 +28,7 @@ struct Way {
   schemacht::json::Json     tags{"{}"};   ///< The way's tags, as one JSON object (`{"highway": "primary", ...}`): empty unless given.
 };
 
-/** @brief The roads a load gives, ordered by id. */
+/** @brief The roads a load gives: ordered by id from a table, and in a file's own order from a file. */
 using Ways = std::vector<Way>;
 
 /** @brief The columns of a road table, the same in every `RoadLayer`. */

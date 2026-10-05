@@ -20,3 +20,7 @@ endif()
 if(TARGET miniverse_osm)
   miniverse_example(import_osm miniverse::osm)
 endif()
+
+if(TARGET miniverse_gdal AND TARGET miniverse_osm)
+  miniverse_example(local_files miniverse::gdal miniverse::osm)
+endif()

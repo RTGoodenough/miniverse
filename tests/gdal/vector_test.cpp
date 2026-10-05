@@ -1,9 +1,10 @@
-// Vector files read with GDAL's OGR: features in WGS 84 with ids and tags, single geometries promoted to multi ones, and a file
-// pushed into a feature layer and loaded back.
+// Vector files read with GDAL's OGR: features in WGS 84 with ids and tags, single geometries promoted to multi ones, a file
+// pushed into a feature layer and loaded back, and a file as a layer itself, read by polygon as a table is.
 //
-// The files are GeoJSON written here as text, and a GeoPackage GDAL makes from one. The last test needs MINIVERSE_TEST_DB (a
-// libpq connection string to a scratch database with PostGIS), and is skipped without it.
+// The files are GeoJSON written here as text, and a GeoPackage GDAL makes from one. The tests named "integration" need
+// MINIVERSE_TEST_DB (a libpq connection string to a scratch database with PostGIS), and are skipped without it.
 
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -15,6 +16,7 @@
 #include <gdal.h>
 #include <gdal_utils.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -27,6 +29,7 @@
 
 #include "support/files.hpp"
 #include "miniverse/gdal/vector.hpp"
+#include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/miniverse.hpp"
 
 namespace bg = boost::geometry;
@@ -99,6 +102,91 @@ void to_geopackage(const std::string& from, const std::string& to) {
 }
 
 struct Buildings : miniverse::FeatureLayer<geo::MultiPolygon> {};
+struct Shops : miniverse::FeatureLayer<geo::Point> {};
+struct Paths : miniverse::FeatureLayer<geo::LineString> {};
+
+// Areas to tell locations apart by: a square with a hole; two triangles far from each other; a square whose ring runs
+// clockwise, as a shapefile's do; a small square; and one that only touches the corner of a location below.
+constexpr std::string_view AREAS = R"({"type": "FeatureCollection", "features": [
+  {"type": "Feature", "id": 5, "properties": {"name": "corner"},
+   "geometry": {"type": "Polygon", "coordinates": [[[-2, -2], [-1, -2], [-1, -1], [-2, -1], [-2, -2]]]}},
+  {"type": "Feature", "id": 1, "properties": {"name": "holed"},
+   "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]], [[1, 1], [1, 2], [2, 2], [2, 1], [1, 1]]]}},
+  {"type": "Feature", "id": 2, "properties": {"name": "triangles"},
+   "geometry": {"type": "MultiPolygon", "coordinates": [[[[10, 10], [11, 10], [11, 11], [10, 10]]], [[[20, 20], [21, 20], [21, 21], [20, 20]]]]}},
+  {"type": "Feature", "id": 3, "properties": {"name": "clockwise"},
+   "geometry": {"type": "Polygon", "coordinates": [[[6, 0], [6, 2], [8, 2], [8, 0], [6, 0]]]}},
+  {"type": "Feature", "id": 4, "properties": {"name": "small"},
+   "geometry": {"type": "Polygon", "coordinates": [[[4.5, 4.5], [5, 4.5], [5, 5], [4.5, 5], [4.5, 4.5]]]}}
+]})";
+
+// Lines: one across the origin's square, one whose box overlaps that square but which passes it by, and one far away.
+constexpr std::string_view TRACKS = R"({"type": "FeatureCollection", "features": [
+  {"type": "Feature", "id": 1, "properties": {}, "geometry": {"type": "LineString", "coordinates": [[-1, 0.5], [0.5, 0.5], [3, 2]]}},
+  {"type": "Feature", "id": 2, "properties": {}, "geometry": {"type": "LineString", "coordinates": [[0.5, 2], [2, 0.5]]}},
+  {"type": "Feature", "id": 3, "properties": {}, "geometry": {"type": "LineString", "coordinates": [[40, 40], [41, 41]]}}
+]})";
+
+// Two points in UTM zone 32 north (EPSG:32632), on its central meridian, longitude 9: half a metre north of latitude 50,
+// and half a metre south of it. In that system the parallel of 50 degrees is a curve that is furthest south just there.
+constexpr std::string_view BY_THE_PARALLEL = R"({"type": "FeatureCollection",
+  "crs": {"type": "name", "properties": {"name": "urn:ogc:def:crs:EPSG::32632"}}, "features": [
+  {"type": "Feature", "id": 1, "properties": {}, "geometry": {"type": "Point", "coordinates": [500000, 5538631.25879034]}},
+  {"type": "Feature", "id": 2, "properties": {}, "geometry": {"type": "Point", "coordinates": [500000, 5538630.14694461]}}
+]})";
+
+// The areas of AREAS' first two features, and a point among them: not an area at all.
+constexpr std::string_view AREAS_AND_A_POINT = R"({"type": "FeatureCollection", "features": [
+  {"type": "Feature", "id": 1, "properties": {},
+   "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [4, 0], [4, 4], [0, 4], [0, 0]]]}},
+  {"type": "Feature", "id": 2, "properties": {},
+   "geometry": {"type": "Polygon", "coordinates": [[[10, 10], [11, 10], [11, 11], [10, 10]]]}},
+  {"type": "Feature", "id": 9, "properties": {}, "geometry": {"type": "Point", "coordinates": [11.5, 11.5]}}
+]})";
+
+[[nodiscard]] geo::Polygon polygon(const std::string& wkt) { return bg::from_wkt<geo::Polygon>(wkt); }
+
+template <geo::wkb::Geometry geometry_t>
+[[nodiscard]] std::vector<std::int64_t> ids(const miniverse::Features<geometry_t>& features) {
+  std::vector<std::int64_t> result;
+  for ( const miniverse::Feature<geometry_t>& feature : features ) {
+    result.push_back(feature.id);
+  }
+
+  return result;
+}
+
+/**
+ * @brief Checks that the file at each of `sources` gives, for each of `locations`, the features a table gives that was
+ * pushed the first of them: the same ones, with the same geometries; the table's by id, the file's in its own order.
+ */
+template <gdal::FeatureKind kind_t>
+void check_loads_as_a_table(const std::string& table, const std::vector<gdal::VectorSource>& sources, const std::vector<geo::Polygon>& locations) {
+  using Geometry = gdal::GeometryOf<kind_t>;
+
+  miniverse::Miniverse<kind_t> tables(test_db(), miniverse::Layer<kind_t>(table));
+  tables.drop_tables();
+  tables.create_tables();
+  tables.template push<kind_t>(gdal::read_features<Geometry>(sources.front())).get();
+
+  for ( const gdal::VectorSource& source : sources ) {
+    miniverse::Miniverse<kind_t> files(gdal::feature_file<kind_t>(source));
+
+    for ( std::size_t i = 0; i < locations.size(); ++i ) {
+      INFO(source.path << ", location " << i << ": " << bg::to_wkt(locations.at(i)));
+      const miniverse::Features<Geometry> from_table = tables.template load<kind_t>(locations.at(i)).get();
+      miniverse::Features<Geometry>       from_file = files.template load<kind_t>(locations.at(i)).get();
+      std::ranges::sort(from_file, {}, &miniverse::Feature<Geometry>::id);
+
+      REQUIRE(ids(from_file) == ids(from_table));
+      for ( std::size_t feature = 0; feature < from_table.size(); ++feature ) {
+        CHECK(bg::to_wkt(from_file.at(feature).geometry) == bg::to_wkt(from_table.at(feature).geometry));
+      }
+    }
+  }
+
+  tables.drop_tables();
+}
 
 }  // namespace
 
@@ -338,4 +426,221 @@ TEST_CASE("integration: a file pushed in parts is written whole, or not at all",
   CHECK(after_all.size() == 2);
 
   world.drop_tables();
+}
+
+TEST_CASE("gdal: a file read by location gives the features that intersect it, in the file's order", "[gdal]") {
+  const Files              files;
+  const gdal::VectorSource source{.path = files.write("areas.geojson", AREAS), .layer = {}, .id_field = {}};
+  const auto               in = [&source](const std::string& wkt) {
+    miniverse::Features<geo::MultiPolygon> found;
+    std::ignore = gdal::read_features_in<geo::MultiPolygon>(source, polygon(wkt), 100, [&found](auto chunk) {
+      found = std::move(chunk);
+
+      return true;
+    });
+
+    return ids(found);
+  };
+
+  CHECK(in("POLYGON((-5 -5,30 -5,30 30,-5 30,-5 -5))") == std::vector<std::int64_t>{5, 1, 2, 3, 4});  // as the file has them, not by id
+  CHECK(in("POLYGON((-1 -1,5 -1,5 5,-1 5,-1 -1))") == std::vector<std::int64_t>{5, 1, 4});             // 5 by its corner alone
+  CHECK(in("POLYGON((1.4 1.4,1.6 1.4,1.6 1.6,1.4 1.6,1.4 1.4))").empty());                              // in the hole of 1
+  CHECK(in("POLYGON((10 10.5,10.3 10.5,10.3 10.9,10 10.9,10 10.5))").empty());                          // in the box of a triangle, beside it
+  CHECK(in("POLYGON((10.6 10,10.9 10,10.9 10.2,10.6 10.2,10.6 10))") == std::vector<std::int64_t>{2});
+  CHECK(in("POLYGON((6.5 0.5,7 0.5,7 1,6.5 1,6.5 0.5))") == std::vector<std::int64_t>{3});              // whichever way its ring runs
+  CHECK(in("POLYGON((50 50,51 50,51 51,50 51,50 50))").empty());
+  // A location with a hole of its own, which the small square lies in.
+  CHECK(in("POLYGON((3 3,9 3,9 9,3 9,3 3),(4.2 4.2,4.2 5.5,5.5 5.5,5.5 4.2,4.2 4.2))") == std::vector<std::int64_t>{1});
+}
+
+TEST_CASE("gdal: a read by location hands over chunks until its callback wants no more", "[gdal]") {
+  const Files              files;
+  const gdal::VectorSource source{.path = files.write("areas.geojson", AREAS), .layer = {}, .id_field = {}};
+  std::vector<std::size_t> sizes;
+
+  const gdal::VectorRead read = gdal::read_features_in<geo::MultiPolygon>(source, polygon("POLYGON((-5 -5,30 -5,30 30,-5 30,-5 -5))"), 2, [&sizes](auto chunk) {
+    sizes.push_back(chunk.size());
+
+    return sizes.size() < 2;
+  });
+
+  CHECK(sizes == std::vector<std::size_t>{2, 2});
+  CHECK(read.features == 4);
+}
+
+TEST_CASE("gdal: a file in another coordinate system is read by a location in WGS 84", "[gdal]") {
+  const Files              files;
+  const gdal::VectorSource source{.path = files.write("path.geojson", MERCATOR_PATH), .layer = {}, .id_field = {}};
+  const auto               count_in = [&source](const std::string& wkt) {
+    std::size_t found = 0;
+    std::ignore = gdal::read_features_in<geo::LineString>(source, polygon(wkt), 100, [&found](auto chunk) {
+      found = chunk.size();
+
+      return true;
+    });
+
+    return found;
+  };
+
+  CHECK(count_in("POLYGON((0.4 0.4,0.6 0.4,0.6 0.6,0.4 0.6,0.4 0.4))") == 1);  // the line runs from (0, 0) to (1, 1)
+  CHECK(count_in("POLYGON((0.6 0.1,0.9 0.1,0.9 0.4,0.6 0.4,0.6 0.1))") == 0);  // in its box, beside it
+  CHECK(count_in("POLYGON((2 2,3 2,3 3,2 3,2 2))") == 0);
+}
+
+TEST_CASE("gdal: a file as a layer is loaded, streamed and verified with no database", "[gdal]") {
+  const Files          files;
+  miniverse::Miniverse world(
+      gdal::feature_file<Buildings>({.path = files.write("areas.geojson", AREAS), .layer = {}, .id_field = {}}),
+      gdal::feature_file<Shops>({.path = files.write("shops.geojson", SHOPS), .layer = {}, .id_field = {}})
+  );
+  const geo::Polygon       near_origin = polygon("POLYGON((-1 -1,5 -1,5 5,-1 5,-1 -1))");
+  std::vector<std::size_t> sizes;
+
+  world.verify().get();
+  const auto buildings = world.load<Buildings>(near_origin).get();
+  const auto shops = world.load<Shops>(near_origin).get();
+  world.stream<Buildings>(near_origin, [&sizes](const miniverse::Features<geo::MultiPolygon>& chunk) { sizes.push_back(chunk.size()); }, {.chunk_rows = 2}).get();
+
+  CHECK(ids(buildings) == std::vector<std::int64_t>{5, 1, 4});
+  CHECK(buildings.at(1).tags.text() == R"({"name":"holed"})");
+  CHECK(ids(shops) == std::vector<std::int64_t>{1});
+  CHECK(sizes == std::vector<std::size_t>{2, 1});
+}
+
+TEST_CASE("gdal: verify says what keeps a file from being a layer", "[gdal]") {
+  const Files          files;
+  miniverse::Miniverse world(
+      gdal::feature_file<Buildings>({.path = files.write("tracks.geojson", TRACKS), .layer = {}, .id_field = {}}),
+      gdal::feature_file<Shops>({.path = files.path_of("missing.gpkg"), .layer = {}, .id_field = {}}),
+      gdal::feature_file<Paths>({.path = files.write("no_system.csv", NO_SYSTEM), .layer = {}, .id_field = {}})
+  );
+
+  try {
+    world.verify().get();
+    FAIL("it verified");
+  } catch ( const miniverse::TablesDiffer& differ ) {
+    REQUIRE(differ.differences().size() == 3);
+    CHECK_THAT(differ.differences().at(0), ContainsSubstring("tracks.geojson") && ContainsSubstring("are Line String, not MultiPolygon"));
+    CHECK_THAT(differ.differences().at(1), ContainsSubstring("missing.gpkg") && ContainsSubstring("can't be opened"));
+    CHECK_THAT(differ.differences().at(2), ContainsSubstring("no_system.csv") && ContainsSubstring("names no coordinate system"));
+  }
+
+  CHECK_THROWS_WITH(world.load<Shops>(polygon("POLYGON((0 0,1 0,1 1,0 0))")).get(), ContainsSubstring("can't be opened"));
+}
+
+TEST_CASE("integration: a file of polygons loads as the table it was pushed into, as GeoJSON and as a GeoPackage", "[gdal][integration]") {
+  const Files       files;
+  const std::string geojson = files.write("areas.geojson", AREAS);
+  const std::string geopackage = files.path_of("areas.gpkg");
+  to_geopackage(geojson, geopackage);
+
+  check_loads_as_a_table<Buildings>(
+      "miniverse_test_gdal_areas",
+      {{.path = geojson, .layer = {}, .id_field = {}}, {.path = geopackage, .layer = "buildings", .id_field = {}}},
+      {
+          polygon("POLYGON((-5 -5,30 -5,30 30,-5 30,-5 -5))"),
+          polygon("POLYGON((-1 -1,5 -1,5 5,-1 5,-1 -1))"),
+          polygon("POLYGON((1.4 1.4,1.6 1.4,1.6 1.6,1.4 1.6,1.4 1.4))"),
+          polygon("POLYGON((10 10.5,10.3 10.5,10.3 10.9,10 10.9,10 10.5))"),
+          polygon("POLYGON((10.6 10,10.9 10,10.9 10.2,10.6 10.2,10.6 10))"),
+          polygon("POLYGON((6.5 0.5,7 0.5,7 1,6.5 1,6.5 0.5))"),
+          polygon("POLYGON((9 9,12 9,9 12,9 9))"),
+          polygon("POLYGON((3 3,9 3,9 9,3 9,3 3),(4.2 4.2,4.2 5.5,5.5 5.5,5.5 4.2,4.2 4.2))"),
+          polygon("POLYGON((4 0,6 0,6 2,4 2,4 0))"),  // an edge of 1 on one side, an edge of 3 on the other
+          polygon("POLYGON((50 50,51 50,51 51,50 51,50 50))"),
+      }
+  );
+}
+
+TEST_CASE("integration: files of points and of lines load as the tables they were pushed into", "[gdal][integration]") {
+  const Files files;
+
+  check_loads_as_a_table<Shops>(
+      "miniverse_test_gdal_shops", {{.path = files.write("shops.geojson", SHOPS), .layer = {}, .id_field = {}}},
+      {
+          polygon("POLYGON((-10 -10,50 -10,50 50,-10 50,-10 -10))"),
+          polygon("POLYGON((1 2,2 2,2 3,1 3,1 2))"),
+          polygon("POLYGON((1.5 2.5,2 2.5,2 3,1.5 3,1.5 2.5))"),  // the first shop is its corner
+          polygon("POLYGON((6 7,8 7,8 9,6 9,6 7),(6.5 7.5,6.5 8.5,7.5 8.5,7.5 7.5,6.5 7.5))"),  // the third is in its hole
+      }
+  );
+  check_loads_as_a_table<Paths>(
+      "miniverse_test_gdal_tracks", {{.path = files.write("tracks.geojson", TRACKS), .layer = {}, .id_field = {}}},
+      {
+          polygon("POLYGON((-10 -10,50 -10,50 50,-10 50,-10 -10))"),
+          polygon("POLYGON((0 0,1 0,1 1,0 1,0 0))"),  // track 1 crosses it; track 2's box overlaps it, and it passes by
+          polygon("POLYGON((3 2,4 2,4 3,3 3,3 2))"),  // track 1 ends on its corner
+          polygon("POLYGON((39 39,42 39,42 42,39 42,39 39))"),
+      }
+  );
+}
+
+TEST_CASE("gdal: a location's edge is a curve in the file's own system, and a feature just inside it is still found", "[gdal]") {
+  const Files              files;
+  const gdal::VectorSource source{.path = files.write("by_the_parallel.geojson", BY_THE_PARALLEL), .layer = {}, .id_field = {}};
+  miniverse::Features<geo::Point> found;
+
+  // From longitude 8 to 10.1, its south edge the parallel of 50 degrees: straight here, and bowed in the file's system.
+  std::ignore = gdal::read_features_in<geo::Point>(source, polygon("POLYGON((8 50,10.1 50,10.1 51,8 51,8 50))"), 100, [&found](auto chunk) {
+    found = std::move(chunk);
+
+    return true;
+  });
+
+  CHECK(ids(found) == std::vector<std::int64_t>{1});
+}
+
+TEST_CASE("gdal: only a feature in the location must be of the type asked for", "[gdal]") {
+  const Files              files;
+  const gdal::VectorSource source{.path = files.write("mixed.geojson", AREAS_AND_A_POINT), .layer = {}, .id_field = {}};
+  const auto               areas_in = [&source](const std::string& wkt) {
+    miniverse::Features<geo::MultiPolygon> found;
+    std::ignore = gdal::read_features_in<geo::MultiPolygon>(source, polygon(wkt), 100, [&found](auto chunk) {
+      found = std::move(chunk);
+
+      return true;
+    });
+
+    return ids(found);
+  };
+
+  // The point is in the box of this triangle, and beside it.
+  CHECK(areas_in("POLYGON((9 9,12 9,9 12,9 9))") == std::vector<std::int64_t>{2});
+  CHECK_THROWS_WITH(areas_in("POLYGON((9 9,12 9,12 12,9 12,9 9))"), ContainsSubstring("feature 9") && ContainsSubstring("not a MultiPolygon"));
+}
+
+TEST_CASE("gdal: a read by location gives the same features whatever the size of its chunks", "[gdal]") {
+  const Files              files;
+  const gdal::VectorSource source{.path = files.write("areas.geojson", AREAS), .layer = {}, .id_field = {}};
+  const auto               in_chunks_of = [&source](std::size_t chunk_features) {
+    std::vector<std::int64_t> found;
+    std::ignore = gdal::read_features_in<geo::MultiPolygon>(source, polygon("POLYGON((-5 -5,30 -5,30 30,-5 30,-5 -5))"), chunk_features, [&found](auto chunk) {
+      for ( const auto& feature : chunk ) {
+        found.push_back(feature.id);
+      }
+
+      return true;
+    });
+
+    return found;
+  };
+
+  CHECK(in_chunks_of(1) == std::vector<std::int64_t>{5, 1, 2, 3, 4});
+  CHECK(in_chunks_of(2) == in_chunks_of(1));
+  CHECK(in_chunks_of(5) == in_chunks_of(1));  // the last chunk full: no empty one after it
+  CHECK(in_chunks_of(100) == in_chunks_of(1));
+}
+
+TEST_CASE("integration: a file in another coordinate system loads as the table it was pushed into", "[gdal][integration]") {
+  const Files files;
+
+  check_loads_as_a_table<Shops>(
+      "miniverse_test_gdal_shops", {{.path = files.write("by_the_parallel.geojson", BY_THE_PARALLEL), .layer = {}, .id_field = {}}},
+      {
+          polygon("POLYGON((8 50,10.1 50,10.1 51,8 51,8 50))"),   // its south edge between the two points
+          polygon("POLYGON((8 49,10.1 49,10.1 50,8 50,8 49))"),   // its north edge there
+          polygon("POLYGON((8 49,10.1 49,10.1 51,8 51,8 49))"),
+          polygon("POLYGON((20 49,21 49,21 51,20 51,20 49))"),    // in the next zones: far from the file
+      }
+  );
 }

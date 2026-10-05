@@ -26,6 +26,7 @@ add_executable(
   unit/feature_layer_test.cpp
   unit/raster_test.cpp
   unit/raster_layer_test.cpp
+  unit/reader_test.cpp
   integration/feature_layer_test.cpp
   integration/geometry_test.cpp
   integration/miniverse_test.cpp
@@ -67,7 +68,7 @@ endif()
 # Skipped, as the integration tests are, unless MINIVERSE_TEST_DB is set. Each makes and drops its own tables
 # (miniverse_example_*), but they take the integration tests' lock all the same: a raster example pushes with the merge
 # function that a raster test drops.
-foreach(example features road_network elevation own_kind import_vector import_raster import_osm)
+foreach(example features road_network elevation own_kind import_vector import_raster import_osm local_files)
   if(TARGET miniverse_example_${example})
     add_test(NAME example.${example} COMMAND ${CMAKE_COMMAND} -DEXAMPLE=$<TARGET_FILE:miniverse_example_${example}> -P
                                              ${CMAKE_CURRENT_SOURCE_DIR}/run_example.cmake)

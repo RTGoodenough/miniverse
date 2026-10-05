@@ -29,7 +29,7 @@ struct Feature {
   schemacht::json::Json tags{"{}"};  ///< What it is, as one JSON object (`{"building": "yes", ...}`): empty unless given.
 };
 
-/** @brief The features a load gives, ordered by id. */
+/** @brief The features a load gives: ordered by id from a table, and in a file's own order from a file. */
 template <geo::wkb::Geometry geometry_t>
 using Features = std::vector<Feature<geometry_t>>;
 

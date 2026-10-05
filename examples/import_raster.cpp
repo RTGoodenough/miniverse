@@ -11,6 +11,7 @@
 // setup also makes the schema miniverse_functions, which every raster table of the database shares, and which stays.
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
@@ -31,13 +32,14 @@ int main(int argc, char** argv) {
   try {
     miniverse::Miniverse world(example::conninfo(argc, argv), miniverse::Layer<Elevation>("miniverse_example_heights"));
 
-    // The table's grid, chosen once: 16 pixels to a degree, in tiles of half a degree. Every file is warped onto it,
-    // whatever its own pixels, so files of different sources lie pixel on pixel.
+    // The table's grid, chosen once: about 7 km to a pixel, which is 16 pixels to a degree, the nearest whole number, in
+    // tiles of 8 pixels. Every file is warped onto it, whatever its own pixels, so files of different sources lie pixel on pixel.
     world.drop_tables();
-    world.create_table<Elevation>({.pixels_per_degree = 16, .tile_pixels = 8, .nodata = -32768});
+    world.create_table<Elevation>({.pixels_per_degree = geo::pixels_per_degree_of_metres(7000), .tile_pixels = 8, .nodata = -32768});
 
     // A writer that did not make the table asks it for its grid.
     const geo::Grid<std::int16_t> grid = world.table_settings<Elevation>().get();
+    std::cout << "the table's grid: " << grid.pixels_per_degree << " pixels to a degree, " << std::lround(grid.metres_per_pixel()) << " m each\n";
 
     // One transaction for the whole file, in windows of 2 by 2 tiles. Each window is waited for before the next is read.
     miniverse::PushInParts<Elevation> heights = world.begin_push<Elevation>().get();

@@ -12,6 +12,7 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -32,10 +33,6 @@ constexpr double NORTH = geo::GRID_NORTH;
 using geo::DEGREES_ACROSS;
 using geo::DEGREES_DOWN;
 
-constexpr std::int32_t MAX_TILE_PIXELS = std::numeric_limits<std::uint16_t>::max();  // raster WKB's width and height
-
-// raster_columns gives the pixel size rounded to 10 places, from which a finer grid can't be told apart: 0.1 arc seconds.
-constexpr std::int32_t MAX_PIXELS_PER_DEGREE = 36000;
 
 // How far the extent constraint reaches past the grid's own edge, in degrees. A tile's far edge, computed in floating point as
 // its corner plus its width, can land a rounding step past the edge, and the constraint would then refuse it.
@@ -51,6 +48,12 @@ constexpr double PIXELS_PER_DEGREE_TOLERANCE = 0.25;
 // Taken first by every setup, and held until its transaction ends: PostgreSQL lets no two transactions make one schema, or
 // replace one function, at the same time (the second fails), so setups take turns. The key is the schema's name, hashed.
 constexpr std::string_view SETUP_LOCK = "DO $$ BEGIN PERFORM pg_advisory_xact_lock(hashtext('miniverse_functions')); END $$";
+
+// How a tile's bytes are compressed where they are stored. pglz, which a server uses unless its `default_toast_compression`
+// says otherwise, makes 16-bit heights a little smaller than lz4 does, but they then load some 75% slower than uncompressed,
+// where lz4 costs some 10% for half the size (measured 2026-10-04 on USGS 30 m tiles). Set before any tile is written: it
+// applies to values stored from then on.
+constexpr std::string_view TILE_COMPRESSION = "lz4";
 
 // The tile `incoming` merged onto `current`, two tiles of one grid position: a pixel with data in `incoming` wins, and one with
 // no data there keeps `current`'s. ST_Union's LAST runs in C: about 4 times as fast as an ST_MapAlgebra expression on a tile
@@ -88,23 +91,6 @@ struct PixelAt {
 /** @return `value` as the shortest decimal that reads back as the same `double`. */
 [[nodiscard]] std::string decimal(double value) { return std::format("{}", value); }
 
-template <geo::Pixel pixel_t>
-void check_grid(const geo::Grid<pixel_t>& grid) {
-  if ( grid.pixels_per_degree < 1 || grid.pixels_per_degree > MAX_PIXELS_PER_DEGREE ) {
-    throw std::invalid_argument("a grid has 1 to 36000 pixels per degree, not " + std::to_string(grid.pixels_per_degree));
-  }
-
-  if ( grid.tile_pixels < 1 || grid.tile_pixels > MAX_TILE_PIXELS ) {
-    throw std::invalid_argument("a grid's tiles are 1 to 65535 pixels a side, not " + std::to_string(grid.tile_pixels));
-  }
-
-  if constexpr ( std::floating_point<pixel_t> ) {
-    if ( ! std::isfinite(grid.nodata) ) {
-      throw std::invalid_argument("a grid's nodata value must be a finite number");
-    }
-  }
-}
-
 /**
  * @brief Copies the pixels of `source` that have data into `target`, where they overlap: `source` at `source_at` and
  * `target` at `target_at` in one frame of pixels.
@@ -139,7 +125,7 @@ std::size_t paste(const geo::Raster<pixel_t>& source, PixelAt source_at, geo::Ra
 
 template <geo::Pixel pixel_t>
 std::vector<std::string> RasterLayer<pixel_t>::setup_sql(const schemacht::schema::TableName& table, const settings_type& grid) {
-  check_grid(grid);
+  geo::check_grid(grid);
 
   const std::int64_t ppd = grid.pixels_per_degree;
   const std::int64_t tile = grid.tile_pixels;
@@ -180,6 +166,7 @@ std::vector<std::string> RasterLayer<pixel_t>::setup_sql(const schemacht::schema
       std::string(SETUP_LOCK),
       std::format("CREATE SCHEMA IF NOT EXISTS {}", raster::MergeRaster::SCHEMA),
       std::format("CREATE OR REPLACE FUNCTION {}{}", raster::MergeRaster::FUNCTION, MERGE_FUNCTION_DEFINITION),
+      std::format("ALTER TABLE {} ALTER COLUMN rast SET COMPRESSION {}", table.quoted(), TILE_COMPRESSION),
       "CREATE INDEX ON " + table.quoted() + " USING gist (ST_ConvexHull(rast))",
       std::move(alter),
   };
@@ -187,7 +174,7 @@ std::vector<std::string> RasterLayer<pixel_t>::setup_sql(const schemacht::schema
 
 template <geo::Pixel pixel_t>
 std::vector<std::vector<typename RasterLayer<pixel_t>::row_type>> RasterLayer<pixel_t>::to_rows(result_type raster, const settings_type& grid) {
-  check_grid(grid);  // the table's grid, as read back: cheap to check again
+  geo::check_grid(grid);  // the table's grid, as read back: cheap to check again
   raster.check_pixel_count();
 
   // A pixel equal to the grid's nodata would be written as having no data, so it would be lost.
@@ -256,21 +243,31 @@ std::vector<std::vector<typename RasterLayer<pixel_t>::row_type>> RasterLayer<pi
 
 template <geo::Pixel pixel_t>
 geo::Raster<pixel_t> RasterLayer<pixel_t>::from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location) {
+  return window(chunk_from_rows(std::move(rows), location), location);
+}
+
+template <geo::Pixel pixel_t>
+geo::Raster<pixel_t> RasterLayer<pixel_t>::window(std::span<const geo::Raster<pixel_t>> tiles, const geo::Polygon& location) {
   // Boost declares return_envelope in a detail header; algorithms/envelope.hpp is the public one.
   const auto box = boost::geometry::return_envelope<boost::geometry::model::box<geo::Point>>(location);  // NOLINT(misc-include-cleaner)
 
-  if ( rows.empty() || box.min_corner().x() > box.max_corner().x() ) {
+  if ( tiles.empty() || box.min_corner().x() > box.max_corner().x() ) {
     return {};
   }
 
+  if ( ! std::isfinite(box.min_corner().x()) || ! std::isfinite(box.min_corner().y()) || ! std::isfinite(box.max_corner().x()) ||
+       ! std::isfinite(box.max_corner().y()) ) {
+    throw std::invalid_argument("the coordinates of a location must be finite numbers");
+  }
+
   // The window, in pixels of the first tile's frame: the box, widened to whole pixels, and at least one pixel each way.
-  const geo::Raster<pixel_t>& first = schemacht::schema::get<"rast">(rows.front());
+  const geo::Raster<pixel_t>& first = tiles.front();
   const std::int64_t          west = floor_snapped((box.min_corner().x() - first.west) / first.pixel_width);
   const std::int64_t          east = std::max(ceil_snapped((box.max_corner().x() - first.west) / first.pixel_width), west + 1);
   const std::int64_t          north = floor_snapped((first.north - box.max_corner().y()) / first.pixel_height);
   const std::int64_t          south = std::max(ceil_snapped((first.north - box.min_corner().y()) / first.pixel_height), north + 1);
 
-  geo::Raster<pixel_t> window{
+  geo::Raster<pixel_t> cut{
       .west = first.west + (static_cast<double>(west) * first.pixel_width),
       .north = first.north - (static_cast<double>(north) * first.pixel_height),
       .pixel_width = first.pixel_width,
@@ -281,8 +278,7 @@ geo::Raster<pixel_t> RasterLayer<pixel_t>::from_rows(std::vector<typename load_s
       .pixels = std::vector<pixel_t>(static_cast<std::size_t>((east - west) * (south - north)), first.nodata),
   };
 
-  for ( const auto& row : rows ) {
-    const geo::Raster<pixel_t>& tile = schemacht::schema::get<"rast">(row);
+  for ( const geo::Raster<pixel_t>& tile : tiles ) {
     if ( ! same_size(tile.pixel_width, first.pixel_width) || ! same_size(tile.pixel_height, first.pixel_height) || tile.nodata != first.nodata ) {
       throw std::invalid_argument("the tiles loaded don't share a pixel size and a nodata value");
     }
@@ -293,21 +289,37 @@ geo::Raster<pixel_t> RasterLayer<pixel_t>::from_rows(std::vector<typename load_s
       throw std::invalid_argument("the tiles loaded are not aligned to one grid of pixels");
     }
 
-    paste(tile, PixelAt{.column = *column, .row = *tile_row}, window, PixelAt{.column = west, .row = north});
+    paste(tile, PixelAt{.column = *column, .row = *tile_row}, cut, PixelAt{.column = west, .row = north});
   }
 
-  return window;
+  return cut;
 }
 
 template <geo::Pixel pixel_t>
 std::vector<geo::Raster<pixel_t>> RasterLayer<pixel_t>::chunk_from_rows(
-    std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& /*location*/
+    std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location
 ) {
+  // The index that answers the load compares boxes rounded outward to single precision, so it finds a tile that ends a hair
+  // short of the location's box too. Only the tiles the box does meet, as whole numbers say, are the location's: touching counts.
+  const auto box = boost::geometry::return_envelope<boost::geometry::model::box<geo::Point>>(location);  // NOLINT(misc-include-cleaner)
+  const auto meets = [&box](const geo::Raster<pixel_t>& tile) {
+    // A box that ends on a tile's edge touches the tile, though the edge, worked out in degrees, may come a rounding step
+    // short of it: so touching is told in tiles, to a billionth of one, which is far finer than the index rounds.
+    constexpr double TOUCHING = -1e-9;
+    const double     across = static_cast<double>(tile.width) * tile.pixel_width;
+    const double     down = static_cast<double>(tile.height) * tile.pixel_height;
+
+    return (box.max_corner().x() - tile.west) / across >= TOUCHING && ((tile.west + across) - box.min_corner().x()) / across >= TOUCHING &&
+           (box.max_corner().y() - (tile.north - down)) / down >= TOUCHING && (tile.north - box.min_corner().y()) / down >= TOUCHING;
+  };
+
   chunk_type tiles;
 
   tiles.reserve(rows.size());
   for ( auto& row : rows ) {
-    tiles.push_back(std::move(schemacht::schema::get<"rast">(row)));
+    if ( geo::Raster<pixel_t>& tile = schemacht::schema::get<"rast">(row); meets(tile) ) {
+      tiles.push_back(std::move(tile));
+    }
   }
 
   return tiles;

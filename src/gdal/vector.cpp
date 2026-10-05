@@ -4,6 +4,7 @@
 #include <cpl_json.h>
 #include <gdal.h>
 #include <gdal_priv.h>
+#include <ogr_api.h>
 #include <ogr_core.h>
 #include <ogr_feature.h>
 #include <ogr_geometry.h>
@@ -11,16 +12,19 @@
 #include <ogr_srs_api.h>
 #include <ogrsf_frmts.h>
 
+#include <algorithm>
 #include <cmath>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -262,74 +266,201 @@ template <geo::wkb::Geometry geometry_t>
   return nullptr;
 }
 
-/** @return The geometry of `feature` as a `geometry_t` in WGS 84; `stolen` is the feature's own, taken from it. */
-template <geo::wkb::Geometry geometry_t>
-[[nodiscard]] geometry_t geometry_of(
+/**
+ * @return The geometry of `feature` in WGS 84, flat and with its arcs as lines, of whatever type it is; `stolen` is the
+ * feature's own, taken from it.
+ */
+[[nodiscard]] std::unique_ptr<OGRGeometry> in_wgs84(
     std::unique_ptr<OGRGeometry> stolen, const OGRFeature& feature, OGRCoordinateTransformation& to_wgs84, const VectorSource& source
 ) {
   stolen->flattenTo2D();
+  if ( stolen->hasCurveGeometry() ) {
+    stolen.reset(stolen->getLinearGeometry());
+  }
 
-  const std::string                  found = stolen->getGeometryName();
-  const std::unique_ptr<OGRGeometry> geometry = as_type(std::move(stolen), ogr_type<geometry_t>());
-  if ( ! geometry ) {
+  if ( stolen->transform(&to_wgs84) != OGRERR_NONE ) {
+    fail("feature " + std::to_string(feature.GetFID()) + " of '" + source.path + "' can't be transformed to WGS 84");
+  }
+
+  return stolen;
+}
+
+/** @return `geometry`, the one of `feature`, as a `geometry_t`. */
+template <geo::wkb::Geometry geometry_t>
+[[nodiscard]] geometry_t of_type(std::unique_ptr<OGRGeometry> geometry, const OGRFeature& feature, const VectorSource& source) {
+  const std::string                  found = geometry->getGeometryName();
+  const std::unique_ptr<OGRGeometry> typed = as_type(std::move(geometry), ogr_type<geometry_t>());
+  if ( ! typed ) {
     throw std::runtime_error(
         "feature " + std::to_string(feature.GetFID()) + " of '" + source.path + "' is a " + found + " that is not a " +
         std::string(geo::wkb::type_name<geometry_t>().view())
     );
   }
 
-  if ( geometry->transform(&to_wgs84) != OGRERR_NONE ) {
-    fail("feature " + std::to_string(feature.GetFID()) + " of '" + source.path + "' can't be transformed to WGS 84");
-  }
-
-  return converted<geometry_t>(*geometry);
+  return converted<geometry_t>(*typed);
 }
 
-}  // namespace
+/** @return `source`'s file, opened for reading its features. */
+[[nodiscard]] GDALDatasetUniquePtr opened(const VectorSource& source) {
+  register_drivers();
 
+  GDALDatasetUniquePtr dataset(GDALDataset::Open(source.path.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR));
+  if ( ! dataset ) {
+    fail("'" + source.path + "' can't be opened as a vector file");
+  }
+
+  return dataset;
+}
+
+/** @return `polygon` as OGR has it, its rings closed. */
+[[nodiscard]] OGRPolygon ogr_polygon_of(const geo::Polygon& polygon) {
+  const auto ring_of = [](const auto& points) {
+    auto ring = std::make_unique<OGRLinearRing>();
+    for ( const geo::Point& point : points ) {
+      ring->addPoint(point.x(), point.y());
+    }
+    ring->closeRings();
+
+    return ring;
+  };
+
+  OGRPolygon made;
+  made.addRingDirectly(ring_of(polygon.outer()).release());
+  for ( const auto& hole : polygon.inners() ) {
+    made.addRingDirectly(ring_of(hole).release());
+  }
+
+  return made;
+}
+
+/**
+ * @brief Has `layer` read only the features whose boxes meet the box of `location`, a polygon in WGS 84, as that box lies in
+ * the layer's own coordinate system, and a little more: what its spatial index answers. The box's straight edges are curves
+ * there, found by points along them, so the box is widened by a hundredth each way to hold what bulges between the points:
+ * the test of each feature decides, and this only spares it features far off. If the box can't be placed there (the
+ * location is partly outside what the system covers), every feature is read.
+ */
+void narrow_to(OGRLayer& layer, const OGRPolygon& location, OGRCoordinateTransformation& to_wgs84) {
+  constexpr int    POINTS_ALONG_AN_EDGE = 21;
+  constexpr double WIDER_BY = 0.01;        // of the box's own size, each way
+  constexpr double AND_AT_LEAST = 1e-7;    // of how far from the origin it lies: a location of one point has no size
+
+  OGREnvelope box;
+  location.getEnvelope(&box);
+
+  double                                             west = 0;
+  double                                             south = 0;
+  double                                             east = 0;
+  double                                             north = 0;
+  const std::unique_ptr<OGRCoordinateTransformation> from_wgs84(to_wgs84.GetInverse());
+  if ( from_wgs84 && from_wgs84->TransformBounds(box.MinX, box.MinY, box.MaxX, box.MaxY, &west, &south, &east, &north, POINTS_ALONG_AN_EDGE) != 0 &&
+       std::isfinite(west) && std::isfinite(south) && std::isfinite(east) && std::isfinite(north) && west <= east && south <= north ) {
+    const double far = std::max({std::abs(west), std::abs(east), std::abs(south), std::abs(north), 1.0}) * AND_AT_LEAST;
+    const double across = ((east - west) * WIDER_BY) + far;
+    const double down = ((north - south) * WIDER_BY) + far;
+    layer.SetSpatialFilterRect(west - across, south - down, east + across, north + down);
+  }
+
+  CPLErrorReset();  // a box that could not be placed is not the read's error
+}
+
+/** @brief Throws unless GDAL can test whether two geometries intersect: without GEOS it would compare their boxes, and say nothing. */
+void need_geos() {
+  if ( ! OGRGeometryFactory::haveGEOS() ) {
+    throw std::runtime_error("this GDAL was built without GEOS, so it can't tell which features intersect a location");
+  }
+}
+
+/** @brief A location as GEOS has it, made ready once for the test of every feature. */
+using Prepared = std::unique_ptr<std::remove_pointer_t<OGRPreparedGeometryH>, void (*)(OGRPreparedGeometryH)>;
+
+/** @return `location`, a polygon in WGS 84, ready to test features against; `layer` reads only the features near it from here on. */
+[[nodiscard]] Prepared narrowed_to(OGRLayer& layer, const geo::Polygon& location, OGRCoordinateTransformation& to_wgs84, const VectorSource& source) {
+  need_geos();
+
+  OGRPolygon polygon = ogr_polygon_of(location);
+  narrow_to(layer, polygon, to_wgs84);
+
+  Prepared within(OGRCreatePreparedGeometry(OGRGeometry::ToHandle(&polygon)), OGRDestroyPreparedGeometry);
+  if ( ! within ) {
+    fail("the location can't be tested against the features of '" + source.path + "'");
+  }
+
+  return within;
+}
+
+/** @return Whether `geometry`, the one of `feature` in WGS 84, intersects the location `within`. */
+[[nodiscard]] bool intersects(std::remove_pointer_t<OGRPreparedGeometryH>& within, OGRGeometry& geometry, const OGRFeature& feature, const VectorSource& source) {
+  const bool found = OGRPreparedGeometryIntersects(&within, OGRGeometry::ToHandle(&geometry)) != 0;
+  if ( CPLGetLastErrorType() == CE_Failure ) {
+    fail("feature " + std::to_string(feature.GetFID()) + " of '" + source.path + "' can't be tested against the location");
+  }
+
+  return found;
+}
+
+/**
+ * @brief Reads `source`'s features, those that intersect `location` if there is one, and hands them to `on_chunk`,
+ * `chunk_features` at a time, until it returns `false`: what `read_features` and `read_features_in` do.
+ */
 template <geo::wkb::Geometry geometry_t>
-VectorRead read_features(const VectorSource& source, std::size_t chunk_features, const std::function<void(Features<geometry_t>)>& on_chunk) {
+VectorRead read_matching(
+    const VectorSource& source, const geo::Polygon* location, std::size_t chunk_features, const std::function<bool(Features<geometry_t>)>& on_chunk
+) {
   if ( chunk_features == 0 ) {
     throw std::invalid_argument("a chunk of features holds at least one");
   }
 
-  register_drivers();
-  const QuietErrors quiet;
-
-  const GDALDatasetUniquePtr dataset(GDALDataset::Open(source.path.c_str(), GDAL_OF_VECTOR | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR));
-  if ( ! dataset ) {
-    fail("'" + source.path + "' can't be opened as a vector file");
-  }
+  const QuietErrors          quiet;
+  const GDALDatasetUniquePtr dataset = opened(source);
 
   OGRLayer&  layer = layer_of(*dataset, source);
   const int  id_field = id_field_of(layer, source);
   const auto to_wgs84 = to_wgs84_from(layer, source);
 
+  if ( location != nullptr && location->outer().empty() ) {
+    return {};  // nothing is in a location of no points
+  }
+
+  const Prepared within = location != nullptr ? narrowed_to(layer, *location, *to_wgs84, source) : Prepared(nullptr, OGRDestroyPreparedGeometry);
+
   VectorRead           read;
   Features<geometry_t> chunk;
 
-  // From here on, GDAL's last error is this read's own: opening and `on_chunk` may each have left one that is not.
   layer.ResetReading();
-  CPLErrorReset();
-  while ( const OGRFeatureUniquePtr feature{layer.GetNextFeature()} ) {
-    std::unique_ptr<OGRGeometry> geometry(feature->StealGeometry());
-    if ( ! geometry || geometry->IsEmpty() ) {
-      ++read.without_geometry;
+  for ( ;; ) {
+    // From here, GDAL's last error is this feature's own: not one that opening, an earlier feature or `on_chunk` left.
+    CPLErrorReset();
+    const OGRFeatureUniquePtr feature{layer.GetNextFeature()};
+    if ( ! feature ) {
+      break;
+    }
+
+    std::unique_ptr<OGRGeometry> stolen(feature->StealGeometry());
+    if ( ! stolen || stolen->IsEmpty() ) {
+      if ( location == nullptr ) {
+        ++read.without_geometry;  // with a location, one that is nowhere is merely not in it
+      }
+
       continue;
+    }
+
+    std::unique_ptr<OGRGeometry> geometry = in_wgs84(std::move(stolen), *feature, *to_wgs84, source);
+    if ( within && ! intersects(*within, *geometry, *feature, source) ) {
+      continue;  // whatever type it is: only a feature in the location must be a `geometry_t`
     }
 
     chunk.push_back(
         Feature<geometry_t>{
             .id = id_of(*feature, id_field, source),
-            .geometry = geometry_of<geometry_t>(std::move(geometry), *feature, *to_wgs84, source),
+            .geometry = of_type<geometry_t>(std::move(geometry), *feature, source),
             .tags = tags_of(*feature, id_field),
         }
     );
     ++read.features;
 
-    if ( chunk.size() == chunk_features ) {
-      on_chunk(std::exchange(chunk, {}));
-      CPLErrorReset();
+    if ( chunk.size() == chunk_features && ! on_chunk(std::exchange(chunk, {})) ) {
+      return read;
     }
   }
 
@@ -338,10 +469,55 @@ VectorRead read_features(const VectorSource& source, std::size_t chunk_features,
   }
 
   if ( ! chunk.empty() ) {
-    on_chunk(std::move(chunk));
+    std::ignore = on_chunk(std::move(chunk));
   }
 
   return read;
+}
+
+}  // namespace
+
+template <geo::wkb::Geometry geometry_t>
+VectorRead read_features(const VectorSource& source, std::size_t chunk_features, const std::function<void(Features<geometry_t>)>& on_chunk) {
+  return read_matching<geometry_t>(source, nullptr, chunk_features, [&on_chunk](Features<geometry_t> chunk) {
+    on_chunk(std::move(chunk));
+
+    return true;
+  });
+}
+
+template <geo::wkb::Geometry geometry_t>
+VectorRead read_features_in(
+    const VectorSource& source, const geo::Polygon& location, std::size_t chunk_features, const std::function<bool(Features<geometry_t>)>& on_chunk
+) {
+  return read_matching<geometry_t>(source, &location, chunk_features, on_chunk);
+}
+
+template <geo::wkb::Geometry geometry_t>
+std::vector<std::string> problems_of(const VectorSource& source) {
+  try {
+    const QuietErrors          quiet;
+    const GDALDatasetUniquePtr dataset = opened(source);
+
+    OGRLayer& layer = layer_of(*dataset, source);
+    std::ignore = id_field_of(layer, source);
+    std::ignore = to_wgs84_from(layer, source);
+    need_geos();
+
+    // A layer that says what its geometries are: of the type asked for, or one that reads as it (a single one as a multi
+    // one, a multi one of one part as its part, a curve as lines). One that does not say may hold any.
+    const OGRwkbGeometryType found = wkbFlatten(OGR_GT_GetLinear(layer.GetGeomType()));
+    const OGRwkbGeometryType wanted = ogr_type<geometry_t>();
+    if ( found != wkbUnknown && found != wanted && OGR_GT_GetCollection(found) != wanted && OGR_GT_GetCollection(wanted) != found ) {
+      return {
+          "the geometries of '" + source.path + "' are " + OGRGeometryTypeToName(found) + ", not " + std::string(geo::wkb::type_name<geometry_t>().view())
+      };
+    }
+
+    return {};
+  } catch ( const std::exception& unreadable ) {
+    return {unreadable.what()};
+  }
 }
 
 template <geo::wkb::Geometry geometry_t>
@@ -358,6 +534,21 @@ template VectorRead read_features<geo::LineString>(const VectorSource&, std::siz
 template VectorRead read_features<geo::Polygon>(const VectorSource&, std::size_t, const std::function<void(Features<geo::Polygon>)>&);
 template VectorRead read_features<geo::MultiLineString>(const VectorSource&, std::size_t, const std::function<void(Features<geo::MultiLineString>)>&);
 template VectorRead read_features<geo::MultiPolygon>(const VectorSource&, std::size_t, const std::function<void(Features<geo::MultiPolygon>)>&);
+
+template VectorRead read_features_in<geo::Point>(const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::Point>)>&);
+template VectorRead
+read_features_in<geo::LineString>(const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::LineString>)>&);
+template VectorRead read_features_in<geo::Polygon>(const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::Polygon>)>&);
+template VectorRead
+read_features_in<geo::MultiLineString>(const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::MultiLineString>)>&);
+template VectorRead
+read_features_in<geo::MultiPolygon>(const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::MultiPolygon>)>&);
+
+template std::vector<std::string> problems_of<geo::Point>(const VectorSource&);
+template std::vector<std::string> problems_of<geo::LineString>(const VectorSource&);
+template std::vector<std::string> problems_of<geo::Polygon>(const VectorSource&);
+template std::vector<std::string> problems_of<geo::MultiLineString>(const VectorSource&);
+template std::vector<std::string> problems_of<geo::MultiPolygon>(const VectorSource&);
 
 template Features<geo::Point>           read_features<geo::Point>(const VectorSource&);
 template Features<geo::LineString>      read_features<geo::LineString>(const VectorSource&);

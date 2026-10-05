@@ -150,6 +150,10 @@ using MergeRasters = schemacht::query::RawStatement<
     "SELECT ST_AsBinary(miniverse_functions.merge_raster($1::raster, $2::raster)) AS rast", schemacht::query::RawArguments<Raster, Raster>,
     sch::Field<Raster, "rast">>;
 
+using ColumnCompression = schemacht::query::RawStatement<
+    "SELECT attcompression::text AS compression FROM pg_attribute WHERE attrelid = $1::regclass AND attname = 'rast'",
+    schemacht::query::RawArguments<std::string>, sch::Field<std::string, "compression">>;
+
 using IndexDefinitions = schemacht::query::RawStatement<
     "SELECT indexdef FROM pg_indexes WHERE tablename = $1 ORDER BY indexname", schemacht::query::RawArguments<std::string>,
     sch::Field<std::string, "indexdef">>;
@@ -266,6 +270,16 @@ TEST_CASE("integration: create_table makes the index on the tiles' outlines that
   REQUIRE(rows.size() == 2);
   CHECK(sch::get<"indexdef">(rows.at(0)).ends_with("USING btree (tile_id)"));  // the primary key's (_pkey)
   CHECK(sch::get<"indexdef">(rows.at(1)).ends_with("USING gist (st_convexhull(rast))"));
+}
+
+TEST_CASE("integration: create_table has the tiles stored with lz4, which loads faster than pglz", "[integration]") {
+  Tiled  tiled(test_db());
+  World& world = tiled.world();
+
+  const auto rows = world.database().execute(ColumnCompression::bind(world.table_name<TestElevation>().quoted())).get();
+
+  REQUIRE(rows.size() == 1);
+  CHECK(sch::get<"compression">(rows.at(0)) == "l");  // pg_attribute's letter for lz4; pglz is `p`, and the server's default is empty
 }
 
 TEST_CASE("integration: a pushed raster is cut into the table's tiles and loaded back", "[integration]") {

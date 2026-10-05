@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -145,4 +146,30 @@ TEST_CASE("column type: a raster is read as ST_AsBinary's bytea, and written as 
   CHECK_THROWS_AS(RasterColumn::parse(INT16), std::invalid_argument);  // the raster's own text form is not what a load selects
   CHECK(RasterColumn::format(int16_raster()) == INT16);
   CHECK(RasterColumn::parse_binary(parse_hex(INT16)) == int16_raster());
+}
+
+TEST_CASE("grid: a resolution in metres is the nearest whole pixels per degree", "[raster]") {
+  using miniverse::geo::pixels_per_degree_of_metres;
+
+  const miniverse::geo::Grid<std::int16_t> thirty{.pixels_per_degree = pixels_per_degree_of_metres(30), .tile_pixels = 256, .nodata = -32768};
+
+  CHECK(thirty.pixels_per_degree == 3711);
+  CHECK(thirty.metres_per_pixel() > 29.99);  // what 30 came to: 29.997
+  CHECK(thirty.metres_per_pixel() < 30.0);
+  CHECK(pixels_per_degree_of_metres(10) == 11132);
+  CHECK(pixels_per_degree_of_metres(90) == 1237);
+  CHECK(pixels_per_degree_of_metres(miniverse::geo::METRES_PER_DEGREE) == 1);
+}
+
+TEST_CASE("grid: a resolution finer than the finest grid, coarser than a degree, or no number above zero, is refused", "[raster]") {
+  using miniverse::geo::pixels_per_degree_of_metres;
+
+  CHECK(pixels_per_degree_of_metres(3.1) == 35910);
+  CHECK_THROWS_AS(pixels_per_degree_of_metres(3.0), std::invalid_argument);  // 37106
+  CHECK_THROWS_AS(pixels_per_degree_of_metres(1), std::invalid_argument);
+  CHECK_THROWS_AS(pixels_per_degree_of_metres(250'000), std::invalid_argument);  // under half a pixel to a degree
+  CHECK_THROWS_AS(pixels_per_degree_of_metres(0), std::invalid_argument);
+  CHECK_THROWS_AS(pixels_per_degree_of_metres(-30), std::invalid_argument);
+  CHECK_THROWS_AS(pixels_per_degree_of_metres(std::numeric_limits<double>::quiet_NaN()), std::invalid_argument);
+  CHECK_THROWS_AS(pixels_per_degree_of_metres(std::numeric_limits<double>::infinity()), std::invalid_argument);
 }

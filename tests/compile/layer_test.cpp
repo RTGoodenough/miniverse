@@ -5,6 +5,7 @@
 #include <concepts>
 #include <cstdint>
 #include <future>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -102,6 +103,11 @@ static_assert(std::same_as<
                   std::string(), schemacht::postgres::Database::Options(), miniverse::Layer<Roads>("roads"), miniverse::Layer<Places>("places")
               )),
               miniverse::Miniverse<Roads, Places>>);
+
+// So are those of a miniverse with no database, whose layers have readers; one of no layers at all is not made that way.
+static_assert(std::constructible_from<miniverse::Layer<Roads>, std::shared_ptr<const miniverse::Reader<Roads>>>);
+static_assert(std::same_as<decltype(miniverse::Miniverse(miniverse::Layer<Roads>("roads"), miniverse::Layer<Places>("places"))), miniverse::Miniverse<Roads, Places>>);
+static_assert(! std::default_initializable<miniverse::Miniverse<>>);
 
 static_assert(schemacht::query::sql::type_name<miniverse::geo::Point>() == "geometry(Point,4326)");
 static_assert(schemacht::query::sql::type_name<miniverse::geo::LineString>() == "geometry(LineString,4326)");

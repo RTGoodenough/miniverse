@@ -76,18 +76,22 @@ constexpr geo::Grid<std::int16_t> GRID{.pixels_per_degree = 4, .tile_pixels = 4,
 
 }  // namespace
 
-TEST_CASE("raster layer: the table's setup is a lock, the shared merge function, its index and the constraints that record its grid", "[raster_layer]") {
+TEST_CASE(
+    "raster layer: the table's setup is a lock, the shared merge function, its compression, its index and the constraints that record its grid",
+    "[raster_layer]"
+) {
   const schemacht::schema::TableName table("srtm");
 
   const std::vector<std::string> setup = Elevation::setup_sql(table, GRID);
 
-  REQUIRE(setup.size() == 5);
+  REQUIRE(setup.size() == 6);
   CHECK(setup.at(0).contains("pg_advisory_xact_lock"));  // first: setups take turns at what follows
   CHECK(setup.at(1) == "CREATE SCHEMA IF NOT EXISTS miniverse_functions");
   CHECK(setup.at(2).starts_with("CREATE OR REPLACE FUNCTION miniverse_functions.merge_raster("));  // what it does: tests/integration
   CHECK(
       std::vector<std::string>(setup.begin() + 3, setup.end()) ==
       std::vector<std::string>{
+          R"(ALTER TABLE "srtm" ALTER COLUMN rast SET COMPRESSION lz4)",
           R"(CREATE INDEX ON "srtm" USING gist (ST_ConvexHull(rast)))",
           R"(ALTER TABLE "srtm" ADD CONSTRAINT enforce_srid_rast CHECK (ST_SRID(rast) = 4326))"
           R"(, ADD CONSTRAINT enforce_scalex_rast CHECK (round(ST_ScaleX(rast)::numeric, 10) = round(0.25, 10)))"
@@ -252,13 +256,33 @@ TEST_CASE("raster layer: with no tiles there is no grid, so the window is empty"
 
 TEST_CASE("raster layer: a streamed chunk is its tiles, each whole", "[raster_layer]") {
   // Two tiles side by side, from (0, 1) and from (1, 1).
-  const std::vector<Raster> tiles = Elevation::chunk_from_rows(loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID))), {});
+  const std::vector<Raster> tiles =
+      Elevation::chunk_from_rows(loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID))), polygon("POLYGON((0.5 0.2,1.5 0.2,1.5 0.8,0.5 0.8,0.5 0.2))"));
 
   REQUIRE(tiles.size() == 2);
   CHECK(tiles.front().west == 0);
   CHECK(tiles.back().west == 1);
   CHECK(tiles.back().width == 4);
   CHECK(tiles.back().at(0, 0) == 400);  // the raster's column 4, row 0
+}
+
+TEST_CASE("raster layer: a tile the location's box does not meet is not the location's, however near it ends", "[raster_layer]") {
+  // Two tiles side by side, from (0, 1) and from (1, 1), as an index that rounds its boxes outward would find them both.
+  const auto tiles_in = [](const std::string& wkt) {
+    return Elevation::chunk_from_rows(loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID))), polygon(wkt)).size();
+  };
+
+  CHECK(tiles_in("POLYGON((1 0.2,1.5 0.2,1.5 0.8,1 0.8,1 0.2))") == 2);                          // touching the west tile's edge: both
+  CHECK(tiles_in("POLYGON((1.0000001 0.2,1.5 0.2,1.5 0.8,1.0000001 0.8,1.0000001 0.2))") == 1);  // a hair past it: the east one alone
+  CHECK(tiles_in("POLYGON((2.0000001 0.2,2.5 0.2,2.5 0.8,2.0000001 0.8,2.0000001 0.2))") == 0);
+  CHECK(tiles_in("POLYGON((0.5 1,1.5 1,1.5 2,0.5 2,0.5 1))") == 2);                              // touching both from the north
+  CHECK(Elevation::chunk_from_rows(loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID))), {}).empty());  // a location of no points
+
+  // And a load of it is then as empty as where there is no tile at all.
+  CHECK(
+      Elevation::from_rows(loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID))), polygon("POLYGON((2.0000001 0.2,2.5 0.2,2.5 0.8,2.0000001 0.8,2.0000001 0.2))")) ==
+      Raster{}
+  );
 }
 
 TEST_CASE("raster layer: tiles that don't share a grid are not stitched", "[raster_layer]") {

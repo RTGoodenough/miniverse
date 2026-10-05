@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -70,6 +71,11 @@ struct MergeRaster {
  * `raster_columns` reads: GDAL and QGIS open the table as one raster, `Miniverse::table_settings` gives the grid to a writer to
  * warp its source onto, and every push reads it before cutting its raster into tiles. The constraints also refuse a tile of
  * another grid.
+ *
+ * The pixel type is the layer's to choose, and it decides the table's size more than anything: tiles are stored compressed
+ * (lz4), which halves whole numbers and hardly touches reals. Measured on 30 m heights, 16-bit whole metres take a third to
+ * a sixth of the space of 32-bit reals and load a third faster; 32-bit whole decimetres, where a metre is too coarse, take
+ * about half the reals' space.
  */
 template <geo::Pixel pixel_t>
 struct RasterLayer {
@@ -107,7 +113,8 @@ struct RasterLayer {
 
   /**
    * @return A lock that setups take turns by; the schema `miniverse_functions` and the function in it a push merges a tile with
-   * (`raster::MergeRaster`), each made if missing; the table's spatial index; and its raster constraints, which record `grid` for `raster_columns` (and so GDAL):
+   * (`raster::MergeRaster`), each made if missing; lz4 as the compression of the tiles where they are stored; the table's
+   * spatial index; and its raster constraints, which record `grid` for `raster_columns` (and so GDAL):
    * SRID 4326, the pixel size, the tile size, alignment to the grid, one band of `pixel_t`, the nodata value, no out-db
    * bands, and an extent of the whole world (and a hair more, for rounding), so it never needs widening.
    *
@@ -117,6 +124,10 @@ struct RasterLayer {
    * one function at the same time, so each first takes an advisory lock, held until its transaction ends (`create_table`
    * runs them in one), and the second waits for the first. Run outside a transaction, each statement is one of its own, and
    * the lock is let go at once: run them all in one.
+   *
+   * The compression needs PostgreSQL 14 or newer, built with lz4, as the usual packages and images are: on one that is not,
+   * that statement fails, and `create_table` then makes no table. Tiles of 16-bit heights come to about half their size, and
+   * load about a tenth slower than uncompressed (as measured); tiles of reals hardly compress at all.
    * @throws std::invalid_argument if `grid` is not a grid: see `geo::Grid`.
    */
   [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table, const settings_type& grid);
@@ -135,19 +146,24 @@ struct RasterLayer {
     return schemacht::postgres::upsert_statement<schema_type, schemacht::postgres::MergeWith<"rast", raster::MergeRaster>>(rows);
   }
 
-  /**
-   * @return The pixels of the tiles `rows` in the bounding box of `location`, widened to whole pixels of the tiles' grid.
-   * Pixels no tile covers are the tiles' nodata. With no tiles at all, there is no grid to place pixels on: the result is
-   * empty (0 by 0).
-   * @throws std::invalid_argument if the tiles don't share a grid (pixel size, alignment) and a nodata value.
-   */
+  /** @return What `window` makes of the tiles `rows`: the pixels in the bounding box of `location`. */
   [[nodiscard]] static result_type from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location);
 
   /**
-   * @return The tiles `rows`, each as it is stored, in no particular order: whole tiles, not cut to `location`'s box. A tile is
-   * megabytes, so stream them a few at a time (`Miniverse::stream`'s `read.chunk_rows`).
+   * @return The pixels of `tiles`, rasters of one grid, in the bounding box of `location`, widened to whole pixels of that
+   * grid. Pixels no tile covers are the tiles' nodata. With no tiles at all, there is no grid to place pixels on: the result
+   * is empty (0 by 0). What a load is, whether its tiles come from a table or from a reader of a file.
+   * @throws std::invalid_argument if the tiles don't share a grid (pixel size, alignment) and a nodata value.
    */
-  [[nodiscard]] static chunk_type chunk_from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& /*location*/);
+  [[nodiscard]] static result_type window(std::span<const geo::Raster<pixel_t>> tiles, const geo::Polygon& location);
+
+  /**
+   * @return The tiles of `rows` whose outlines the box of `location` meets (touching counts), each as it is stored, in no
+   * particular order: whole tiles, not cut to the box. The rows may hold a tile more, which ends a hair short of the box:
+   * the index that answers a load compares boxes rounded outward. A tile is megabytes, so stream them a few at a time
+   * (`Miniverse::stream`'s `read.chunk_rows`).
+   */
+  [[nodiscard]] static chunk_type chunk_from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location);
 
   /** @throws std::runtime_error if the table has no grid in its constraints: it was not made by `create_table`. */
   [[nodiscard]] static settings_type settings_from_rows(std::vector<typename settings_statement_type::row_type> rows);

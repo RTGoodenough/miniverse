@@ -119,7 +119,7 @@ if(NOT MINIVERSE_BUILD_OSM_CHOICE STREQUAL "OFF")
 endif()
 
 if(MINIVERSE_HAS_OSM)
-  add_library(miniverse_osm STATIC src/osm/boost_json.cpp src/osm/ways.cpp)
+  add_library(miniverse_osm STATIC src/osm/boost_json.cpp src/osm/ways.cpp src/osm/ways_in_memory.cpp)
   target_include_directories(miniverse_osm SYSTEM PRIVATE ${MINIVERSE_OSMIUM_INCLUDE_DIR} ${MINIVERSE_PROTOZERO_INCLUDE_DIR})
   target_link_libraries(miniverse_osm PUBLIC miniverse::miniverse PRIVATE ZLIB::ZLIB EXPAT::EXPAT BZip2::BZip2 Threads::Threads)
 

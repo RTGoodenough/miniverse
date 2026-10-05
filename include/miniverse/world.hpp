@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -9,6 +8,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -51,6 +51,10 @@
  * `verify` when the program starts checks that the tables are the layers' kinds'.
  * Errors, including one from a kind's own conversions, arrive through the future, never as a throw from the call itself. The
  * miniverse must outlive the futures it hands out: wait on them before it is destroyed.
+ *
+ * A layer need not be a table: one made from a `Reader` (reader.hpp) is read from a file, or from data of the program's own,
+ * by the same `load` and `stream`. A miniverse whose layers all have readers needs no database, and is made without a
+ * connection string: for a test, or a user with files alone.
  */
 namespace miniverse {
 
@@ -72,12 +76,13 @@ void guarded(const schemacht::util::Settler<value_t>& done, step_t step) {
 }  // namespace detail
 
 /**
- * @brief What `Miniverse::verify` fails with when a layer's table is not as its kind says: every difference of every layer,
- * as lines of `what()` and one by one in `differences()`. A check that could not be run at all fails with its own error.
+ * @brief What `Miniverse::verify` fails with when a layer's table is not as its kind says, or its reader finds something wrong
+ * with what it reads: every difference of every layer, as lines of `what()` and one by one in `differences()`. A check that
+ * could not be run at all fails with its own error.
  */
 class TablesDiffer : public std::runtime_error {
  public:
-  /** @param differences Each as `<table>: <what differs>`, in the layers' order. */
+  /** @param differences Each as `<table, or what a reader reads>: <what differs>`, in the layers' order. */
   explicit TablesDiffer(std::vector<std::string> differences) : std::runtime_error(message_of(differences)), _differences(std::move(differences)) {}
 
   /** @return Each difference, as `<table>: <what differs>`, in the layers' order. */
@@ -275,7 +280,7 @@ class PushInParts {
   ~PushInParts() = default;  // not committed: rolled back
 };
 
-/** @brief One layer of each kind `kind_ts`, each in its own table of one PostGIS database. */
+/** @brief One layer of each kind `kind_ts`, each in its own table of one PostGIS database, or read by a reader. */
 template <LayerKind... kind_ts>
 class Miniverse {
  public:
@@ -286,14 +291,25 @@ class Miniverse {
    * @throws std::runtime_error if a connection can't be made.
    */
   Miniverse(const std::string& conninfo, const schemacht::postgres::Database::Options& options, Layer<kind_ts>... layers)
-      : _layers(distinct_tables(std::move(layers)...)), _database(conninfo, options) {}
+      : _layers(distinct_tables(std::move(layers)...)), _database(std::in_place, conninfo, options) {}
 
   /** @brief As above, with the pool's default options. */
   explicit Miniverse(const std::string& conninfo, Layer<kind_ts>... layers) : Miniverse(conninfo, {}, std::move(layers)...) {}
 
-  /** @return The name of the table the layer `kind_t` is stored in. */
+  /**
+   * @brief A miniverse with no database, for `layers` that each have a reader: nothing is connected to.
+   * @throws std::invalid_argument if a layer is a table: that needs a connection string.
+   */
+  explicit Miniverse(Layer<kind_ts>... layers)
+    requires(sizeof...(kind_ts) > 0)
+      : _layers(all_with_readers(std::move(layers)...)) {}
+
+  /**
+   * @return The name of the table the layer `kind_t` is stored in.
+   * @throws std::logic_error if the layer is not a table: it has a reader.
+   */
   template <LayerKind kind_t>
-  [[nodiscard]] const schemacht::schema::TableName& table_name() const noexcept {
+  [[nodiscard]] const schemacht::schema::TableName& table_name() const {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
 
     return layer<kind_t>().table().name();
@@ -302,10 +318,21 @@ class Miniverse {
   /**
    * @return A future for what the layer `kind_t` holds in `location`, a polygon in WGS 84 longitude and latitude (what that
    * is, the kind says: for a `RoadLayer`, the ways that intersect it). It holds the error instead if the load failed.
+   *
+   * A layer with a reader is read on a thread started for the load, so several loads run at once as those of tables do; the
+   * future of such a load waits for it when it is dropped.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<typename kind_t::result_type> load(const geo::Polygon& location) {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
+
+    if ( const auto& reader = layer<kind_t>().reader(); reader ) {
+      return on_a_thread([reader, location] {
+        check_location(location);
+
+        return reader->load(location);
+      });
+    }
 
     return execute_as<typename kind_t::result_type>(
         [&] { return kind_t::load_statement_type::bind(location).on(layer<kind_t>().table()); },
@@ -327,14 +354,37 @@ class Miniverse {
    * `on_chunk` is called with one chunk at a time, never from two threads at once, on a thread of the pool's, not the
    * caller's. It returns `void`, or a `bool` where `false` stops the load, which is then cancelled. What it throws is the load's
    * error; chunks it was handed before an error stay handed. It must not wait on another of this miniverse's futures.
+   *
+   * A layer with a reader hands over chunks of `read.chunk_rows` too, on a thread started for the load, in the order its
+   * reader says (a file's own, for the readers of files); the future of such a load waits for it when it is dropped.
    */
   template <LayerKind kind_t, ChunkCallback<kind_t> callback_t>
   [[nodiscard]] std::future<void> stream(const geo::Polygon& location, callback_t on_chunk, const schemacht::postgres::ReadOptions& read) {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
 
+    if ( const auto& reader = layer<kind_t>().reader(); reader ) {
+      return on_a_thread([reader, location, on_chunk = std::move(on_chunk), chunk_rows = read.chunk_rows]() mutable {
+        if ( chunk_rows == 0 ) {
+          throw std::invalid_argument("a stream needs chunks of at least one row");  // as a table's refuses it
+        }
+
+        check_location(location);
+
+        reader->stream(location, chunk_rows, [&on_chunk](ChunkOf<kind_t> chunk) {
+          if constexpr ( std::same_as<std::invoke_result_t<callback_t&, ChunkOf<kind_t>>, bool> ) {
+            return on_chunk(std::move(chunk));
+          } else {
+            on_chunk(std::move(chunk));
+
+            return true;
+          }
+        });
+      });
+    }
+
     return schemacht::util::future_from<void>([&](const schemacht::util::Settler<void>& done) {
       detail::guarded(done, [&] {
-        _database.stream_chunks(
+        database().stream_chunks(
             kind_t::load_statement_type::bind(location).on(layer<kind_t>().table()),
             [on_chunk = std::move(on_chunk), location](LoadedRows<kind_t>&& rows) mutable {
               return on_chunk(chunk_of<kind_t>(std::move(rows), location));  // nothing, or whether it wants more
@@ -346,22 +396,29 @@ class Miniverse {
   }
 
   /**
-   * @brief As above, with chunks of the size the miniverse's pool reads by default (`Database::Options::read`): 1000 rows
-   * unless it was made with another, which suits features and is far too many for a raster's tiles.
+   * @brief As above, with chunks of the size the miniverse's pool reads by default (`Database::Options::read`): 1000 rows,
+   * also in a miniverse with no database, unless the pool was made with another. That suits features, and is far too many
+   * for a raster's tiles.
    */
   template <LayerKind kind_t, ChunkCallback<kind_t> callback_t>
   [[nodiscard]] std::future<void> stream(const geo::Polygon& location, callback_t on_chunk) {
-    return stream<kind_t>(location, std::move(on_chunk), _database.read_options());
+    return stream<kind_t>(location, std::move(on_chunk), _database ? _database->read_options() : schemacht::postgres::ReadOptions{});
   }
 
   /**
    * @return A future for the settings the layer `kind_t`'s table was made with (an elevation's grid), read from the database:
    * for a writer to warp its source onto before pushing. It holds the error instead if the table does not exist, or has no
-   * settings (it was not made by `create_table`).
+   * settings (it was not made by `create_table`). For a layer with a reader, they are the reader's.
    */
   template <HasSettings kind_t>
   [[nodiscard]] std::future<typename kind_t::settings_type> table_settings() {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
+
+    if ( const auto& reader = layer<kind_t>().reader(); reader ) {
+      return schemacht::util::future_from<typename kind_t::settings_type>([&](const schemacht::util::Settler<typename kind_t::settings_type>& done) {
+        detail::guarded(done, [&] { done(reader->settings(), nullptr); });
+      });
+    }
 
     return execute_as<typename kind_t::settings_type>(
         [&] { return settings_statement<kind_t>(); }, [](auto rows) { return kind_t::settings_from_rows(std::move(rows)); }
@@ -382,15 +439,22 @@ class Miniverse {
    * The kind's `write_statement` says what happens to a row already there: a `RoadLayer`'s way fails the push, and an
    * `RasterLayer`'s tile is merged with it (new pixels win, and where the new tile has no data the old pixel stays). Pushes
    * that overlap are merged in the order they commit: where both have data, the last to commit wins.
+   *
+   * A layer with a reader is only read: a push to it fails with a `std::logic_error`.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<void> push(kind_t::result_type data) {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
 
     return schemacht::util::future_from<void>([&](const schemacht::util::Settler<void>& done) {
+      if ( ! layer<kind_t>().is_table() ) {
+        detail::guarded(done, [&] { done.fail(only_read<kind_t>()); });
+        return;
+      }
+
       if constexpr ( HasSettings<kind_t> ) {
         detail::guarded(done, [&] {
-          _database.execute(
+          database().execute(
               settings_statement<kind_t>(),
               [this, done, data = std::move(data)](SettingsRows<kind_t> rows, const std::exception_ptr& error) mutable {
                 if ( error ) {
@@ -421,6 +485,9 @@ class Miniverse {
    *
    * Not checked: a table's indexes (the spatial index a load is fast by), its other constraints, the function a raster push
    * merges with (`raster::MergeRaster`), and what the connection's role may do.
+   *
+   * A layer with a reader is checked by its reader (`Reader::problems`: a file that is missing, or does not hold what the
+   * kind needs), on the calling thread; what it finds is in the `TablesDiffer` too, said of the reader's name.
    */
   [[nodiscard]] std::future<void> verify() {
     return schemacht::util::future_from<void>([&](const schemacht::util::Settler<void>& done) {
@@ -428,7 +495,7 @@ class Miniverse {
         done(nullptr);
       } else {
         detail::guarded(done, [&] {
-          const auto  checks = std::make_shared<Checks>(std::vector<std::string>{table_name<kind_ts>().quoted()...}, done);
+          const auto  checks = std::make_shared<Checks>(std::vector<std::string>{layer<kind_ts>().name()...}, done);
           std::size_t layer = 0;
           (check_table<kind_ts>(checks, layer++), ...);
         });
@@ -439,16 +506,22 @@ class Miniverse {
   /**
    * @return A future for a push of the layer `kind_t` that takes its data in parts, all of them written or none (see
    * `PushInParts`): for a dataset too large to hold at once. For a kind with settings, the table's are read first, once, and
-   * every part's rows are made with them. It holds the error instead if they can't be read, or no transaction begun.
+   * every part's rows are made with them. It holds the error instead if they can't be read, or no transaction begun, or the
+   * layer has a reader (a `std::logic_error`: it is only read).
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<PushInParts<kind_t>> begin_push() {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
 
     return schemacht::util::future_from<PushInParts<kind_t>>([&](const schemacht::util::Settler<PushInParts<kind_t>>& done) {
+      if ( ! layer<kind_t>().is_table() ) {
+        detail::guarded(done, [&] { done.fail(only_read<kind_t>()); });
+        return;
+      }
+
       if constexpr ( HasSettings<kind_t> ) {
         detail::guarded(done, [&] {
-          _database.execute(settings_statement<kind_t>(), [this, done](SettingsRows<kind_t> rows, const std::exception_ptr& error) {
+          database().execute(settings_statement<kind_t>(), [this, done](SettingsRows<kind_t> rows, const std::exception_ptr& error) {
             if ( error ) {
               done.fail(error);
               return;
@@ -478,6 +551,8 @@ class Miniverse {
    * (`CREATE EXTENSION postgis`, and `postgis_raster` for a raster).
    *
    * The table and its setup are one transaction: if any of it fails, nothing is left behind, and the error is that statement's own.
+   * For a layer with a reader there is no table to make: nothing is done, here and in `drop_tables`, so that one setup serves
+   * a miniverse of tables and one of files. Its `settings` are then neither checked nor kept: the reader has its own.
    * @throws schemacht::postgres::QueryError if the table exists already, or can't be made, or its setup fails.
    * @throws std::invalid_argument if the kind refuses `settings`, before anything is sent.
    */
@@ -485,7 +560,9 @@ class Miniverse {
   void create_table(const typename kind_t::settings_type& settings) {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
 
-    make_table<kind_t>(kind_t::setup_sql(table_name<kind_t>(), settings));  // checks the settings first
+    if ( layer<kind_t>().is_table() ) {
+      make_table<kind_t>(kind_t::setup_sql(table_name<kind_t>(), settings));  // checks the settings first
+    }
   }
 
   /** @brief As above, for a kind without settings. */
@@ -495,7 +572,9 @@ class Miniverse {
     static_assert(! HasSettings<kind_t>, "this kind's table is made with settings (an elevation's grid): call create_table<Kind>(settings) for it");
 
     if constexpr ( ! HasSettings<kind_t> ) {
-      make_table<kind_t>(kind_t::setup_sql(table_name<kind_t>()));
+      if ( layer<kind_t>().is_table() ) {
+        make_table<kind_t>(kind_t::setup_sql(table_name<kind_t>()));
+      }
     }
   }
 
@@ -505,12 +584,21 @@ class Miniverse {
   /** @brief Drops every layer's table, those that exist, and waits for it. */
   void drop_tables() { (drop_table<kind_ts>(), ...); }
 
-  /** @return The pool, for what the layers don't cover: a query of your own on the same connections. */
-  [[nodiscard]] schemacht::postgres::Database& database() noexcept { return _database; }
+  /**
+   * @return The pool, for what the layers don't cover: a query of your own on the same connections.
+   * @throws std::logic_error if the miniverse was made with no database.
+   */
+  [[nodiscard]] schemacht::postgres::Database& database() {
+    if ( ! _database ) {
+      throw std::logic_error("this miniverse was made with no database: its layers are read by readers");
+    }
+
+    return *_database;
+  }
 
  private:
-  std::tuple<Layer<kind_ts>...> _layers;  // before the pool: checked before any connection is opened
-  schemacht::postgres::Database _database;
+  std::tuple<Layer<kind_ts>...>                _layers;    // before the pool: checked before any connection is opened
+  std::optional<schemacht::postgres::Database> _database;  // none, in a miniverse of readers alone
 
   /** @brief The rows a statement gives. */
   template <schemacht::postgres::RunnableStatement statement_t>
@@ -527,12 +615,43 @@ class Miniverse {
   }
 
   [[nodiscard]] static std::tuple<Layer<kind_ts>...> distinct_tables(Layer<kind_ts>... layers) {
-    const std::array<std::string_view, sizeof...(kind_ts)> tables{std::string_view(layers.table().name().quoted())...};
+    std::vector<std::string_view> tables;
+    (..., (layers.is_table() ? tables.push_back(layers.table().name().quoted()) : void()));
     if ( ! schemacht::util::all_distinct(tables) ) {
       throw std::invalid_argument("two layers of the miniverse name the same table");
     }
 
     return {std::move(layers)...};
+  }
+
+  [[nodiscard]] static std::tuple<Layer<kind_ts>...> all_with_readers(Layer<kind_ts>... layers) {
+    if ( (layers.is_table() || ...) ) {
+      throw std::invalid_argument("a layer that is a table needs a database: make the miniverse with a connection string");
+    }
+
+    return {std::move(layers)...};
+  }
+
+  /** @return Why the layer `kind_t`, which has a reader, can't be written. */
+  template <LayerKind kind_t>
+  [[nodiscard]] std::exception_ptr only_read() const {
+    return std::make_exception_ptr(std::logic_error("the layer read from " + layer<kind_t>().name() + " is only read: a push needs a layer that is a table"));
+  }
+
+  /**
+   * @return A future for what `read` gives, run on a thread started for it; it holds what `read` throws instead, or why no
+   * thread could be started.
+   */
+  template <std::invocable read_t>
+  [[nodiscard]] static std::future<std::invoke_result_t<read_t>> on_a_thread(read_t read) {
+    try {
+      return std::async(std::launch::async, std::move(read));
+    } catch ( ... ) {
+      std::promise<std::invoke_result_t<read_t>> failed;
+      failed.set_exception(std::current_exception());
+
+      return failed.get_future();
+    }
   }
 
   template <LayerKind kind_t>
@@ -564,7 +683,7 @@ class Miniverse {
       return;
     }
 
-    _database.begin([batches = std::move(batches), done, table = &layer<kind_t>().table()](
+    database().begin([batches = std::move(batches), done, table = &layer<kind_t>().table()](
                         schemacht::postgres::Transaction transaction, const std::exception_ptr& error
                     ) mutable {
       if ( error ) {
@@ -581,7 +700,7 @@ class Miniverse {
   /** @brief Begins a transaction, and settles `done` with the push in parts it is, whose rows `to_rows` makes. */
   template <LayerKind kind_t>
   void begin_parts(typename PushInParts<kind_t>::ToRows to_rows, const schemacht::util::Settler<PushInParts<kind_t>>& done) {
-    _database.begin([to_rows = std::move(to_rows), done, table = &layer<kind_t>().table()](
+    database().begin([to_rows = std::move(to_rows), done, table = &layer<kind_t>().table()](
                         schemacht::postgres::Transaction transaction, const std::exception_ptr& error
                     ) mutable {
       if ( error ) {
@@ -596,7 +715,7 @@ class Miniverse {
   /** @brief The checks of a `verify` while they run, a layer each on any thread: what each found, and the future they settle together. */
   class Checks {
    public:
-    /** @param tables The layers' tables as a statement writes them, in the layers' order: what a difference is said of. */
+    /** @param tables The layers' names (`Layer::name`), in the layers' order: what a difference is said of. */
     Checks(std::vector<std::string> tables, schemacht::util::Settler<void> done)
         : _tables(std::move(tables)), _problems(_tables.size()), _pending(_tables.size()), _done(std::move(done)) {}
 
@@ -660,11 +779,19 @@ class Miniverse {
     ~Checks() = default;
   };
 
-  /** @brief Checks the layer `kind_t`'s table against its kind's schema, then its settings if it has any, and tells `checks`. */
+  /**
+   * @brief Checks the layer `kind_t`'s table against its kind's schema, then its settings if it has any, and tells `checks`; a
+   * layer with a reader is checked by its reader.
+   */
   template <LayerKind kind_t>
   void check_table(const std::shared_ptr<Checks>& checks, std::size_t layer_number) {
     try {
-      _database.execute(
+      if ( const auto& reader = layer<kind_t>().reader(); reader ) {
+        checks->finish(layer_number, reader->problems(), nullptr);
+        return;
+      }
+
+      database().execute(
           schemacht::postgres::table_differences_statement<typename kind_t::schema_type>().on(layer<kind_t>().table()),
           [this, checks, layer_number](const std::vector<schemacht::postgres::TableDifference>& differences, const std::exception_ptr& error) {
             if ( error ) {
@@ -705,7 +832,7 @@ class Miniverse {
   template <HasSettings kind_t>
   void check_settings(const std::shared_ptr<Checks>& checks, std::size_t layer_number) {
     try {
-      _database.execute(settings_statement<kind_t>(), [checks, layer_number](SettingsRows<kind_t> rows, const std::exception_ptr& error) {
+      database().execute(settings_statement<kind_t>(), [checks, layer_number](SettingsRows<kind_t> rows, const std::exception_ptr& error) {
         if ( error ) {
           checks->finish(layer_number, {}, error);
           return;
@@ -734,7 +861,7 @@ class Miniverse {
   template <LayerKind kind_t>
   void make_table(std::vector<std::string> setup) {
     // Each waited for in turn, so the error is the failing statement's own. A throw drops the transaction, which rolls it back.
-    schemacht::postgres::Transaction transaction = _database.begin().get();
+    schemacht::postgres::Transaction transaction = database().begin().get();
     transaction.execute(schemacht::postgres::create_table_statement<typename kind_t::schema_type>().on(layer<kind_t>().table())).get();
     for ( std::string& sql : setup ) {
       transaction.execute(schemacht::postgres::unchecked_sql(std::move(sql))).get();
@@ -745,7 +872,11 @@ class Miniverse {
 
   template <LayerKind kind_t>
   void drop_table() {
-    _database.execute(schemacht::postgres::drop_table_statement<typename kind_t::schema_type>().on(layer<kind_t>().table())).get();
+    if ( ! layer<kind_t>().is_table() ) {
+      return;  // nothing to drop
+    }
+
+    database().execute(schemacht::postgres::drop_table_statement<typename kind_t::schema_type>().on(layer<kind_t>().table())).get();
   }
 
   /**
@@ -756,7 +887,7 @@ class Miniverse {
   [[nodiscard]] std::future<result_t> execute_as(make_t make, convert_t convert) {
     return schemacht::util::future_from<result_t>([&](const schemacht::util::Settler<result_t>& done) {
       detail::guarded(done, [&] {  // the statement may not get made: an argument could not be bound
-        _database.execute(make(), [done, convert = std::move(convert)](ResultRows<std::invoke_result_t<make_t>> rows, const std::exception_ptr& error) {
+        database().execute(make(), [done, convert = std::move(convert)](ResultRows<std::invoke_result_t<make_t>> rows, const std::exception_ptr& error) {
           if ( error ) {
             done.fail(error);
             return;

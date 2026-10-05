@@ -1,5 +1,8 @@
 #include "miniverse/gdal/raster.hpp"
 
+#include <boost/geometry/algorithms/envelope.hpp>  // IWYU pragma: keep
+#include <boost/geometry/geometries/box.hpp>
+
 #include <cpl_error.h>
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -14,6 +17,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <format>
 #include <functional>
 #include <limits>
@@ -64,6 +68,26 @@ struct Extent {
   double east = 0;
   double north = 0;
 };
+
+/**
+ * @brief How many of a grid's pixels there are to one of a file's, across and down: over the file as a whole. Given to every
+ * warp of the file, since GDAL would else work it out for each window by itself, a little differently for each where the
+ * file's pixels are not all of one size in degrees, and weigh the same file pixels differently from window to window.
+ */
+struct Scale {
+  double across = 1;
+  double down = 1;
+};
+
+/** @return The scale of `dataset`, whose extent is `extent`, on a grid of `pixels_per_degree`. */
+[[nodiscard]] Scale scale_of(GDALDataset& dataset, const Extent& extent, std::int64_t pixels_per_degree) {
+  const auto ppd = static_cast<double>(pixels_per_degree);
+
+  return {
+      .across = ((extent.east - extent.west) * ppd) / static_cast<double>(dataset.GetRasterXSize()),
+      .down = ((extent.north - extent.south) * ppd) / static_cast<double>(dataset.GetRasterYSize()),
+  };
+}
 
 /** @brief Tiles of the grid, counted east from longitude -180 and south from latitude 90: `first` to before `end`, each way. */
 struct Tiles {
@@ -226,7 +250,7 @@ template <geo::Pixel pixel_t>
 
 /** @brief Fills `window`'s pixels from `dataset`: warped onto the window's own pixels, the grid's nodata where it has no data. */
 template <geo::Pixel pixel_t>
-void warp_into(geo::Raster<pixel_t>& window, GDALDataset& dataset, const RasterSource& source, const std::int64_t pixels_per_degree) {
+void warp_into(geo::Raster<pixel_t>& window, GDALDataset& dataset, const RasterSource& source, const std::int64_t pixels_per_degree, const Scale& scale) {
   CPLErrorReset();  // from here, GDAL's last error is this window's own
 
   // The window's far edges, from its near ones and its size in pixels: with `-ts`, GDAL's pixels are then the grid's.
@@ -244,6 +268,8 @@ void warp_into(geo::Raster<pixel_t>& window, GDALDataset& dataset, const RasterS
       "-b",         std::to_string(source.band),
       "-et",        "0",     // exact, not approximated a scanline at a time: else a pixel depends on the window it is read in
       "-ovr",       "NONE",  // the file's own pixels, not its overviews
+      "-wo",        std::format("XSCALE={}", scale.across),  // the file's, not each window's own: for the same reason
+      "-wo",        std::format("YSCALE={}", scale.down),
   };
   std::vector<char*> arguments;
   arguments.reserve(words.size() + 1);
@@ -276,6 +302,104 @@ void warp_into(geo::Raster<pixel_t>& window, GDALDataset& dataset, const RasterS
   }
 }
 
+/** @return `source`'s file, opened for reading the band it names. */
+[[nodiscard]] GDALDatasetUniquePtr opened(const RasterSource& source) {
+  register_drivers();
+
+  GDALDatasetUniquePtr dataset(GDALDataset::Open(source.path.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR));
+  if ( ! dataset ) {
+    fail("'" + source.path + "' can't be opened as a raster file");
+  }
+
+  if ( source.band < 1 || source.band > dataset->GetRasterCount() ) {
+    throw std::runtime_error("'" + source.path + "' has " + std::to_string(dataset->GetRasterCount()) + " bands, so no band " + std::to_string(source.band));
+  }
+
+  return dataset;
+}
+
+/**
+ * @return The tiles of `grid` whose outlines the box of `location` meets, those it only touches too, within the world: the
+ * tiles a table's load gives for it (`RasterLayer::chunk_from_rows`). None, for a location of no points.
+ */
+template <geo::Pixel pixel_t>
+[[nodiscard]] Tiles tiles_meeting(const geo::Polygon& location, const geo::Grid<pixel_t>& grid) {
+  // Boost declares return_envelope in a detail header; algorithms/envelope.hpp is the public one.
+  const auto box = boost::geometry::return_envelope<boost::geometry::model::box<geo::Point>>(location);  // NOLINT(misc-include-cleaner)
+  if ( box.min_corner().x() > box.max_corner().x() ) {
+    return {};
+  }
+
+  if ( ! std::isfinite(box.min_corner().x()) || ! std::isfinite(box.min_corner().y()) || ! std::isfinite(box.max_corner().x()) ||
+       ! std::isfinite(box.max_corner().y()) ) {
+    throw std::invalid_argument("the coordinates of a location must be finite numbers");
+  }
+
+  const auto per_degree = static_cast<double>(grid.pixels_per_degree) / static_cast<double>(grid.tile_pixels);  // tiles
+  const auto ppd = static_cast<std::int64_t>(grid.pixels_per_degree);
+  const auto tile = static_cast<std::int64_t>(grid.tile_pixels);
+  const auto tiles_across = static_cast<double>(ceil_div(DEGREES_ACROSS * ppd, tile));
+  const auto tiles_down = static_cast<double>(ceil_div(DEGREES_DOWN * ppd, tile));
+
+  // A box that ends on a tile's edge meets the tile beyond it: the tolerance leans that way, where `tiles_of` leans the other.
+  const auto column = [&](double tiles) { return static_cast<std::int64_t>(std::clamp(tiles, 0.0, tiles_across)); };
+  const auto row = [&](double tiles) { return static_cast<std::int64_t>(std::clamp(tiles, 0.0, tiles_down)); };
+
+  return {
+      .first_column = column(std::floor(((box.min_corner().x() - WEST) * per_degree) - EDGE_TOLERANCE)),
+      .end_column = column(std::floor(((box.max_corner().x() - WEST) * per_degree) + EDGE_TOLERANCE) + 1),
+      .first_row = row(std::floor(((NORTH - box.max_corner().y()) * per_degree) - EDGE_TOLERANCE)),
+      .end_row = row(std::floor(((NORTH - box.min_corner().y()) * per_degree) + EDGE_TOLERANCE) + 1),
+  };
+}
+
+/** @return The tiles that are both in `one` and in `other`: none, if `first` is not before `end` each way. */
+[[nodiscard]] Tiles in_both(const Tiles& one, const Tiles& other) {
+  return {
+      .first_column = std::max(one.first_column, other.first_column),
+      .end_column = std::min(one.end_column, other.end_column),
+      .first_row = std::max(one.first_row, other.first_row),
+      .end_row = std::min(one.end_row, other.end_row),
+  };
+}
+
+[[nodiscard]] bool none(const Tiles& tiles) { return tiles.first_column >= tiles.end_column || tiles.first_row >= tiles.end_row; }
+
+template <geo::Pixel pixel_t>
+[[nodiscard]] bool has_no_data(const geo::Raster<pixel_t>& raster) {
+  return std::ranges::all_of(raster.pixels, [&raster](pixel_t pixel) { return pixel == raster.nodata; });
+}
+
+/**
+ * @return The tile of `grid` numbered `column` across, cut from `window`, a row of whole tiles that starts at the tile
+ * `first_column`: a whole tile always, the grid's nodata where the window was cut short at the world's edge.
+ */
+template <geo::Pixel pixel_t>
+[[nodiscard]] geo::Raster<pixel_t> tile_of(const geo::Raster<pixel_t>& window, std::int64_t column, std::int64_t first_column, const geo::Grid<pixel_t>& grid) {
+  const auto        tile = static_cast<std::size_t>(grid.tile_pixels);
+  const std::size_t from = static_cast<std::size_t>(column - first_column) * tile;  // the tile's first pixel across, in the window
+
+  // Its west edge from its place in the grid, as `window_of` and a table's tiles have theirs: the same number, to the last bit.
+  geo::Raster<pixel_t> cut{
+      .west = WEST + (static_cast<double>(column * static_cast<std::int64_t>(grid.tile_pixels)) / static_cast<double>(grid.pixels_per_degree)),
+      .north = window.north,
+      .pixel_width = window.pixel_width,
+      .pixel_height = window.pixel_height,
+      .width = tile,
+      .height = tile,
+      .nodata = grid.nodata,
+      .pixels = std::vector<pixel_t>(tile * tile, grid.nodata),
+  };
+
+  const std::size_t across = std::min(tile, window.width - from);
+  for ( std::size_t row = 0; row < window.height; ++row ) {
+    const auto first = window.pixels.begin() + static_cast<std::ptrdiff_t>((row * window.width) + from);
+    std::copy(first, first + static_cast<std::ptrdiff_t>(across), cut.pixels.begin() + static_cast<std::ptrdiff_t>(row * tile));
+  }
+
+  return cut;
+}
+
 }  // namespace
 
 template <geo::Pixel pixel_t>
@@ -286,23 +410,14 @@ RasterRead read_raster(
     throw std::invalid_argument("a window is at least one tile each way");
   }
 
-  if ( grid.pixels_per_degree < 1 || grid.tile_pixels < 1 ) {
-    throw std::invalid_argument("a grid has at least one pixel per degree, and tiles of at least one pixel");
-  }
+  geo::check_grid(grid);
 
-  register_drivers();
-  const QuietErrors quiet;
+  const QuietErrors          quiet;
+  const GDALDatasetUniquePtr dataset = opened(source);
 
-  const GDALDatasetUniquePtr dataset(GDALDataset::Open(source.path.c_str(), GDAL_OF_RASTER | GDAL_OF_READONLY | GDAL_OF_VERBOSE_ERROR));
-  if ( ! dataset ) {
-    fail("'" + source.path + "' can't be opened as a raster file");
-  }
-
-  if ( source.band < 1 || source.band > dataset->GetRasterCount() ) {
-    throw std::runtime_error("'" + source.path + "' has " + std::to_string(dataset->GetRasterCount()) + " bands, so no band " + std::to_string(source.band));
-  }
-
-  const Tiles tiles = tiles_of(extent_of(*dataset, source), grid);
+  const Extent extent = extent_of(*dataset, source);
+  const Tiles  tiles = tiles_of(extent, grid);
+  const Scale  scale = scale_of(*dataset, extent, grid.pixels_per_degree);
 
   // At most what fits the loop's whole numbers, whatever was asked for: a whole file as one window asks for the most there
   // is. A window is never wider than the world, so its pixels fit GDAL's int.
@@ -320,9 +435,9 @@ RasterRead read_raster(
            .end_row = std::min(row + step, tiles.end_row)},
           grid
       );
-      warp_into(window, *dataset, source, grid.pixels_per_degree);
+      warp_into(window, *dataset, source, grid.pixels_per_degree, scale);
 
-      if ( std::ranges::all_of(window.pixels, [&](pixel_t pixel) { return pixel == grid.nodata; }) ) {
+      if ( has_no_data(window) ) {
         ++read.without_data;
         continue;
       }
@@ -347,6 +462,74 @@ geo::Raster<pixel_t> read_raster(const RasterSource& source, const geo::Grid<pix
   return whole;
 }
 
+template <geo::Pixel pixel_t>
+void read_tiles_in(
+    const RasterSource& source, const geo::Grid<pixel_t>& grid, const geo::Polygon& location, std::size_t chunk_tiles,
+    const std::function<bool(std::vector<geo::Raster<pixel_t>>)>& on_chunk
+) {
+  if ( chunk_tiles == 0 ) {
+    throw std::invalid_argument("a chunk of tiles holds at least one");
+  }
+
+  geo::check_grid(grid);
+
+  const QuietErrors          quiet;
+  const GDALDatasetUniquePtr dataset = opened(source);
+
+  const Extent extent = extent_of(*dataset, source);
+  const Tiles  tiles = in_both(tiles_meeting(location, grid), tiles_of(extent, grid));
+  const Scale  scale = scale_of(*dataset, extent, grid.pixels_per_degree);
+
+  // Warped a run of tiles of one row at a time, then cut into its tiles: as many as a chunk holds, but no wider a run than
+  // some thousands of pixels, however large a chunk was asked for.
+  constexpr std::int64_t            RUN_PIXELS = 4096;
+  const std::int64_t                widest = std::max<std::int64_t>(1, RUN_PIXELS / grid.tile_pixels);
+  const auto                        run = static_cast<std::int64_t>(std::min<std::size_t>(chunk_tiles, static_cast<std::size_t>(widest)));
+  std::vector<geo::Raster<pixel_t>> chunk;
+  for ( std::int64_t row = tiles.first_row; row < tiles.end_row; ++row ) {
+    for ( std::int64_t first = tiles.first_column; first < tiles.end_column; first += run ) {
+      const std::int64_t   end = std::min(first + run, tiles.end_column);
+      geo::Raster<pixel_t> window = window_of<pixel_t>({.first_column = first, .end_column = end, .first_row = row, .end_row = row + 1}, grid);
+      warp_into(window, *dataset, source, grid.pixels_per_degree, scale);
+
+      for ( std::int64_t column = first; column < end; ++column ) {
+        geo::Raster<pixel_t> tile = tile_of(window, column, first, grid);
+        if ( has_no_data(tile) ) {
+          continue;
+        }
+
+        chunk.push_back(std::move(tile));
+        if ( chunk.size() == chunk_tiles ) {
+          if ( ! on_chunk(std::exchange(chunk, {})) ) {
+            return;
+          }
+
+          CPLErrorReset();  // GDAL's last error is this read's own from here on, not one `on_chunk` left
+        }
+      }
+    }
+  }
+
+  if ( ! chunk.empty() ) {
+    std::ignore = on_chunk(std::move(chunk));
+  }
+}
+
+template <geo::Pixel pixel_t>
+std::vector<std::string> problems_of(const RasterSource& source, const geo::Grid<pixel_t>& grid) {
+  try {
+    geo::check_grid(grid);
+
+    const QuietErrors          quiet;
+    const GDALDatasetUniquePtr dataset = opened(source);
+    std::ignore = extent_of(*dataset, source);
+
+    return {};
+  } catch ( const std::exception& unreadable ) {
+    return {unreadable.what()};
+  }
+}
+
 template RasterRead read_raster(const RasterSource&, const geo::Grid<std::int8_t>&, std::size_t, const std::function<void(geo::Raster<std::int8_t>)>&);
 template RasterRead read_raster(const RasterSource&, const geo::Grid<std::uint8_t>&, std::size_t, const std::function<void(geo::Raster<std::uint8_t>)>&);
 template RasterRead read_raster(const RasterSource&, const geo::Grid<std::int16_t>&, std::size_t, const std::function<void(geo::Raster<std::int16_t>)>&);
@@ -364,5 +547,40 @@ template geo::Raster<std::int32_t>  read_raster(const RasterSource&, const geo::
 template geo::Raster<std::uint32_t> read_raster(const RasterSource&, const geo::Grid<std::uint32_t>&);
 template geo::Raster<float>         read_raster(const RasterSource&, const geo::Grid<float>&);
 template geo::Raster<double>        read_raster(const RasterSource&, const geo::Grid<double>&);
+
+
+template void read_tiles_in(
+    const RasterSource&, const geo::Grid<std::int8_t>&, const geo::Polygon&, std::size_t, const std::function<bool(std::vector<geo::Raster<std::int8_t>>)>&
+);
+template void read_tiles_in(
+    const RasterSource&, const geo::Grid<std::uint8_t>&, const geo::Polygon&, std::size_t, const std::function<bool(std::vector<geo::Raster<std::uint8_t>>)>&
+);
+template void read_tiles_in(
+    const RasterSource&, const geo::Grid<std::int16_t>&, const geo::Polygon&, std::size_t, const std::function<bool(std::vector<geo::Raster<std::int16_t>>)>&
+);
+template void read_tiles_in(
+    const RasterSource&, const geo::Grid<std::uint16_t>&, const geo::Polygon&, std::size_t, const std::function<bool(std::vector<geo::Raster<std::uint16_t>>)>&
+);
+template void read_tiles_in(
+    const RasterSource&, const geo::Grid<std::int32_t>&, const geo::Polygon&, std::size_t, const std::function<bool(std::vector<geo::Raster<std::int32_t>>)>&
+);
+template void read_tiles_in(
+    const RasterSource&, const geo::Grid<std::uint32_t>&, const geo::Polygon&, std::size_t, const std::function<bool(std::vector<geo::Raster<std::uint32_t>>)>&
+);
+template void read_tiles_in(
+    const RasterSource&, const geo::Grid<float>&, const geo::Polygon&, std::size_t, const std::function<bool(std::vector<geo::Raster<float>>)>&
+);
+template void read_tiles_in(
+    const RasterSource&, const geo::Grid<double>&, const geo::Polygon&, std::size_t, const std::function<bool(std::vector<geo::Raster<double>>)>&
+);
+
+template std::vector<std::string> problems_of(const RasterSource&, const geo::Grid<std::int8_t>&);
+template std::vector<std::string> problems_of(const RasterSource&, const geo::Grid<std::uint8_t>&);
+template std::vector<std::string> problems_of(const RasterSource&, const geo::Grid<std::int16_t>&);
+template std::vector<std::string> problems_of(const RasterSource&, const geo::Grid<std::uint16_t>&);
+template std::vector<std::string> problems_of(const RasterSource&, const geo::Grid<std::int32_t>&);
+template std::vector<std::string> problems_of(const RasterSource&, const geo::Grid<std::uint32_t>&);
+template std::vector<std::string> problems_of(const RasterSource&, const geo::Grid<float>&);
+template std::vector<std::string> problems_of(const RasterSource&, const geo::Grid<double>&);
 
 }  // namespace miniverse::gdal
