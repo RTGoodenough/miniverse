@@ -1,6 +1,7 @@
 # Each example is a program of its own, run with a libpq connection string to a database with PostGIS (and postgis_raster,
 # for the raster ones). Each makes its own tables (miniverse_example_*) and drops them when it is done. The examples that
-# read files read the small ones of data/.
+# read files read the small ones of data/. The one exception is make_database, which makes a database of its own from files
+# it is given, and keeps it.
 function(miniverse_example name)
   add_executable(miniverse_example_${name} ${name}.cpp)
   target_link_libraries(miniverse_example_${name} PRIVATE ${ARGN})
@@ -23,4 +24,5 @@ endif()
 
 if(TARGET miniverse_gdal AND TARGET miniverse_osm)
   miniverse_example(local_files miniverse::gdal miniverse::osm)
+  miniverse_example(make_database miniverse::gdal miniverse::osm)
 endif()
