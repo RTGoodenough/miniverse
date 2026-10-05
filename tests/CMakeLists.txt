@@ -44,7 +44,7 @@ catch_discover_tests(miniverse_tests PROPERTIES RESOURCE_LOCK miniverse_test_db)
 # miniverse::gdal, if it was built: its own executable, so the tests above stay free of GDAL
 # ==============================================================================
 if(TARGET miniverse_gdal)
-  add_executable(miniverse_gdal_tests gdal/raster_test.cpp gdal/vector_test.cpp)
+  add_executable(miniverse_gdal_tests gdal/dataset_test.cpp gdal/raster_test.cpp gdal/vector_test.cpp)
   target_include_directories(miniverse_gdal_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   target_link_libraries(miniverse_gdal_tests PRIVATE miniverse::gdal GDAL::GDAL Catch2::Catch2WithMain)
   catch_discover_tests(miniverse_gdal_tests PROPERTIES RESOURCE_LOCK miniverse_test_db)

@@ -67,7 +67,8 @@ set_target_properties(miniverse PROPERTIES EXPORT_NAME miniverse)
 # ==============================================================================
 # Optional: miniverse::gdal, files read with GDAL
 # ==============================================================================
-# Its own library, so that the core never needs GDAL. Its headers are in include/miniverse/gdal.
+# Its own library, so that the core never needs GDAL. Its headers are in include/miniverse/gdal; one of them, dataset.hpp,
+# hands out GDAL's own dataset, so GDAL's headers come with the library.
 set(MINIVERSE_HAS_GDAL FALSE)
 string(TOUPPER "${MINIVERSE_BUILD_GDAL}" MINIVERSE_BUILD_GDAL_CHOICE)
 if(MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "ON")
@@ -82,8 +83,8 @@ endif()
 if(GDAL_FOUND AND NOT MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "OFF")
   set(MINIVERSE_HAS_GDAL TRUE)
 
-  add_library(miniverse_gdal STATIC src/gdal/raster.cpp src/gdal/vector.cpp)
-  target_link_libraries(miniverse_gdal PUBLIC miniverse::miniverse PRIVATE GDAL::GDAL)
+  add_library(miniverse_gdal STATIC src/gdal/dataset.cpp src/gdal/raster.cpp src/gdal/vector.cpp)
+  target_link_libraries(miniverse_gdal PUBLIC miniverse::miniverse GDAL::GDAL)
 
   add_library(miniverse::gdal ALIAS miniverse_gdal)
   set_target_properties(miniverse_gdal PROPERTIES EXPORT_NAME gdal)

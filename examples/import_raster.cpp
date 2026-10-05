@@ -1,4 +1,5 @@
-// A raster file into a raster layer: a GeoTIFF, or anything else GDAL opens, warped onto the table's grid.
+// A raster file into a raster layer: a GeoTIFF, or anything else GDAL opens, warped onto the table's grid. And back: what a
+// load gives, as a GDAL dataset.
 //
 // The file may be in any coordinate system and of any pixel size: each pixel of the table's grid is made from the file's
 // pixels around it. It is read a window of whole tiles at a time and written as one push in parts: all of it, or none. This
@@ -10,6 +11,10 @@
 // creates the table miniverse_example_heights, and drops it when it is done; a real uploader would keep it. A raster table's
 // setup also makes the schema miniverse_functions, which every raster table of the database shares, and which stays.
 
+#include <gdal.h>
+#include <gdal_priv.h>
+#include <ogr_spatialref.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -18,6 +23,7 @@
 #include <iostream>
 #include <utility>
 
+#include "miniverse/gdal/dataset.hpp"
 #include "miniverse/gdal/raster.hpp"
 #include "miniverse/miniverse.hpp"
 #include "support.hpp"
@@ -59,6 +65,13 @@ int main(int argc, char** argv) {
 
     std::cout << loaded.width << " by " << loaded.height << " pixels, the highest " << *std::ranges::max_element(loaded.pixels) << " m, "
               << std::ranges::count(loaded.pixels, loaded.nodata) << " with no data\n";
+
+    // The same load as GDAL's own dataset, held in memory: for GDAL's tools, or to write as a file of any format it has
+    // (`GetGDALDriverManager()->GetDriverByName("GTiff")->CreateCopy("heights.tif", dataset.get(), ...)`).
+    const GDALDatasetUniquePtr dataset = miniverse::gdal::dataset_of(loaded);
+
+    std::cout << "as a GDAL dataset: " << dataset->GetRasterXSize() << " by " << dataset->GetRasterYSize() << " pixels of "
+              << GDALGetDataTypeName(dataset->GetRasterBand(1)->GetRasterDataType()) << ", in " << dataset->GetSpatialRef()->GetName() << '\n';
 
     world.drop_tables();
 

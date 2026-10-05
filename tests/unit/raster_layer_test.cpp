@@ -374,5 +374,5 @@ TEST_CASE("raster layer: the load is aimed at the layer's table and reads tiles 
 
   const std::string load = std::string(Elevation::load_statement_type::bind(polygon("POLYGON((0 0,1 0,1 1,0 0))")).on(layer.table()).sql());
 
-  CHECK(load == R"(SELECT ST_AsBinary("rast") AS "rast" FROM "srtm" WHERE ST_Intersects("rast", $1::geometry(Polygon,4326)))");
+  CHECK(load == R"(SELECT ST_AsBinary("rast") AS "rast" FROM "srtm" WHERE ST_Intersects(ST_ConvexHull("rast"), $1::geometry(Polygon,4326)))");
 }

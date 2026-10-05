@@ -40,6 +40,7 @@ namespace miniverse::gdal {
 namespace {
 
 using detail::fail;
+using detail::gdal_type;
 using detail::QuietErrors;
 using detail::register_drivers;
 
@@ -97,37 +98,6 @@ struct Tiles {
   std::int64_t first_row = 0;
   std::int64_t end_row = 0;
 };
-
-/** @return The GDAL type that is `pixel_t`. */
-template <geo::Pixel pixel_t>
-[[nodiscard]] constexpr GDALDataType gdal_type() {
-  if constexpr ( std::same_as<pixel_t, std::int8_t> ) {
-    return GDT_Int8;
-
-  } else if constexpr ( std::same_as<pixel_t, std::uint8_t> ) {
-    return GDT_Byte;
-
-  } else if constexpr ( std::same_as<pixel_t, std::int16_t> ) {
-    return GDT_Int16;
-
-  } else if constexpr ( std::same_as<pixel_t, std::uint16_t> ) {
-    return GDT_UInt16;
-
-  } else if constexpr ( std::same_as<pixel_t, std::int32_t> ) {
-    return GDT_Int32;
-
-  } else if constexpr ( std::same_as<pixel_t, std::uint32_t> ) {
-    return GDT_UInt32;
-
-  } else if constexpr ( std::same_as<pixel_t, float> ) {
-    return GDT_Float32;
-
-  } else {
-    static_assert(std::same_as<pixel_t, double>, "a new pixel type needs its GDAL type here");
-
-    return GDT_Float64;
-  }
-}
 
 /** @return The name gdalwarp knows `resampling` by. */
 [[nodiscard]] constexpr std::string_view name_of(Resampling resampling) {

@@ -121,7 +121,7 @@ struct RasterLayer {
    */
   static constexpr auto LOAD =
       schemacht::query::select(
-          schemacht::query::On<schema_type>::template col<"rast">().template apply<geo::Intersects>(schemacht::query::arg<0>())
+          schemacht::query::On<schema_type>::template col<"rast">().template apply<geo::OutlineIntersects>(schemacht::query::arg<0>())
       )
           .project(schemacht::query::On<schema_type>::template col<"rast">());
   using load_statement_type = schemacht::query::Prepared<LOAD>;

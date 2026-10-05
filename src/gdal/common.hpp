@@ -3,11 +3,18 @@
 #include <cpl_error.h>
 #include <gdal.h>
 
+#include <concepts>
+#include <cstdint>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 
-/** What the files of miniverse::gdal share: GDAL's drivers registered once, and its errors made into exceptions. Not installed. */
+#include "miniverse/geo/concepts/raster.hpp"
+
+/**
+ * What the files of miniverse::gdal share: GDAL's drivers registered once, its errors made into exceptions, and its name for
+ * each pixel type. Not installed.
+ */
 namespace miniverse::gdal::detail {
 
 /** @brief Throws `std::runtime_error` with `what` and, if GDAL reported one, its own message. */
@@ -36,6 +43,37 @@ class QuietErrors {
 inline void register_drivers() {
   static std::once_flag registered;
   std::call_once(registered, [] { GDALAllRegister(); });
+}
+
+/** @return The GDAL type that is `pixel_t`. */
+template <geo::Pixel pixel_t>
+[[nodiscard]] constexpr GDALDataType gdal_type() {
+  if constexpr ( std::same_as<pixel_t, std::int8_t> ) {
+    return GDT_Int8;
+
+  } else if constexpr ( std::same_as<pixel_t, std::uint8_t> ) {
+    return GDT_Byte;
+
+  } else if constexpr ( std::same_as<pixel_t, std::int16_t> ) {
+    return GDT_Int16;
+
+  } else if constexpr ( std::same_as<pixel_t, std::uint16_t> ) {
+    return GDT_UInt16;
+
+  } else if constexpr ( std::same_as<pixel_t, std::int32_t> ) {
+    return GDT_Int32;
+
+  } else if constexpr ( std::same_as<pixel_t, std::uint32_t> ) {
+    return GDT_UInt32;
+
+  } else if constexpr ( std::same_as<pixel_t, float> ) {
+    return GDT_Float32;
+
+  } else {
+    static_assert(std::same_as<pixel_t, double>, "a new pixel type needs its GDAL type here");
+
+    return GDT_Float64;
+  }
 }
 
 }  // namespace miniverse::gdal::detail
