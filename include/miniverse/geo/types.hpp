@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include <boost/geometry/geometries/box.hpp>
 #include <boost/geometry/geometries/linestring.hpp>
 #include <boost/geometry/geometries/multi_linestring.hpp>
 #include <boost/geometry/geometries/multi_polygon.hpp>
@@ -21,6 +22,9 @@ inline constexpr std::int32_t WGS84_SRID = 4326;
 
 /** @brief A position: `x()` is the longitude, `y()` the latitude, in degrees. */
 using Point = boost::geometry::model::d2::point_xy<double>;
+
+/** @brief A box between two longitudes and two latitudes: `min_corner()` is its south-west corner, `max_corner()` its north-east. */
+using Box = boost::geometry::model::box<Point>;
 
 /** @brief A line through points, such as a road. */
 using LineString = boost::geometry::model::linestring<Point>;

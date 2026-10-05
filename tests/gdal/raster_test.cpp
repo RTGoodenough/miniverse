@@ -26,6 +26,7 @@
 #include <functional>
 #include <numbers>
 #include <stdexcept>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -443,6 +444,16 @@ TEST_CASE("gdal raster: a file as a layer loads the box's pixels on the grid, an
 
   CHECK(chunks == std::vector<std::size_t>{3, 1});
   CHECK(world.load<Elevation>(polygon("POLYGON((40 40,41 40,41 41,40 41,40 40))")).get() == Raster{});
+
+  // A triangle in the north west of the file: the south-east tile is in its box, and is not read.
+  const geo::Polygon  triangle = polygon("POLYGON((1.1 1.2,2.8 2.9,1.1 2.9,1.1 1.2))");
+  std::vector<Raster> reached;
+  world.stream<Elevation>(triangle, [&reached](std::vector<Raster> tiles) { reached.insert(reached.end(), tiles.begin(), tiles.end()); }).get();
+  const Raster askew = world.load<Elevation>(triangle).get();
+
+  CHECK(reached.size() == 3);
+  CHECK(askew.value_at({1.6, 2.4}) == 202);           // column 2, row 2 of the file
+  CHECK(askew.value_at({2.6, 1.4}) == std::nullopt);  // in the box, in the tile not read
 }
 
 TEST_CASE("gdal raster: verify says what keeps a file from being a layer", "[gdal]") {
@@ -488,7 +499,10 @@ TEST_CASE("integration: a raster file on the grid loads and streams as the table
           polygon("POLYGON((2 3,3 3,3 4,2 4,2 3))"),                          // north of it, touching its edge
           polygon("POLYGON((0.5 2.5,1.5 2.5,1.5 3.5,0.5 3.5,0.5 2.5))"),      // over its corner
           polygon("POLYGON((1.5 2.5,1.5 2.5,1.5 2.5,1.5 2.5))"),              // a point
-          polygon("POLYGON((1 2.6,3 1.2,2 1.2,1 2.6))"),                      // a triangle: its box
+          polygon("POLYGON((1 2.6,3 1.2,2 1.2,1 2.6))"),                      // a triangle: its box, from the tiles it reaches into
+          polygon("POLYGON((1.1 1.6,1.12 1.58,3.4 2.88,3.38 2.9,1.1 1.6))"),  // a strip askew: few of its box's tiles
+          polygon("POLYGON((0.5 0.5,4.5 0.5,4.5 3.5,0.5 3.5,0.5 0.5),(1.9 0.9,1.9 2.1,3.1 2.1,3.1 0.9,1.9 0.9))"),  // a tile in its hole
+          polygon("POLYGON((1.5 2,2.5 2,2.5 2,1.5 2))"),                      // a line along the line between tiles: nothing
           polygon("POLYGON((40 40,41 40,41 41,40 41,40 40))"),                // far away
       }
   );
@@ -509,6 +523,7 @@ TEST_CASE("integration: a raster file in another coordinate system loads and str
           polygon("POLYGON((1.3 2.3,1.6 2.3,1.6 2.6,1.3 2.6,1.3 2.3))"),
           polygon("POLYGON((1.5 1.5,2.5 1.5,2.5 2.5,1.5 2.5,1.5 1.5))"),
           polygon("POLYGON((2.6 0.5,3.4 0.5,3.4 1.4,2.6 1.4,2.6 0.5))"),  // over the file's south-east corner
+          polygon("POLYGON((1.1 1.2,1.12 1.18,2.9 2.88,2.88 2.9,1.1 1.2))"),  // a strip askew
           polygon("POLYGON((0 2,1 2,1 3,0 3,0 2))"),
           polygon("POLYGON((40 40,41 40,41 41,40 41,40 40))"),
       }
@@ -591,6 +606,9 @@ TEST_CASE("integration: on a grid of tenths of a degree, a raster file loads and
           polygon("POLYGON((1.5 1.5,3.5 1.5,3.5 2.5,1.5 2.5,1.5 1.5))"),
           polygon("POLYGON((0.7 2,1 2,1 3,0.7 3,0.7 2))"),    // west of it, touching its edge
           polygon("POLYGON((2.1 0.5,2.4 0.5,2.4 0.9,2.1 0.9,2.1 0.5))"),  // on a tile's edge at 2.1, south of the file
+          polygon("POLYGON((1.05 1.25,1.07 1.23,3.95 2.93,3.93 2.95,1.05 1.25))"),  // a strip askew, across tiles of three tenths
+          polygon("POLYGON((0.5 0.5,4.5 0.5,4.5 3.5,0.5 3.5,0.5 0.5),(1.7 1.4,1.7 2.5,2.8 2.5,2.8 1.4,1.7 1.4))"),  // tiles in its hole
+          polygon("POLYGON((1.2 1.5,1.2 2.4,2.1 2.4,2.1 1.5,1.2 1.5))"),      // its edges on tiles' edges, which no double holds
           polygon("POLYGON((40 40,41 40,41 41,40 41,40 40))"),
       },
       {.pixels_per_degree = 10, .tile_pixels = 3, .nodata = GRID_NODATA}

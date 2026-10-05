@@ -33,6 +33,7 @@
 #include "miniverse/geo/concepts/raster.hpp"
 #include "miniverse/geo/raster.hpp"
 #include "miniverse/geo/types.hpp"
+#include "miniverse/layer/raster_layer.hpp"
 
 namespace miniverse::gdal {
 
@@ -320,7 +321,7 @@ void warp_into(geo::Raster<pixel_t>& window, GDALDataset& dataset, const RasterS
 
 /**
  * @return The tiles of `grid` whose outlines the box of `location` meets, those it only touches too, within the world: the
- * tiles a table's load gives for it (`RasterLayer::chunk_from_rows`). None, for a location of no points.
+ * tiles a location can reach into, of which `raster::Reach` says which it does. None, for a location of no points.
  */
 template <geo::Pixel pixel_t>
 [[nodiscard]] Tiles tiles_meeting(const geo::Polygon& location, const geo::Grid<pixel_t>& grid) {
@@ -364,6 +365,29 @@ template <geo::Pixel pixel_t>
 }
 
 [[nodiscard]] bool none(const Tiles& tiles) { return tiles.first_column >= tiles.end_column || tiles.first_row >= tiles.end_row; }
+
+/** @return The outline of the tile of `grid` numbered `column` across and `row` down. */
+template <geo::Pixel pixel_t>
+[[nodiscard]] geo::Box outline_of(std::int64_t column, std::int64_t row, const geo::Grid<pixel_t>& grid) {
+  const auto tile = static_cast<std::int64_t>(grid.tile_pixels);
+  const auto ppd = static_cast<double>(grid.pixels_per_degree);
+  const auto degrees = [&](std::int64_t tiles) { return static_cast<double>(tiles * tile) / ppd; };
+
+  return {{WEST + degrees(column), NORTH - degrees(row + 1)}, {WEST + degrees(column + 1), NORTH - degrees(row)}};
+}
+
+/** @return The columns of the tiles of `run`, some of one row of `grid`, that `reach`'s location reaches into, from the west. */
+template <geo::Pixel pixel_t>
+[[nodiscard]] std::vector<std::int64_t> reached_of(const raster::Reach& reach, const Tiles& run, const geo::Grid<pixel_t>& grid) {
+  std::vector<std::int64_t> reached;
+  for ( std::int64_t column = run.first_column; column < run.end_column; ++column ) {
+    if ( reach.into(outline_of(column, run.first_row, grid)) ) {
+      reached.push_back(column);
+    }
+  }
+
+  return reached;
+}
 
 template <geo::Pixel pixel_t>
 [[nodiscard]] bool has_no_data(const geo::Raster<pixel_t>& raster) {
@@ -480,20 +504,29 @@ void read_tiles_in(
   const Tiles  tiles = in_both(tiles_meeting(location, grid), tiles_of(extent, grid));
   const Scale  scale = scale_of(*dataset, extent, grid.pixels_per_degree);
 
+  const raster::Reach reach(location);
+
   // Warped a run of tiles of one row at a time, then cut into its tiles: as many as a chunk holds, but no wider a run than
-  // some thousands of pixels, however large a chunk was asked for.
+  // some thousands of pixels, however large a chunk was asked for. Of a run, only from the first tile the location reaches
+  // into to the last, and of those only the ones it does reach into: the others are not read.
   constexpr std::int64_t            RUN_PIXELS = 4096;
   const std::int64_t                widest = std::max<std::int64_t>(1, RUN_PIXELS / grid.tile_pixels);
   const auto                        run = static_cast<std::int64_t>(std::min<std::size_t>(chunk_tiles, static_cast<std::size_t>(widest)));
   std::vector<geo::Raster<pixel_t>> chunk;
   for ( std::int64_t row = tiles.first_row; row < tiles.end_row; ++row ) {
     for ( std::int64_t first = tiles.first_column; first < tiles.end_column; first += run ) {
-      const std::int64_t   end = std::min(first + run, tiles.end_column);
-      geo::Raster<pixel_t> window = window_of<pixel_t>({.first_column = first, .end_column = end, .first_row = row, .end_row = row + 1}, grid);
+      const std::vector<std::int64_t> reached = reached_of(reach, {first, std::min(first + run, tiles.end_column), row, row + 1}, grid);
+      if ( reached.empty() ) {
+        continue;
+      }
+
+      geo::Raster<pixel_t> window = window_of<pixel_t>(
+          {.first_column = reached.front(), .end_column = reached.back() + 1, .first_row = row, .end_row = row + 1}, grid
+      );
       warp_into(window, *dataset, source, grid.pixels_per_degree, scale);
 
-      for ( std::int64_t column = first; column < end; ++column ) {
-        geo::Raster<pixel_t> tile = tile_of(window, column, first, grid);
+      for ( const std::int64_t column : reached ) {
+        geo::Raster<pixel_t> tile = tile_of(window, column, reached.front(), grid);
         if ( has_no_data(tile) ) {
           continue;
         }

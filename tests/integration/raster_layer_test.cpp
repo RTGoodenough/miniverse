@@ -178,8 +178,42 @@ TEST_CASE("integration: an elevation load gives the pixels in the polygon's box,
     }
   }
 
-  // The box, not the polygon: a triangle's pixels are its box's.
-  CHECK(tiled.world().load<TestElevation>(polygon("POLYGON((0 0,2 0,0 2,0 0))")).get() == heights);
+}
+
+TEST_CASE("integration: an elevation load of an area that runs askew reads the tiles it reaches into, not all of its box's", "[integration]") {
+  Tiled tiled(test_db());
+
+  // A triangle in the north west of the tiles: its box holds much of the south-east tile, which it comes no nearer than a
+  // tenth of a degree.
+  const geo::Polygon  triangle = polygon("POLYGON((0.1 0.2,1.8 1.9,0.1 1.9,0.1 0.2))");
+  std::vector<Raster> tiles;
+
+  const Raster heights = tiled.world().load<TestElevation>(triangle).get();
+  tiled.world().stream<TestElevation>(triangle, [&tiles](std::vector<Raster> chunk) { tiles.insert(tiles.end(), chunk.begin(), chunk.end()); }).get();
+
+  // The pixels of its box all the same, with no data where the tile was not read.
+  CHECK(heights.west == 0);
+  CHECK(heights.north == 2);
+  REQUIRE(heights.width == 8);
+  REQUIRE(heights.height == 8);
+  for ( std::size_t row = 0; row < heights.height; ++row ) {
+    for ( std::size_t column = 0; column < heights.width; ++column ) {
+      CHECK(heights.at(column, row) == (column >= 4 && row >= 4 ? NODATA : made(column, row)));
+    }
+  }
+
+  REQUIRE(tiles.size() == 2);
+  CHECK(tiles.front().west == 0);
+  CHECK(tiles.back().west == 0);
+}
+
+TEST_CASE("integration: an elevation load of a ring that is not closed fails, as PostGIS can't test it against a tile's outline", "[integration]") {
+  Tiled tiled(test_db());
+
+  geo::Polygon open_ring;
+  open_ring.outer() = {{0.1, 0.1}, {1.9, 0.1}, {1.9, 1.9}, {0.1, 1.9}};
+
+  CHECK_THROWS_AS(tiled.world().load<TestElevation>(open_ring).get(), schemacht::postgres::QueryError);
 }
 
 TEST_CASE("integration: an elevation load inside one tile is widened to whole pixels", "[integration]") {

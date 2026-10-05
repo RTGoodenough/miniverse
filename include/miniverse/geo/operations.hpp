@@ -14,6 +14,9 @@ namespace miniverse::geo {
 /**
  * @brief `ST_Intersects("column", $n::geometry(Polygon,4326))`: the geometry shares any point with a polygon. PostGIS 3 gives
  * the function a planner support function, so a GiST index on the column answers it.
+ *
+ * On a `raster` column it is the tile's outline (`ST_ConvexHull`) that is tested, whatever its pixels hold, and a GiST index
+ * on `ST_ConvexHull(rast)` narrows the tiles to those whose boxes meet the polygon's first, as `&&` does.
  */
 struct Intersects {
   static constexpr std::string_view FUNCTION = "ST_Intersects";

@@ -347,7 +347,7 @@ class Miniverse {
    *
    * A chunk is what a load would give, of `read.chunk_rows` rows (the last of what is left), as `ChunkOf` says:
    * - for a feature or road layer, that many features, in the load's order (by id);
-   * - for a raster layer, that many tiles, in no particular order, each whole: the tiles that meet `location`'s box, not cut
+   * - for a raster layer, that many tiles, in no particular order, each whole: the tiles `location` reaches into, not cut
    *   to it. A tile is megabytes, and about `chunk_rows` times `max_buffered_chunks` + 2 of them are held at once, so ask for a
    *   few at a time.
    *

@@ -1,6 +1,8 @@
 #include "miniverse/layer/raster_layer.hpp"
 
+#include <boost/geometry/algorithms/correct.hpp>
 #include <boost/geometry/algorithms/envelope.hpp>  // IWYU pragma: keep
+#include <boost/geometry/algorithms/intersects.hpp>  // IWYU pragma: keep
 #include <boost/geometry/geometries/box.hpp>
 
 #include <algorithm>
@@ -241,6 +243,29 @@ std::vector<std::vector<typename RasterLayer<pixel_t>::row_type>> RasterLayer<pi
   return batches;
 }
 
+namespace raster {
+
+Reach::Reach(geo::Polygon location) : _location(std::move(location)) {
+  boost::geometry::correct(_location);  // Boost's test, unlike PostGIS's, minds which way a ring runs round
+}
+
+bool Reach::into(const geo::Box& tile) const {
+  // How far into a tile a location must reach, in tiles: see the class.
+  constexpr double ROUNDING = 1e-9;
+
+  const double across = (tile.max_corner().x() - tile.min_corner().x()) * ROUNDING;
+  const double down = (tile.max_corner().y() - tile.min_corner().y()) * ROUNDING;
+
+  const geo::Box inside{
+      {tile.min_corner().x() + across, tile.min_corner().y() + down},
+      {tile.max_corner().x() - across, tile.max_corner().y() - down},
+  };
+
+  return boost::geometry::intersects(inside, _location);  // NOLINT(misc-include-cleaner)
+}
+
+}  // namespace raster
+
 template <geo::Pixel pixel_t>
 geo::Raster<pixel_t> RasterLayer<pixel_t>::from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location) {
   return window(chunk_from_rows(std::move(rows), location), location);
@@ -299,25 +324,13 @@ template <geo::Pixel pixel_t>
 std::vector<geo::Raster<pixel_t>> RasterLayer<pixel_t>::chunk_from_rows(
     std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location
 ) {
-  // The index that answers the load compares boxes rounded outward to single precision, so it finds a tile that ends a hair
-  // short of the location's box too. Only the tiles the box does meet, as whole numbers say, are the location's: touching counts.
-  const auto box = boost::geometry::return_envelope<boost::geometry::model::box<geo::Point>>(location);  // NOLINT(misc-include-cleaner)
-  const auto meets = [&box](const geo::Raster<pixel_t>& tile) {
-    // A box that ends on a tile's edge touches the tile, though the edge, worked out in degrees, may come a rounding step
-    // short of it: so touching is told in tiles, to a billionth of one, which is far finer than the index rounds.
-    constexpr double TOUCHING = -1e-9;
-    const double     across = static_cast<double>(tile.width) * tile.pixel_width;
-    const double     down = static_cast<double>(tile.height) * tile.pixel_height;
-
-    return (box.max_corner().x() - tile.west) / across >= TOUCHING && ((tile.west + across) - box.min_corner().x()) / across >= TOUCHING &&
-           (box.max_corner().y() - (tile.north - down)) / down >= TOUCHING && (tile.north - box.min_corner().y()) / down >= TOUCHING;
-  };
+  const raster::Reach reach(location);
 
   chunk_type tiles;
 
   tiles.reserve(rows.size());
   for ( auto& row : rows ) {
-    if ( geo::Raster<pixel_t>& tile = schemacht::schema::get<"rast">(row); meets(tile) ) {
+    if ( geo::Raster<pixel_t>& tile = schemacht::schema::get<"rast">(row); reach.into(tile.outline()) ) {
       tiles.push_back(std::move(tile));
     }
   }

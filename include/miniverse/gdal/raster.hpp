@@ -95,10 +95,11 @@ template <geo::Pixel pixel_t>
 [[nodiscard]] geo::Raster<pixel_t> read_raster(const RasterSource& source, const geo::Grid<pixel_t>& grid);
 
 /**
- * @brief Hands the tiles of `grid` that the box of `location`, a polygon in WGS 84, meets (those it only touches, too) to
- * `on_chunk`, each whole and as `read_raster` makes its pixels from `source`, `chunk_tiles` at a time (the last of what is
- * left), from the north west, row by row, on the calling thread, until it returns `false`. A tile with no data at all is
- * left out, as a table has none for it: what a table that the file was pushed into has for the location.
+ * @brief Hands the tiles of `grid` that `location`, a polygon in WGS 84, reaches into (`raster::Reach`: not those it only
+ * touches, nor those of its box that it does not reach, which are not read) to `on_chunk`, each whole and as `read_raster`
+ * makes its pixels from `source`, `chunk_tiles` at a time (the last of what is left), from the north west, row by row, on
+ * the calling thread, until it returns `false`. A tile with no data at all is left out, as a table has none for it: what
+ * a table that the file was pushed into has for the location.
  * @throws std::invalid_argument if `chunk_tiles` is 0, and as `read_raster`; std::runtime_error as `read_raster`.
  */
 template <geo::Pixel pixel_t>

@@ -52,12 +52,40 @@ struct MergeRaster {
   static constexpr std::string_view FUNCTION = "miniverse_functions.merge_raster";
 };
 
+/**
+ * @brief Which tiles of a grid a location has: those it reaches into. A load of a raster layer reads these and no others,
+ * from a table or from a file, so a long thin area that runs askew costs its own tiles, not all the tiles of its box.
+ *
+ * A tile the location only touches, at an edge or a corner, is not one of them: no pixel of the location is in it. Touching
+ * is told to a billionth of a tile's size, since a tile's edge, worked out in degrees, comes a rounding step to one side of
+ * where a location that ends on it was written: a location that reaches no further into a tile than that is not in it. So a
+ * location of no area, a point or a line, that lies along the line between tiles has no tile at all.
+ */
+class Reach {
+ public:
+  /** @param location A polygon in WGS 84. Its rings may run either way round. */
+  explicit Reach(geo::Polygon location);
+
+  /** @return Whether the location reaches into `tile`, a tile's outline. */
+  [[nodiscard]] bool into(const geo::Box& tile) const;
+
+  Reach(const Reach&) = default;
+  Reach(Reach&&) = default;
+  Reach& operator=(const Reach&) = default;
+  Reach& operator=(Reach&&) = default;
+  ~Reach() = default;
+
+ private:
+  geo::Polygon _location;
+};
+
 }  // namespace raster
 
 /**
  * @brief The layer kind of rasters of one band of `pixel_t`, such as elevation: one row per tile of the table's grid
  * (`geo::Grid`, its settings), which every source is warped onto. A load gives the pixels in the bounding box of the location,
- * from the tiles that cover it (see `from_rows`).
+ * from the tiles the location reaches into (`raster::Reach`; see `from_rows`): where the box holds a tile the location does
+ * not reach, as the box of an area that runs askew does, the pixels are nodata, though the table may have data there.
  *
  * @code
  * struct Elevation : miniverse::RasterLayer<std::int16_t> {};
@@ -87,10 +115,13 @@ struct RasterLayer {
   using schema_type = schemacht::schema::Schema<"raster", raster::TileId, raster::Rast<pixel_t>>;
   using row_type = schema_type::row_type;
 
-  /** @brief The tiles whose outline's box meets argument 0's box (the GiST index on `ST_ConvexHull(rast)` answers `&&`). */
+  /**
+   * @brief The tiles whose outlines argument 0 meets: those whose boxes meet its box, which the GiST index on
+   * `ST_ConvexHull(rast)` finds, and of them those the polygon itself meets.
+   */
   static constexpr auto LOAD =
       schemacht::query::select(
-          schemacht::query::On<schema_type>::template col<"rast">().template apply<geo::BoxesIntersect>(schemacht::query::arg<0>())
+          schemacht::query::On<schema_type>::template col<"rast">().template apply<geo::Intersects>(schemacht::query::arg<0>())
       )
           .project(schemacht::query::On<schema_type>::template col<"rast">());
   using load_statement_type = schemacht::query::Prepared<LOAD>;
@@ -146,22 +177,22 @@ struct RasterLayer {
     return schemacht::postgres::upsert_statement<schema_type, schemacht::postgres::MergeWith<"rast", raster::MergeRaster>>(rows);
   }
 
-  /** @return What `window` makes of the tiles `rows`: the pixels in the bounding box of `location`. */
+  /** @return What `window` makes of the tiles of `rows` that `location` reaches into: the pixels in its bounding box. */
   [[nodiscard]] static result_type from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location);
 
   /**
    * @return The pixels of `tiles`, rasters of one grid, in the bounding box of `location`, widened to whole pixels of that
    * grid. Pixels no tile covers are the tiles' nodata. With no tiles at all, there is no grid to place pixels on: the result
-   * is empty (0 by 0). What a load is, whether its tiles come from a table or from a reader of a file.
+   * is empty (0 by 0). What a load is, whether its tiles come from a table or from a reader of a file. It takes the tiles
+   * it is given: which tiles a location has is `chunk_from_rows`'s to say, and a file reader's.
    * @throws std::invalid_argument if the tiles don't share a grid (pixel size, alignment) and a nodata value.
    */
   [[nodiscard]] static result_type window(std::span<const geo::Raster<pixel_t>> tiles, const geo::Polygon& location);
 
   /**
-   * @return The tiles of `rows` whose outlines the box of `location` meets (touching counts), each as it is stored, in no
-   * particular order: whole tiles, not cut to the box. The rows may hold a tile more, which ends a hair short of the box:
-   * the index that answers a load compares boxes rounded outward. A tile is megabytes, so stream them a few at a time
-   * (`Miniverse::stream`'s `read.chunk_rows`).
+   * @return The tiles of `rows` that `location` reaches into (`raster::Reach`), each as it is stored, in no particular order:
+   * whole tiles, not cut to the location. The rows may hold a tile more, which the location only touches: the database's
+   * test counts touching. A tile is megabytes, so stream them a few at a time (`Miniverse::stream`'s `read.chunk_rows`).
    */
   [[nodiscard]] static chunk_type chunk_from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location);
 

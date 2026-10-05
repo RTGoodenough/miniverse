@@ -16,6 +16,8 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <optional>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -58,12 +60,9 @@ constexpr std::int16_t NODATA = -32768;
   return heights;
 }
 
-/** @return The height of the pixel of `heights` that `position` lies in. */
-[[nodiscard]] std::int16_t height_at(const Heights& heights, const geo::Point& position) {
-  const auto column = static_cast<std::size_t>((position.x() - heights.west) / heights.pixel_width);
-  const auto row = static_cast<std::size_t>((heights.north - position.y()) / heights.pixel_height);
-
-  return heights.at(column, row);
+/** @return A height in words. */
+[[nodiscard]] std::string in_words(std::optional<std::int16_t> height) {
+  return height ? std::to_string(*height) + " m" : "no height";
 }
 
 int main(int argc, char** argv) {
@@ -88,12 +87,16 @@ int main(int argc, char** argv) {
     Heights lake = surveyed(grid, 7.5, 46.75, 0.5, 0.25, [](std::size_t column) { return column < 30 ? std::int16_t{372} : NODATA; });
     world.push<Elevation>(std::move(lake)).get();
 
-    // A load gives the pixels in an area's box as one raster, stitched from the tiles that cover it.
+    // A load gives the pixels in an area's box as one raster, stitched from the tiles the area reaches into.
     const Heights heights = world.load<Elevation>(example::box(7.4, 46.4, 8.1, 46.9)).get();
 
     std::cout << heights.width << " by " << heights.height << " pixels from longitude " << heights.west << ", latitude " << heights.north << '\n';
-    std::cout << "  on the lake:      " << height_at(heights, {7.6, 46.6}) << " m\n";
-    std::cout << "  east of the lake: " << height_at(heights, {7.9, 46.6}) << " m (the first survey's)\n";
+
+    // A position's height is the value of the pixel it lies in: nothing, for a position outside the raster, and for a pixel
+    // with no data.
+    std::cout << "  on the lake:       " << in_words(heights.value_at({7.6, 46.6})) << '\n';
+    std::cout << "  east of the lake:  " << in_words(heights.value_at({7.9, 46.6})) << " (the first survey's)\n";
+    std::cout << "  north of the load: " << in_words(heights.value_at({7.6, 47.5})) << '\n';
 
     // A stream gives the tiles as they are stored, here two at a time: a worker with a large area holds a few tiles, not the
     // area. The callback runs on a thread of the miniverse's, one call at a time, while this thread only waits for the future:

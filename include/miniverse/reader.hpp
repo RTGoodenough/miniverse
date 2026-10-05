@@ -37,10 +37,10 @@ namespace miniverse {
 
 /**
  * @brief Throws unless `location` is a polygon every table's load takes: each of its rings closed (its last point its first
- * again), and of four points or more. PostGIS can't test an unclosed ring against a line or an area, and fails the load when
- * it comes to one (against points it has a test of its own, which does not mind); a miniverse refuses such a location for
- * every layer with a reader, before the reader is asked, so that a worker tried on files does not fail on tables. A polygon
- * of no points at all is taken: nothing is in it.
+ * again), and of four points or more. PostGIS can't test an unclosed ring against a line, an area or a raster's tile, and
+ * fails the load when it comes to one (against points it has a test of its own, which does not mind); a miniverse refuses
+ * such a location for every layer with a reader, before the reader is asked, so that a worker tried on files does not fail
+ * on tables. A polygon of no points at all is taken: nothing is in it.
  * @throws std::invalid_argument for such a ring.
  */
 inline void check_location(const geo::Polygon& location) {
