@@ -69,6 +69,11 @@ set_target_properties(miniverse PROPERTIES EXPORT_NAME miniverse)
 # ==============================================================================
 # Its own library, so that the core never needs GDAL. Its headers are in include/miniverse/gdal; one of them, dataset.hpp,
 # hands out GDAL's own dataset, so GDAL's headers come with the library.
+# GDAL 3.7 or newer: GDT_Int8 for rasters of std::int8_t (3.7), TransformBounds for a file's extent (3.4), prepared
+# geometries in the public API (3.3), and GDAL's own CMake package (3.5). Built with GEOS, which the usual packages are.
+# The version is checked after the find: GDAL's package only accepts a version of its own minor, so a minimum can't be
+# asked of find_package.
+set(MINIVERSE_MIN_GDAL 3.7)
 set(MINIVERSE_HAS_GDAL FALSE)
 string(TOUPPER "${MINIVERSE_BUILD_GDAL}" MINIVERSE_BUILD_GDAL_CHOICE)
 if(MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "ON")
@@ -77,6 +82,14 @@ elseif(MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "AUTO")
   find_package(GDAL CONFIG QUIET)
 elseif(NOT MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "OFF")
   message(FATAL_ERROR "MINIVERSE_BUILD_GDAL is '${MINIVERSE_BUILD_GDAL}': AUTO, ON or OFF")
+endif()
+
+if(GDAL_FOUND AND GDAL_VERSION VERSION_LESS MINIVERSE_MIN_GDAL)
+  if(MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "ON")
+    message(FATAL_ERROR "miniverse::gdal needs GDAL ${MINIVERSE_MIN_GDAL} or newer, found ${GDAL_VERSION}")
+  endif()
+  message(STATUS "GDAL ${GDAL_VERSION} found, but miniverse::gdal needs ${MINIVERSE_MIN_GDAL} or newer: not built")
+  set(GDAL_FOUND FALSE)
 endif()
 
 # Not for OFF, even if a project around this one has found GDAL for itself.

@@ -2,6 +2,7 @@
 
 #include <cpl_error.h>
 #include <cpl_json.h>
+#include <cpl_port.h>
 #include <gdal.h>
 #include <gdal_priv.h>
 #include <ogr_api.h>
@@ -190,6 +191,18 @@ template <geo::wkb::Geometry geometry_t>
   return transformation;
 }
 
+/**
+ * @return `value` as a JSON value of its own, to add to an object under any name. GDAL before 3.8 makes a value only as a
+ * member of an object, under a name it splits at `/`; so it is made under a plain name and taken out again.
+ */
+template <typename value_t>
+[[nodiscard]] CPLJSONObject json_value(value_t value) {
+  CPLJSONObject holder;
+  holder.Add("value", value);
+
+  return holder.GetObj("value");
+}
+
 /** @return The fields of `feature`, but for `id_field`, as one JSON object: see the top of vector.hpp. */
 [[nodiscard]] schemacht::json::Json tags_of(const OGRFeature& feature, int id_field) {
   const OGRFeatureDefn* fields = feature.GetDefnRef();
@@ -204,16 +217,16 @@ template <geo::wkb::Geometry geometry_t>
     const OGRFieldDefn* field = fields->GetFieldDefn(i);
     const OGRFieldType  type = field->GetType();
     if ( type == OFTInteger && field->GetSubType() == OFSTBoolean ) {
-      tags.AddNoSplitName(field->GetNameRef(), CPLJSONObject(feature.GetFieldAsInteger(i) != 0));
+      tags.AddNoSplitName(field->GetNameRef(), json_value(feature.GetFieldAsInteger(i) != 0));
 
     } else if ( type == OFTInteger || type == OFTInteger64 ) {
-      tags.AddNoSplitName(field->GetNameRef(), CPLJSONObject(static_cast<std::int64_t>(feature.GetFieldAsInteger64(i))));
+      tags.AddNoSplitName(field->GetNameRef(), json_value(static_cast<GInt64>(feature.GetFieldAsInteger64(i))));
 
     } else if ( type == OFTReal && std::isfinite(feature.GetFieldAsDouble(i)) ) {
-      tags.AddNoSplitName(field->GetNameRef(), CPLJSONObject(feature.GetFieldAsDouble(i)));
+      tags.AddNoSplitName(field->GetNameRef(), json_value(feature.GetFieldAsDouble(i)));
 
     } else {  // text, dates, lists; and a real that is not a number, which JSON has no way to write
-      tags.AddNoSplitName(field->GetNameRef(), CPLJSONObject(feature.GetFieldAsString(i)));
+      tags.AddNoSplitName(field->GetNameRef(), json_value(feature.GetFieldAsString(i)));
     }
   }
 

@@ -13,7 +13,7 @@ find_dependency(Boost 1.74)
 
 set(miniverse_gdal_FOUND @MINIVERSE_HAS_GDAL@)
 if(miniverse_gdal_FOUND)
-  find_dependency(GDAL CONFIG)
+  find_dependency(GDAL CONFIG)  # @MINIVERSE_MIN_GDAL@ or newer, which miniverse was built with
 endif()
 
 set(miniverse_osm_FOUND @MINIVERSE_HAS_OSM@)
