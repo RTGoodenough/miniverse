@@ -420,7 +420,7 @@ TEST_CASE("integration: an elevation load is answered by the index on the tiles'
 
   const std::string plan = plan_of(world.database(), sql, schemacht::ColumnType<geo::Polygon>::format(area));
 
-  CHECK(plan.contains("Index Scan using miniverse_test_elevation_st_convexhull_idx"));
+  CHECK(plan.find("Index Scan using miniverse_test_elevation_st_convexhull_idx") != std::string::npos);
 }
 
 TEST_CASE("integration: a push of several new tiles writes them all", "[integration]") {
