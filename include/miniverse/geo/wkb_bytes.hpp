@@ -16,7 +16,7 @@
 
 /**
  * @file
- * The bytes of well-known binary, geometry's (geo/wkb.hpp) and raster's (geo/raster.hpp) alike: a `Reader` for either
+ * The bytes of well-known binary, geometry's (geo/wkb.hpp) and raster's (geo/raster_wkb.hpp) alike: a `Reader` for either
  * byte order, as the data's own mark says, and a `Writer` that writes little-endian. For a WKB form of your own, such as
  * another PostGIS type read through `ST_AsBinary`.
  *

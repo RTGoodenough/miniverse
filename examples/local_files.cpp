@@ -20,9 +20,9 @@
 #include <future>
 #include <iostream>
 
-#include "miniverse/gdal/raster.hpp"
+#include "miniverse/gdal/gdal.hpp"
 #include "miniverse/miniverse.hpp"
-#include "miniverse/osm/ways.hpp"
+#include "miniverse/osm/osm.hpp"
 #include "support.hpp"
 
 namespace geo = miniverse::geo;
@@ -70,7 +70,7 @@ int main(int argc, char** argv) {
     const geo::Grid<std::int16_t> grid{.pixels_per_degree = geo::pixels_per_degree_of_metres(7000), .tile_pixels = 8, .nodata = -32768};
 
     // A world of files, with no connection string: nothing is connected to.
-    World files(miniverse::osm::road_file<Roads>(streets), miniverse::gdal::raster_file<Elevation>(heights, grid));
+    World        files(miniverse::osm::road_file<Roads>(streets), miniverse::gdal::raster_file<Elevation>(heights, grid));
     const Survey from_files = survey(files, area);
     std::cout << "from files:  " << from_files.roads << " roads of " << from_files.road_nodes << " nodes, the highest ground " << from_files.highest
               << " m\n";
@@ -87,8 +87,8 @@ int main(int argc, char** argv) {
     tables.push<Elevation>(miniverse::gdal::read_raster<std::int16_t>(heights, grid)).get();
     const Survey from_tables = survey(tables, area);
 
-    std::cout << "from tables: " << from_tables.roads << " roads of " << from_tables.road_nodes << " nodes, the highest ground " << from_tables.highest
-              << " m\n";
+    std::cout << "from tables: " << from_tables.roads << " roads of " << from_tables.road_nodes << " nodes, the highest ground "
+              << from_tables.highest << " m\n";
     std::cout << (from_files == from_tables ? "the same from both\n" : "NOT the same\n");
 
     tables.drop_tables();

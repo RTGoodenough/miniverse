@@ -1,11 +1,9 @@
-// The raster kind without a database: the table's setup, a raster cut into the grid's tiles, and tiles stitched into the
-// window a load asks for.
+// The raster kind without a database: the table's setup, its rows made from a raster in batches and back into the window
+// a load asks for, and its grid read back. Cutting and stitching are raster_tiles_test.cpp; which tiles a location has,
+// raster_reach_test.cpp.
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <boost/geometry/io/wkt/read.hpp>
-
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -19,9 +17,14 @@
 #include "miniverse/miniverse.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/table_name.hpp"
+#include "support/rasters.hpp"
 
-namespace bg = boost::geometry;
 namespace geo = miniverse::geo;
+
+using test::GRID;
+using test::NODATA;
+using test::numbered;
+using test::polygon;
 
 namespace {
 
@@ -30,28 +33,6 @@ struct Elevation : miniverse::RasterLayer<std::int16_t> {};
 using Raster = geo::Raster<std::int16_t>;
 using LoadedRow = Elevation::load_statement_type::result_type;
 using SettingsRow = Elevation::settings_statement_type::row_type;
-
-constexpr std::int16_t NODATA = -32768;
-
-// Four pixels to a degree, in tiles of one degree.
-constexpr geo::Grid<std::int16_t> GRID{.pixels_per_degree = 4, .tile_pixels = 4, .nodata = NODATA};
-
-[[nodiscard]] geo::Polygon polygon(const std::string& wkt) { return bg::from_wkt<geo::Polygon>(wkt); }
-
-/** @return `width` by `height` pixels of the grid from (`west`, `north`), each `column * 100 + row`. */
-[[nodiscard]] Raster numbered(double west, double north, std::size_t width, std::size_t height) {
-  Raster raster{
-      .west = west, .north = north, .pixel_width = 0.25, .pixel_height = 0.25, .width = width, .height = height, .nodata = NODATA, .pixels = {}
-  };
-
-  for ( std::size_t row = 0; row < height; ++row ) {
-    for ( std::size_t column = 0; column < width; ++column ) {
-      raster.pixels.push_back(static_cast<std::int16_t>((column * 100) + row));
-    }
-  }
-
-  return raster;
-}
 
 /** @return The rows of `batches`, in order: for checks that don't care about the batching. */
 [[nodiscard]] std::vector<Elevation::row_type> rows(std::vector<std::vector<Elevation::row_type>> batches) {
@@ -131,48 +112,7 @@ TEST_CASE("raster layer: a grid that is not one is refused", "[raster_layer]") {
   CHECK_NOTHROW(Elevation::setup_sql(table, {.pixels_per_degree = 36000, .tile_pixels = 4, .nodata = NODATA}));
   CHECK_THROWS_AS(Elevation::setup_sql(table, {.pixels_per_degree = 4, .tile_pixels = 0, .nodata = NODATA}), std::invalid_argument);
   CHECK_THROWS_AS(Elevation::setup_sql(table, {.pixels_per_degree = 4, .tile_pixels = 65536, .nodata = NODATA}), std::invalid_argument);
-  CHECK_THROWS_AS(
-      miniverse::RasterLayer<float>::setup_sql(table, {.pixels_per_degree = 4, .tile_pixels = 4, .nodata = NAN}), std::invalid_argument
-  );
-}
-
-TEST_CASE("raster layer: a raster is cut into the grid's tiles it covers", "[raster_layer]") {
-  // 6 by 6 pixels from (0.5, 1): columns 722 to 727 of the grid and rows 356 to 361, so tiles 180 and 181 across, 89 and 90 down.
-  const auto batches = Elevation::to_rows(numbered(0.5, 1, 6, 6), GRID);
-
-  // 360 tiles span the world, so tile 180 across and 89 down is 89 * 360 + 180. Four small tiles are one batch.
-  REQUIRE(batches.size() == 1);
-  const std::vector<Elevation::row_type>& rows = batches.front();
-  REQUIRE(rows.size() == 4);
-  CHECK(schemacht::schema::get<"tile_id">(rows.front()) == (89 * 360) + 180);
-
-  const Raster& tile = schemacht::schema::get<"rast">(rows.front());
-  CHECK(tile.west == 0);
-  CHECK(tile.north == 1);
-  CHECK(tile.width == 4);
-  CHECK(tile.height == 4);
-  CHECK(tile.pixel_width == 0.25);
-  CHECK(tile.at(0, 0) == NODATA);  // west of the raster
-  CHECK(tile.at(2, 0) == 0);       // the raster's first pixel
-  CHECK(tile.at(3, 3) == 103);
-
-  CHECK(schemacht::schema::get<"tile_id">(rows.back()) == (90 * 360) + 181);
-  CHECK(schemacht::schema::get<"rast">(rows.back()).at(0, 0) == 204);  // the raster's column 2, row 4
-}
-
-TEST_CASE("raster layer: a raster's own nodata becomes the grid's, and a tile with no data is left out", "[raster_layer]") {
-  Raster raster = numbered(0.5, 1, 2, 1);
-  raster.nodata = 0;  // the first pixel has no data, and now the second too: the one tile they are in is left out
-  raster.pixels.at(1) = 0;
-
-  CHECK(Elevation::to_rows(raster, GRID).empty());
-
-  raster.pixels.at(1) = 7;
-  const std::vector<Elevation::row_type> tiles = rows(Elevation::to_rows(raster, GRID));
-
-  REQUIRE(tiles.size() == 1);
-  CHECK(schemacht::schema::get<"rast">(tiles.front()).at(2, 0) == NODATA);
-  CHECK(schemacht::schema::get<"rast">(tiles.front()).at(3, 0) == 7);
+  CHECK_THROWS_AS(miniverse::RasterLayer<float>::setup_sql(table, {.pixels_per_degree = 4, .tile_pixels = 4, .nodata = NAN}), std::invalid_argument);
 }
 
 TEST_CASE("raster layer: tiles are written in batches of PIXEL_BYTES_PER_STATEMENT, by tile id", "[raster_layer]") {
@@ -180,7 +120,14 @@ TEST_CASE("raster layer: tiles are written in batches of PIXEL_BYTES_PER_STATEME
   constexpr geo::Grid<std::int16_t> COARSE_TILES{.pixels_per_degree = 3600, .tile_pixels = 2048, .nodata = NODATA};
   constexpr std::size_t             TILE = 2048;
   Raster                            raster{
-                                 .west = -180, .north = 90, .pixel_width = 1.0 / 3600, .pixel_height = 1.0 / 3600, .width = 5 * TILE, .height = TILE, .nodata = NODATA, .pixels = {}
+      .west = -180,
+      .north = 90,
+      .pixel_width = 1.0 / 3600,
+      .pixel_height = 1.0 / 3600,
+      .width = 5 * TILE,
+      .height = TILE,
+      .nodata = NODATA,
+      .pixels = {}
   };
   raster.pixels.assign(raster.width * raster.height, 1);
 
@@ -192,74 +139,20 @@ TEST_CASE("raster layer: tiles are written in batches of PIXEL_BYTES_PER_STATEME
   CHECK(schemacht::schema::get<"tile_id">(batches.front().front()) == 0);
   CHECK(schemacht::schema::get<"tile_id">(batches.front().back()) == 3);
   CHECK(schemacht::schema::get<"tile_id">(batches.back().front()) == 4);
-}
 
-TEST_CASE("raster layer: a pixel with data equal to the grid's nodata is refused, not lost", "[raster_layer]") {
-  Raster raster = numbered(0.5, 1, 2, 1);
-  raster.nodata = 0;
-  raster.pixels.at(1) = NODATA;  // has data in this raster, but would have none on the grid
-
-  CHECK_THROWS_AS(Elevation::to_rows(raster, GRID), std::invalid_argument);
-}
-
-TEST_CASE("raster layer: a raster not on the grid is not cut", "[raster_layer]") {
-  Raster other_size = numbered(0, 1, 2, 2);
-  other_size.pixel_width = other_size.pixel_height = 0.5;
-  Raster wrong_count = numbered(0, 1, 2, 2);
-  wrong_count.pixels.pop_back();
-
-  CHECK_THROWS_AS(Elevation::to_rows(other_size, GRID), std::invalid_argument);
-  CHECK_THROWS_AS(Elevation::to_rows(numbered(0.1, 1, 2, 2), GRID), std::invalid_argument);      // between pixels
-  CHECK_THROWS_AS(Elevation::to_rows(numbered(-180.25, 1, 2, 2), GRID), std::invalid_argument);  // west of the world
-  CHECK_THROWS_AS(Elevation::to_rows(numbered(179.75, 1, 2, 2), GRID), std::invalid_argument);   // east of it
-  CHECK_THROWS_AS(Elevation::to_rows(std::move(wrong_count), GRID), std::invalid_argument);
+  // Four small tiles are one batch.
+  CHECK(Elevation::to_rows(numbered(0.5, 1, 6, 6), GRID).size() == 1);
 }
 
 TEST_CASE("raster layer: a grid that is not one is refused before a raster is cut with it", "[raster_layer]") {
   CHECK_THROWS_AS(Elevation::to_rows(numbered(0, 1, 2, 2), {.pixels_per_degree = 4, .tile_pixels = 0, .nodata = NODATA}), std::invalid_argument);
-  CHECK_THROWS_AS(Elevation::to_rows(numbered(0, 1, 2, 2), {.pixels_per_degree = 0, .tile_pixels = 4, .nodata = NODATA}), std::invalid_argument);
-}
-
-TEST_CASE("raster layer: tiles stitched over a raster's own box give the raster back", "[raster_layer]") {
-  const Raster raster = numbered(0.5, 1, 6, 6);
-
-  CHECK(Elevation::from_rows(loaded(rows(Elevation::to_rows(raster, GRID))), polygon("POLYGON((0.5 -0.5,2 -0.5,2 1,0.5 1,0.5 -0.5))")) == raster);
-}
-
-TEST_CASE("raster layer: a box is widened to whole pixels, and pixels no tile covers are nodata", "[raster_layer]") {
-  const std::vector<LoadedRow> tiles = loaded(rows(Elevation::to_rows(numbered(0, 1, 4, 4), GRID)));  // the one tile from (0, 1) to (1, 0)
-
-  // Inside the tile, off its pixels' edges: pixels 1 to 2 across (0.25 to 0.75) and 1 to 2 down (latitude 0.75 to 0.25).
-  const Raster inside = Elevation::from_rows(tiles, polygon("POLYGON((0.3 0.3,0.6 0.3,0.6 0.6,0.3 0.6,0.3 0.3))"));
-  CHECK(inside.west == 0.25);
-  CHECK(inside.north == 0.75);
-  CHECK(inside.width == 2);
-  CHECK(inside.height == 2);
-  CHECK(inside.pixels == std::vector<std::int16_t>{101, 201, 102, 202});
-
-  // Half a degree past the tile to the west: two pixels of nodata, then the tile's first column.
-  const Raster past = Elevation::from_rows(tiles, polygon("POLYGON((-0.5 0.75,0.25 0.75,0.25 1,-0.5 1,-0.5 0.75))"));
-  CHECK(past.west == -0.5);
-  CHECK(past.width == 3);
-  CHECK(past.height == 1);
-  CHECK(past.pixels == std::vector<std::int16_t>{NODATA, NODATA, 0});
-
-  // A point is one pixel.
-  CHECK(Elevation::from_rows(tiles, polygon("POLYGON((0.3 0.6,0.3 0.6,0.3 0.6,0.3 0.6))")).pixels == std::vector<std::int16_t>{101});
-}
-
-TEST_CASE("raster layer: with no tiles there is no grid, so the window is empty", "[raster_layer]") {
-  const Raster empty = Elevation::from_rows({}, polygon("POLYGON((0 0,1 0,1 1,0 1,0 0))"));
-
-  CHECK(empty.width == 0);
-  CHECK(empty.height == 0);
-  CHECK(empty.pixels.empty());
 }
 
 TEST_CASE("raster layer: a streamed chunk is its tiles, each whole", "[raster_layer]") {
   // Two tiles side by side, from (0, 1) and from (1, 1).
-  const std::vector<Raster> tiles =
-      Elevation::chunk_from_rows(loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID))), polygon("POLYGON((0.5 0.2,1.5 0.2,1.5 0.8,0.5 0.8,0.5 0.2))"));
+  const std::vector<Raster> tiles = Elevation::chunk_from_rows(
+      loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID))), polygon("POLYGON((0.5 0.2,1.5 0.2,1.5 0.8,0.5 0.8,0.5 0.2))")
+  );
 
   REQUIRE(tiles.size() == 2);
   CHECK(tiles.front().west == 0);
@@ -268,71 +161,21 @@ TEST_CASE("raster layer: a streamed chunk is its tiles, each whole", "[raster_la
   CHECK(tiles.back().at(0, 0) == 400);  // the raster's column 4, row 0
 }
 
-TEST_CASE("raster layer: a tile the location only touches, or reaches into by no more than a rounding, is not the location's", "[raster_layer]") {
-  // Two tiles side by side, from (0, 1) and from (1, 1), as the database finds them both for a location that touches them.
-  const auto tiles_in = [](const std::string& wkt) {
-    return Elevation::chunk_from_rows(loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID))), polygon(wkt)).size();
-  };
+TEST_CASE("raster layer: a load of a location that reaches no tile is as empty as where there is no tile at all", "[raster_layer]") {
+  // Two tiles side by side, from (0, 1) and from (1, 1), as the database finds them for a location that touches them.
+  const std::vector<LoadedRow> tiles = loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID)));
 
-  CHECK(tiles_in("POLYGON((1 0.2,1.5 0.2,1.5 0.8,1 0.8,1 0.2))") == 1);                          // ending on the west tile's edge: the east one alone
-  CHECK(tiles_in("POLYGON((0.9999999 0.2,1.5 0.2,1.5 0.8,0.9999999 0.8,0.9999999 0.2))") == 2);  // a hair into the west tile: both
-  CHECK(tiles_in("POLYGON((0.999999999999 0.2,1.5 0.2,1.5 0.8,0.999999999999 0.8,0.999999999999 0.2))") == 1);  // a rounding into it: as on its edge
-  CHECK(tiles_in("POLYGON((1.0000001 0.2,1.5 0.2,1.5 0.8,1.0000001 0.8,1.0000001 0.2))") == 1);
-  CHECK(tiles_in("POLYGON((2.0000001 0.2,2.5 0.2,2.5 0.8,2.0000001 0.8,2.0000001 0.2))") == 0);
-  CHECK(tiles_in("POLYGON((0.5 1,1.5 1,1.5 2,0.5 2,0.5 1))") == 0);                              // touching both from the north: neither
-  CHECK(Elevation::chunk_from_rows(loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID))), {}).empty());  // a location of no points
-
-  // And a load of it is then as empty as where there is no tile at all.
-  CHECK(
-      Elevation::from_rows(loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID))), polygon("POLYGON((2.0000001 0.2,2.5 0.2,2.5 0.8,2.0000001 0.8,2.0000001 0.2))")) ==
-      Raster{}
-  );
+  CHECK(Elevation::chunk_from_rows(tiles, {}).empty());  // a location of no points
+  CHECK(Elevation::from_rows(tiles, polygon("POLYGON((2.0000001 0.2,2.5 0.2,2.5 0.8,2.0000001 0.8,2.0000001 0.2))")) == Raster{});
 }
 
 namespace {
 
-/** @return Where the tiles of nine, three by three from (0, 3), that `wkt` has lie: the west and north of each, from the north west. */
-[[nodiscard]] std::vector<std::pair<double, double>> tiles_of_nine_in(const std::string& wkt) {
-  std::vector<std::pair<double, double>> corners;
-  for ( const Raster& tile : Elevation::chunk_from_rows(loaded(rows(Elevation::to_rows(numbered(0, 3, 12, 12), GRID))), polygon(wkt)) ) {
-    corners.emplace_back(tile.west, tile.north);
-  }
-
-  std::ranges::sort(corners, [](const auto& one, const auto& other) { return one.second != other.second ? one.second > other.second : one.first < other.first; });
-
-  return corners;
-}
-
 // A strip a fiftieth of a degree wide from the south west to the north east, half a degree north of the diagonal: its box
-// is nearly all of the nine tiles, and it crosses five of them, none at a corner.
+// is nearly all of nine tiles three by three from (0, 3), and it crosses five of them.
 const std::string STRIP = "POLYGON((0.1 0.6,0.12 0.58,2.42 2.88,2.4 2.9,0.1 0.6))";
 
 }  // namespace
-
-TEST_CASE("raster layer: an area that runs askew has the tiles it reaches into, not all the tiles of its box", "[raster_layer]") {
-  using Corners = std::vector<std::pair<double, double>>;
-
-  CHECK(tiles_of_nine_in("POLYGON((0.1 0.1,2.9 0.1,2.9 2.9,0.1 2.9,0.1 0.1))").size() == 9);  // the strip's box, near enough
-  CHECK(tiles_of_nine_in(STRIP) == Corners{{1, 3}, {2, 3}, {0, 2}, {1, 2}, {0, 1}});
-
-  // Whichever way its ring runs round.
-  CHECK(tiles_of_nine_in("POLYGON((0.1 0.6,2.4 2.9,2.42 2.88,0.12 0.58,0.1 0.6))") == tiles_of_nine_in(STRIP));
-
-  // A tile that lies in a hole of the area is not reached, though the area is all around it.
-  CHECK(
-      tiles_of_nine_in("POLYGON((0.1 0.1,2.9 0.1,2.9 2.9,0.1 2.9,0.1 0.1),(0.9 0.9,0.9 2.1,2.1 2.1,2.1 0.9,0.9 0.9))") ==
-      Corners{{0, 3}, {1, 3}, {2, 3}, {0, 2}, {2, 2}, {0, 1}, {1, 1}, {2, 1}}
-  );
-}
-
-TEST_CASE("raster layer: an area of no size has the tile it lies in, and none if it lies along the line between tiles", "[raster_layer]") {
-  using Corners = std::vector<std::pair<double, double>>;
-
-  CHECK(tiles_of_nine_in("POLYGON((1.5 1.5,1.5 1.5,1.5 1.5,1.5 1.5))") == Corners{{1, 2}});                    // a point
-  CHECK(tiles_of_nine_in("POLYGON((0.5 1.5,2.5 1.5,2.5 1.5,0.5 1.5))") == Corners{{0, 2}, {1, 2}, {2, 2}});  // a line
-  CHECK(tiles_of_nine_in("POLYGON((1 1,1 1,1 1,1 1))").empty());                                             // a point on a corner
-  CHECK(tiles_of_nine_in("POLYGON((0.5 1,2.5 1,2.5 1,0.5 1))").empty());                                     // a line along one
-}
 
 TEST_CASE("raster layer: a load of an area that runs askew is its box, with no data in the tiles it does not reach", "[raster_layer]") {
   const Raster heights = Elevation::from_rows(loaded(rows(Elevation::to_rows(numbered(0, 3, 12, 12), GRID))), polygon(STRIP));
@@ -346,14 +189,6 @@ TEST_CASE("raster layer: a load of an area that runs askew is its box, with no d
   CHECK(heights.value_at({1.1, 1.6}) == 405);           // in a tile the strip crosses, though not on the strip: column 4, row 5
   CHECK(heights.value_at({2.1, 0.9}) == std::nullopt);  // in the box, in a tile the strip does not reach
   CHECK(heights.value_at({0.6, 2.4}) == std::nullopt);
-}
-
-TEST_CASE("raster layer: tiles that don't share a grid are not stitched", "[raster_layer]") {
-  std::vector<LoadedRow> tiles = loaded(rows(Elevation::to_rows(numbered(0, 1, 8, 4), GRID)));
-  REQUIRE(tiles.size() == 2);
-  std::get<0>(tiles.back()).value.west += 0.1;
-
-  CHECK_THROWS_AS(Elevation::from_rows(tiles, polygon("POLYGON((0 0,2 0,2 1,0 1,0 0))")), std::invalid_argument);
 }
 
 TEST_CASE("raster layer: the grid is read back from raster_columns", "[raster_layer]") {

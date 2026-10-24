@@ -1,4 +1,4 @@
-#include "miniverse/geo/raster.hpp"
+#include "miniverse/geo/raster_wkb.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include "miniverse/geo/concepts/raster.hpp"
+#include "miniverse/geo/raster.hpp"
 #include "miniverse/geo/types.hpp"
 #include "miniverse/geo/wkb_bytes.hpp"
 

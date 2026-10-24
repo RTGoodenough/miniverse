@@ -30,7 +30,7 @@
 #include <vector>
 
 #include "miniverse/miniverse.hpp"
-#include "miniverse/osm/ways.hpp"
+#include "miniverse/osm/osm.hpp"
 #include "schemacht/postgres/async_client.hpp"
 #include "support/files.hpp"
 

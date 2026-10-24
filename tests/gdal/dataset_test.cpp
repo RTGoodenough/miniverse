@@ -16,6 +16,7 @@
 
 #include "miniverse/gdal/dataset.hpp"
 #include "miniverse/gdal/raster.hpp"
+#include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/raster.hpp"
 #include "support/files.hpp"
 
@@ -33,7 +34,9 @@ constexpr geo::Grid<std::int16_t> GRID{.pixels_per_degree = 4, .tile_pixels = 4,
 
 /** @return 8 by 4 pixels of the grid from (1, 3), each `column * 100 + row`, but the first, which has no data. */
 [[nodiscard]] geo::Raster<std::int16_t> heights() {
-  geo::Raster<std::int16_t> raster{.west = 1, .north = 3, .pixel_width = 0.25, .pixel_height = 0.25, .width = 8, .height = 4, .nodata = NODATA, .pixels = {}};
+  geo::Raster<std::int16_t> raster{
+      .west = 1, .north = 3, .pixel_width = 0.25, .pixel_height = 0.25, .width = 8, .height = 4, .nodata = NODATA, .pixels = {}
+  };
   for ( std::size_t row = 0; row < raster.height; ++row ) {
     for ( std::size_t column = 0; column < raster.width; ++column ) {
       raster.pixels.push_back(static_cast<std::int16_t>((column * 100) + row));
@@ -88,7 +91,14 @@ TEST_CASE("gdal dataset: the dataset has the raster's pixels, and keeps them whe
 
 TEST_CASE("gdal dataset: a raster of reals is a dataset of reals", "[gdal]") {
   const geo::Raster<float> raster{
-      .west = -71.5, .north = 42.25, .pixel_width = 0.5, .pixel_height = 0.5, .width = 2, .height = 2, .nodata = -9999.0F, .pixels = {1.5F, -9999.0F, 0.25F, 4321.125F}
+      .west = -71.5,
+      .north = 42.25,
+      .pixel_width = 0.5,
+      .pixel_height = 0.5,
+      .width = 2,
+      .height = 2,
+      .nodata = -9999.0F,
+      .pixels = {1.5F, -9999.0F, 0.25F, 4321.125F}
   };
 
   const GDALDatasetUniquePtr dataset = gdal::dataset_of(raster);
@@ -107,7 +117,9 @@ TEST_CASE("gdal dataset: written as a GeoTIFF, it reads back as the raster it wa
 
   {
     const GDALDatasetUniquePtr dataset = gdal::dataset_of(raster);
-    const GDALDatasetUniquePtr written(GetGDALDriverManager()->GetDriverByName("GTiff")->CreateCopy(path.c_str(), dataset.get(), 0, nullptr, nullptr, nullptr));
+    const GDALDatasetUniquePtr written(
+        GetGDALDriverManager()->GetDriverByName("GTiff")->CreateCopy(path.c_str(), dataset.get(), 0, nullptr, nullptr, nullptr)
+    );
     REQUIRE(written);
   }
 

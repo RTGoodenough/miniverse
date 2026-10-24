@@ -12,7 +12,7 @@
 #include <limits>
 #include <stdexcept>
 
-#include "common.hpp"
+#include "gdal/common.hpp"
 #include "miniverse/geo/concepts/raster.hpp"
 #include "miniverse/geo/raster.hpp"
 #include "miniverse/geo/types.hpp"

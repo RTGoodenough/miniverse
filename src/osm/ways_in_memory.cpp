@@ -1,5 +1,5 @@
 #include <boost/geometry/algorithms/correct.hpp>
-#include <boost/geometry/algorithms/envelope.hpp>  // IWYU pragma: keep
+#include <boost/geometry/algorithms/envelope.hpp>    // IWYU pragma: keep
 #include <boost/geometry/algorithms/intersects.hpp>  // IWYU pragma: keep
 #include <boost/geometry/geometries/box.hpp>
 #include <boost/geometry/index/parameters.hpp>
@@ -17,8 +17,8 @@
 #include <vector>
 
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer/road_layer.hpp"
-#include "miniverse/osm/ways.hpp"
+#include "miniverse/layer/way.hpp"
+#include "miniverse/osm/ways_in_memory.hpp"
 
 namespace miniverse::osm {
 

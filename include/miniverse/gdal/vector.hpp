@@ -2,24 +2,17 @@
 
 #include <cstddef>
 #include <functional>
-#include <limits>
-#include <memory>
 #include <string>
-#include <tuple>
-#include <utility>
 #include <vector>
 
-#include "miniverse/gdal/concepts/vector.hpp"  // IWYU pragma: export
 #include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer.hpp"
-#include "miniverse/layer/feature_layer.hpp"
-#include "miniverse/reader.hpp"
+#include "miniverse/layer/feature.hpp"
 
 /**
  * @file
  * Vector files as features, read with GDAL's OGR: a GeoPackage, a shapefile, GeoJSON, or anything else OGR opens, as the
- * `Features` a `FeatureLayer` is pushed.
+ * `Features` a `FeatureLayer` is pushed, or read in its place (feature_file.hpp).
  *
  * @code
  * struct Buildings : miniverse::FeatureLayer<miniverse::geo::MultiPolygon> {};
@@ -43,10 +36,11 @@
  *   the later is kept.
  * - **Ids** are OGR's own (FID), or a whole-number field's. A feature with neither is an error.
  *
- * A file can also be a layer itself, read in place of a table (`feature_file`, at the end of this file): for a test, or a
- * user with files alone.
+ * A file can also be a layer itself, read in place of a table (`feature_file`, feature_file.hpp): for a test, or a user with
+ * files alone.
  *
- * This is the optional component `miniverse::gdal` (CMake: `MINIVERSE_BUILD_GDAL`); the rest of miniverse does not need GDAL.
+ * Part of the optional component `miniverse::gdal` (CMake: `MINIVERSE_BUILD_GDAL`; gdal.hpp includes all of it); the rest of
+ * miniverse does not need GDAL.
  * Errors are `std::runtime_error` with GDAL's own message. While a read runs, GDAL's errors on the calling thread are kept
  * for those messages, not printed: also the ones GDAL calls made inside `on_chunk` raise.
  */
@@ -106,70 +100,15 @@ VectorRead read_features_in(
 template <geo::wkb::Geometry geometry_t>
 [[nodiscard]] std::vector<std::string> problems_of(const VectorSource& source);
 
-/**
- * @brief The reader of a vector file as a layer of `kind_t`: what `feature_file` makes a layer with. A load gives the file's
- * features that intersect the location, in the file's order (a table's are by id), their tags as `read_features` writes them
- * (a table's are as `jsonb` prints them: the same document, another text); each load opens the file for itself, so loads
- * run side by side.
- */
-template <FeatureKind kind_t>
-class FeatureFile : public Reader<kind_t> {
- public:
-  explicit FeatureFile(VectorSource source) : _source(std::move(source)) {}
-
-  [[nodiscard]] std::string name() const override { return "'" + _source.path + "'"; }
-
-  [[nodiscard]] typename kind_t::result_type load(const geo::Polygon& location) const override {
-    typename kind_t::result_type all;
-
-    // One chunk, of however many there are.
-    std::ignore = read_features_in<GeometryOf<kind_t>>(_source, location, std::numeric_limits<std::size_t>::max(), [&all](auto chunk) {
-      all = std::move(chunk);
-
-      return true;
-    });
-
-    return all;
-  }
-
-  void stream(const geo::Polygon& location, std::size_t chunk_rows, const Reader<kind_t>::OnChunk& on_chunk) const override {
-    std::ignore = read_features_in<GeometryOf<kind_t>>(_source, location, chunk_rows, on_chunk);
-  }
-
-  [[nodiscard]] std::vector<std::string> problems() const override { return problems_of<GeometryOf<kind_t>>(_source); }
-
- private:
-  VectorSource _source;
-
- public:
-  FeatureFile(const FeatureFile&) = delete;
-  FeatureFile(FeatureFile&&) = delete;
-  FeatureFile& operator=(const FeatureFile&) = delete;
-  FeatureFile& operator=(FeatureFile&&) = delete;
-  ~FeatureFile() override = default;
-};
-
-/**
- * @return The layer of `kind_t` that is `source`, a vector file, read in place of a table:
- *
- * @code
- * miniverse::Miniverse world(miniverse::gdal::feature_file<Buildings>({.path = "buildings.gpkg"}));
- * world.load<Buildings>(area).get();  // the file's buildings that intersect the area
- * @endcode
- *
- * The file is not opened until a load, or `Miniverse::verify`, which says what is wrong with it.
- */
-template <FeatureKind kind_t>
-[[nodiscard]] Layer<kind_t> feature_file(VectorSource source) {
-  return Layer<kind_t>(std::make_shared<FeatureFile<kind_t>>(std::move(source)));
-}
-
 extern template VectorRead read_features<geo::Point>(const VectorSource&, std::size_t, const std::function<void(Features<geo::Point>)>&);
 extern template VectorRead read_features<geo::LineString>(const VectorSource&, std::size_t, const std::function<void(Features<geo::LineString>)>&);
 extern template VectorRead read_features<geo::Polygon>(const VectorSource&, std::size_t, const std::function<void(Features<geo::Polygon>)>&);
-extern template VectorRead
-read_features<geo::MultiLineString>(const VectorSource&, std::size_t, const std::function<void(Features<geo::MultiLineString>)>&);
-extern template VectorRead read_features<geo::MultiPolygon>(const VectorSource&, std::size_t, const std::function<void(Features<geo::MultiPolygon>)>&);
+extern template VectorRead read_features<geo::MultiLineString>(
+    const VectorSource&, std::size_t, const std::function<void(Features<geo::MultiLineString>)>&
+);
+extern template VectorRead read_features<geo::MultiPolygon>(
+    const VectorSource&, std::size_t, const std::function<void(Features<geo::MultiPolygon>)>&
+);
 
 extern template Features<geo::Point>           read_features<geo::Point>(const VectorSource&);
 extern template Features<geo::LineString>      read_features<geo::LineString>(const VectorSource&);
@@ -177,16 +116,21 @@ extern template Features<geo::Polygon>         read_features<geo::Polygon>(const
 extern template Features<geo::MultiLineString> read_features<geo::MultiLineString>(const VectorSource&);
 extern template Features<geo::MultiPolygon>    read_features<geo::MultiPolygon>(const VectorSource&);
 
-extern template VectorRead
-read_features_in<geo::Point>(const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::Point>)>&);
-extern template VectorRead
-read_features_in<geo::LineString>(const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::LineString>)>&);
-extern template VectorRead
-read_features_in<geo::Polygon>(const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::Polygon>)>&);
-extern template VectorRead
-read_features_in<geo::MultiLineString>(const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::MultiLineString>)>&);
-extern template VectorRead
-read_features_in<geo::MultiPolygon>(const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::MultiPolygon>)>&);
+extern template VectorRead read_features_in<geo::Point>(
+    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::Point>)>&
+);
+extern template VectorRead read_features_in<geo::LineString>(
+    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::LineString>)>&
+);
+extern template VectorRead read_features_in<geo::Polygon>(
+    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::Polygon>)>&
+);
+extern template VectorRead read_features_in<geo::MultiLineString>(
+    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::MultiLineString>)>&
+);
+extern template VectorRead read_features_in<geo::MultiPolygon>(
+    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::MultiPolygon>)>&
+);
 
 extern template std::vector<std::string> problems_of<geo::Point>(const VectorSource&);
 extern template std::vector<std::string> problems_of<geo::LineString>(const VectorSource&);

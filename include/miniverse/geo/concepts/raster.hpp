@@ -4,6 +4,10 @@
 #include <cstdint>
 #include <string_view>
 
+/**
+ * @file
+ * What a pixel can be: the types a raster holds, and PostGIS's name and code for each.
+ */
 namespace miniverse::geo {
 
 /**

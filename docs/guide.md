@@ -287,6 +287,11 @@ World files(miniverse::osm::road_file<Roads>(streets), miniverse::gdal::raster_f
 - `osm::road_file<Kind>(WaySource)`: an OpenStreetMap file, read whole into memory when the layer is made and indexed by
   position; a bad file fails there.
 
+The readers are in `miniverse/gdal/feature_file.hpp`, `miniverse/gdal/raster_file.hpp` and `miniverse/osm/road_file.hpp`;
+`miniverse/gdal/gdal.hpp` and `miniverse/osm/osm.hpp` include all of a component. No component header brings in the
+built-in kinds or the `Miniverse` itself: include `miniverse/miniverse.hpp` (or `world.hpp`, with kinds of your own)
+beside them.
+
 `load`, `stream`, `verify` and `table_settings` work the same on these layers; `push` and `begin_push` fail with a
 `std::logic_error`, since a file is only read; `create_table` and `drop_tables` skip them, so one setup serves a world of
 tables and a world of files. A load of a reader runs on a thread started for it, so loads of several file layers run at

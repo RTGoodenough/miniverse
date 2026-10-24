@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "miniverse/geo/raster.hpp"
+#include "miniverse/geo/raster_wkb.hpp"
 #include "miniverse/geo/types.hpp"
 #include "miniverse/geo/wkb.hpp"
 #include "schemacht/query/sql_type.hpp"

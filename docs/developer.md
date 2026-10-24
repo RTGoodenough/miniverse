@@ -16,11 +16,17 @@ include/miniverse/
   location.hpp           check_location: what a reader's load holds a polygon to, as a table's would refuse
   miniverse.hpp          umbrella: world.hpp plus the built-in kinds and geo types
   concepts/              LayerKind, HasSettings, HasNoSettings, HasOwnChunks, ChunkCallback
-  geo/                   Point/LineString/Polygon/... (Boost.Geometry), Raster, Grid, WKB, column types, PostGIS operations
-  layer/                 FeatureLayer, RoadLayer, RasterLayer
-  gdal/                  component miniverse::gdal: vector.hpp, raster.hpp, dataset.hpp
-  osm/                   component miniverse::osm: ways.hpp
-src/                     the compiled parts: geo WKB, the kinds' statements and conversions, gdal/, osm/
+  geo/                   one idea each: types.hpp (Boost.Geometry), grid.hpp, raster.hpp, wkb.hpp and raster_wkb.hpp
+                         (over wkb_bytes.hpp), column_types.hpp, operations.hpp (PostGIS tests); concepts/ under
+                         each area holds its concepts
+  layer/                 feature.hpp and way.hpp (what a load gives), the kinds feature_layer.hpp, road_layer.hpp,
+                         raster_layer.hpp; raster/reach.hpp (which tiles a location has), raster/tiles.hpp (cut, window)
+  gdal/                  component miniverse::gdal: vector.hpp and raster.hpp (files read into layers), feature_file.hpp
+                         and raster_file.hpp (files as layers), dataset.hpp; gdal.hpp is its umbrella
+  osm/                   component miniverse::osm: ways.hpp (files read), ways_in_memory.hpp, road_file.hpp (a file as a
+                         layer); osm.hpp is its umbrella
+src/                     the compiled parts: geo WKB, the kinds' statements and conversions, layer/raster/, gdal/ (with its
+                         private raster/ and vector/), osm/
 tests/
   compile/               static_asserts on the concepts and types
   compile_fail/          cases that must not compile, each checked for its message
@@ -97,24 +103,30 @@ own, and their futures wait for that thread when dropped. What runs on the calle
   `FEATURES_PER_STATEMENT` and `POINTS_PER_STATEMENT`.
 - **RoadLayer** (`layer/road_layer.hpp`): `way_id, node_ids bigint[], geom geometry(LineString,4326), tags jsonb`, a GiST
   index. Batches of `WAYS_PER_STATEMENT`.
-- **RasterLayer<P>** (`layer/raster_layer.hpp`, `src/layer/raster_layer.cpp`): `tile_id bigint PRIMARY KEY, rast raster`.
+- **RasterLayer<P>** (`layer/raster_layer.hpp`, `src/layer/raster_layer.cpp`; the pixel arithmetic in `layer/raster/tiles.hpp`,
+  which tiles a location has in `layer/raster/reach.hpp`): `tile_id bigint PRIMARY KEY, rast raster`.
   The tile id is the tile's row and column in the world grid. `setup_sql` makes the schema `miniverse_functions` and its
   `merge_raster` function (shared by every raster table of the database), sets lz4 compression on `rast`, makes a GiST
   index on `ST_ConvexHull(rast)`, and adds the constraints that record the grid in the form `raster_columns` parses (so
   GDAL and QGIS read the table). `to_rows` cuts a raster into the grid's tiles, in batches sized by
-  `PIXEL_BYTES_PER_STATEMENT`; `write_statement` is an upsert that merges through `merge_raster`. The load statement is `ST_Intersects(ST_ConvexHull("rast"), $1)`;
-  `raster::Reach` then decides on the client which tiles the location reaches into, the same rule the file reader uses,
-  and `window` stitches them into the location's box.
+  `PIXEL_BYTES_PER_STATEMENT`; `write_statement` is an upsert that merges through `merge_raster`. The load statement
+  is `ST_Intersects(ST_ConvexHull("rast"), $1)`; `raster::Reach` then decides on the client which tiles the location
+  reaches into, the same rule the file reader uses, and `raster::window` stitches them into the location's box. A push
+  is `raster::cut`, then batches.
 
 ### The components
 
-- **miniverse::gdal** (`src/gdal/`): `vector.cpp` reads features with OGR: a spatial filter in the layer's own coordinate
-  system narrows the read, then each feature is transformed to WGS 84 and tested against the location with a GEOS
-  prepared geometry; types are checked only for features in the location. `raster.cpp` warps a file onto a grid with
-  `GDALWarp` a run of tiles at a time, with one scale for the whole file so a pixel comes out the same whichever window
-  it is read in; `read_tiles_in` gives the tiles a location reaches into. `dataset.cpp` copies a raster into a `MEM`
-  dataset. `common.hpp` holds what the three share: GDAL errors made into exceptions, driver registration, the pixel
-  type mapping.
+- **miniverse::gdal** (`src/gdal/`): `vector.cpp` is the read loop over a file's features; its stages are one private
+  file each under `vector/`: `source` (open the file, find the layer and id field, the transformation to WGS 84),
+  `geometry` (OGR's geometries as miniverse's, of the type asked for or one that reads as it), `fields` (a feature's
+  id and its other fields as JSON) and `filter` (the layer narrowed to the location's box by its own index, then each
+  feature tested against the location with a GEOS prepared geometry). `raster.cpp` is the read loop over a file's
+  windows; under `raster/`: `source` (open the file, its extent in WGS 84, its scale to the grid), `tiles` (which tiles
+  an extent or a location's box meets, a window of them, a tile cut from one) and `warp` (one window filled by
+  `GDALWarp`, with one scale for the whole file so a pixel comes out the same whichever window it is read in).
+  `dataset.cpp` copies a raster into a `MEM` dataset. `common.hpp` holds what all of them share: GDAL errors made into
+  exceptions, driver registration, the pixel type mapping. The private headers are included as `gdal/...` from `src/`,
+  and are not installed.
 - **miniverse::osm** (`src/osm/`): `ways.cpp` reads ways with libosmium, holding node positions while it reads;
   `ways_in_memory.cpp` indexes ways in a Boost.Geometry R-tree for `road_file`. Boost.JSON is compiled into the library
   (`boost_json.cpp`) so it needs no Boost library to link.
@@ -149,9 +161,10 @@ the real ones.
 
 ### Add a file format
 
-A reader of files follows the pattern of `gdal/vector.hpp`: a `Source` struct naming the file and options, a chunked
-`read_*` for importing into tables, a `read_*_in(location)` for layers, a `problems_of` for `verify`, and a `*File<Kind>`
-reader plus a `*_file<Kind>` function that makes the `Layer`. Constrain `Kind` with a concept in `concepts/` that says
+A reader of files follows the pattern of `gdal/vector.hpp` and `gdal/feature_file.hpp`: in the first, a `Source` struct
+naming the file and options, a chunked `read_*` for importing into tables, a `read_*_in(location)` for layers and a
+`problems_of` for `verify`; in a header of its own, the `*File<Kind>` reader and the `*_file<Kind>` function that makes
+the `Layer`. Constrain `Kind` with a concept in `concepts/` that says
 which kinds the format can feed (`gdal::FeatureKind`, `gdal::RasterKind`, `osm::WayKind`). Add a test that pushes a file
 into a table and compares loads and streams of the two, as `tests/gdal/raster_test.cpp` does with
 `check_loads_as_a_table`.
@@ -160,9 +173,10 @@ into a table and compares loads and streams of the two, as `tests/gdal/raster_te
 
 The pixel types are listed in `geo/concepts/raster.hpp` (`Pixel`, and `PixelType<P>` with PostGIS's name for each),
 `src/gdal/common.hpp` (`gdal_type`, which has a `static_assert` for a type it does not know), the `extern template`
-lists at the end of `geo/raster.hpp` and `layer/raster_layer.hpp`, and the explicit instantiation lists at the end of
-`src/geo/raster.cpp`, `src/layer/raster_layer.cpp`, `src/gdal/raster.cpp` and `src/gdal/dataset.cpp`. A missed
-instantiation is a link error; a missed `extern template` line is not reported, and costs only compile time.
+lists at the end of `geo/raster_wkb.hpp`, `layer/raster/tiles.hpp` and `layer/raster_layer.hpp`, and the explicit
+instantiation lists at the end of `src/geo/raster_wkb.cpp`, `src/layer/raster/tiles.cpp`,
+`src/layer/raster_layer.cpp`, `src/gdal/raster.cpp` and `src/gdal/dataset.cpp`. A missed instantiation is a link
+error; a missed `extern template` line is not reported, and costs only compile time.
 
 ## Building
 

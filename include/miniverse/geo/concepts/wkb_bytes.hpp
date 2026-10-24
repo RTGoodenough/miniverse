@@ -4,6 +4,10 @@
 #include <concepts>
 #include <cstdint>
 
+/**
+ * @file
+ * The numbers well-known binary is made of: what its bytes are read into and written from.
+ */
 namespace miniverse::geo::wkb {
 
 /** @brief A number WKB holds: an integer or a floating point number of 1, 2, 4 or 8 bytes. */

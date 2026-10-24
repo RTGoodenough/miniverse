@@ -46,9 +46,11 @@ find_package(Boost 1.74 REQUIRED)
 add_library(
   miniverse
   STATIC
-  src/geo/raster.cpp
+  src/geo/raster_wkb.cpp
   src/geo/wkb.cpp
   src/layer/feature_layer.cpp
+  src/layer/raster/reach.cpp
+  src/layer/raster/tiles.cpp
   src/layer/raster_layer.cpp
   src/layer/road_layer.cpp
 )
@@ -98,7 +100,18 @@ endif()
 if(GDAL_FOUND AND NOT MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "OFF")
   set(MINIVERSE_HAS_GDAL TRUE)
 
-  add_library(miniverse_gdal STATIC src/gdal/dataset.cpp src/gdal/raster.cpp src/gdal/vector.cpp)
+  add_library(
+    miniverse_gdal STATIC
+    src/gdal/dataset.cpp
+    src/gdal/raster.cpp
+    src/gdal/raster/source.cpp
+    src/gdal/vector.cpp
+    src/gdal/vector/fields.cpp
+    src/gdal/vector/filter.cpp
+    src/gdal/vector/geometry.cpp
+    src/gdal/vector/source.cpp
+  )
+  target_include_directories(miniverse_gdal PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)  # its private headers, as "gdal/..."
   target_link_libraries(miniverse_gdal PUBLIC miniverse::miniverse GDAL::GDAL)
 
   add_library(miniverse::gdal ALIAS miniverse_gdal)

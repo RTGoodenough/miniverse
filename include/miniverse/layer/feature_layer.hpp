@@ -10,6 +10,7 @@
 #include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/geo/operations.hpp"
 #include "miniverse/geo/types.hpp"
+#include "miniverse/layer/feature.hpp"  // IWYU pragma: export
 #include "schemacht/json/json.hpp"
 #include "schemacht/postgres/statements.hpp"
 #include "schemacht/query/predicate.hpp"
@@ -19,19 +20,11 @@
 #include "schemacht/schema/schema.hpp"
 #include "schemacht/schema/table_name.hpp"
 
+/**
+ * @file
+ * The layer kind of features of one geometry type: its table's columns and index, and its rows made from features and back.
+ */
 namespace miniverse {
-
-/** @brief A feature: one thing of the world as a geometry, with an id and tags. */
-template <geo::wkb::Geometry geometry_t>
-struct Feature {
-  std::int64_t          id = 0;
-  geometry_t            geometry{};  ///< Where it is, in WGS 84 longitude and latitude.
-  schemacht::json::Json tags{"{}"};  ///< What it is, as one JSON object (`{"building": "yes", ...}`): empty unless given.
-};
-
-/** @brief The features a load gives: ordered by id from a table, and in a file's own order from a file. */
-template <geo::wkb::Geometry geometry_t>
-using Features = std::vector<Feature<geometry_t>>;
 
 /** @brief The columns of a feature table, the same in every `FeatureLayer` but for the geometry type. */
 namespace feature {

@@ -5,8 +5,14 @@
 
 #include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/geo/concepts/raster.hpp"
+#include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/raster.hpp"
 
+/**
+ * @file
+ * Which layer kinds a raster file can be read as, in place of a table (raster_file.hpp): those whose load gives a
+ * `geo::Raster` on a `geo::Grid`.
+ */
 namespace miniverse::gdal {
 
 /** @brief The pixel type of the rasters a load of `kind_t` gives. */

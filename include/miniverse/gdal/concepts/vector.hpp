@@ -5,8 +5,13 @@
 
 #include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/geo/concepts/wkb.hpp"
-#include "miniverse/layer/feature_layer.hpp"
+#include "miniverse/layer/feature.hpp"
 
+/**
+ * @file
+ * Which layer kinds a vector file can be read as, in place of a table (feature_file.hpp): those whose load gives `Features`
+ * of one geometry type.
+ */
 namespace miniverse::gdal {
 
 /** @brief The geometry type of the features a load of `kind_t` gives. */

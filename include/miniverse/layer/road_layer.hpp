@@ -9,6 +9,7 @@
 #include "miniverse/geo/column_types.hpp"
 #include "miniverse/geo/operations.hpp"
 #include "miniverse/geo/types.hpp"
+#include "miniverse/layer/way.hpp"  // IWYU pragma: export
 #include "schemacht/json/json.hpp"
 #include "schemacht/postgres/statements.hpp"
 #include "schemacht/query/predicate.hpp"
@@ -18,18 +19,11 @@
 #include "schemacht/schema/schema.hpp"
 #include "schemacht/schema/table_name.hpp"
 
+/**
+ * @file
+ * The layer kind of roads, OpenStreetMap ways: its table's columns and index, and its rows made from ways and back.
+ */
 namespace miniverse {
-
-/** @brief A road: an OpenStreetMap way, as a line through its nodes. */
-struct Way {
-  std::int64_t              id = 0;
-  std::vector<std::int64_t> node_ids;     ///< The way's nodes, in order: one per point of `coordinates`.
-  geo::LineString           coordinates;  ///< Where the nodes are.
-  schemacht::json::Json     tags{"{}"};   ///< The way's tags, as one JSON object (`{"highway": "primary", ...}`): empty unless given.
-};
-
-/** @brief The roads a load gives: ordered by id from a table, and in a file's own order from a file. */
-using Ways = std::vector<Way>;
 
 /** @brief The columns of a road table, the same in every `RoadLayer`. */
 namespace road {

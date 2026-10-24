@@ -32,8 +32,8 @@
 #include <utility>
 #include <vector>
 
+#include "miniverse/gdal/gdal.hpp"
 #include "support/files.hpp"
-#include "miniverse/gdal/raster.hpp"
 #include "miniverse/miniverse.hpp"
 
 namespace bg = boost::geometry;

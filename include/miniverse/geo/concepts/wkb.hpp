@@ -4,6 +4,10 @@
 
 #include "miniverse/geo/types.hpp"
 
+/**
+ * @file
+ * Which geometry types have a well-known binary form: those a table stores.
+ */
 namespace miniverse::geo::wkb {
 
 /** @brief A geometry type that WKB can be read into and written from, and that can be a column (geo/column_types.hpp). */

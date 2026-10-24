@@ -3,24 +3,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <iterator>
-#include <memory>
 #include <string>
-#include <utility>
 #include <vector>
 
-#include "miniverse/gdal/concepts/raster.hpp"  // IWYU pragma: export
 #include "miniverse/geo/concepts/raster.hpp"
+#include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/raster.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer.hpp"
-#include "miniverse/layer/raster_layer.hpp"
-#include "miniverse/reader.hpp"
 
 /**
  * @file
  * Raster files as rasters on a table's grid, read with GDAL: a GeoTIFF or anything else GDAL opens, warped onto the grid of
- * a `RasterLayer`'s table, for pushing into it.
+ * a `RasterLayer`'s table, for pushing into it or reading in its place (raster_file.hpp).
  *
  * @code
  * struct Elevation : miniverse::RasterLayer<std::int16_t> {};
@@ -46,10 +40,10 @@
  * - **Memory**: a window is held twice while it is made, so `window_tiles` squared tiles, twice. A file near a pole spans
  *   every longitude once in WGS 84, however small it is.
  *
- * A file can also be a layer itself, read in place of a table (`raster_file`, at the end of this file): for a test, or a user
- * with files alone.
+ * A file can also be a layer itself, read in place of a table (`raster_file`, raster_file.hpp): for a test, or a user with
+ * files alone.
  *
- * Part of the optional component `miniverse::gdal`, as vector.hpp is. Errors are `std::runtime_error` with GDAL's own message.
+ * Part of the optional component `miniverse::gdal` (gdal.hpp includes all of it). Errors are `std::runtime_error` with GDAL's own message.
  * While a read runs, GDAL's errors on the calling thread are kept for those messages, not printed: also the ones GDAL calls
  * made inside `on_window` raise.
  */
@@ -65,8 +59,8 @@ enum class Resampling : std::uint8_t {
 
 /** @brief Which raster to read, and how. */
 struct RasterSource {
-  std::string path;                                ///< The file, or anything else GDAL opens.
-  int         band = 1;                            ///< Which of its bands, counted from 1.
+  std::string path;                               ///< The file, or anything else GDAL opens.
+  int         band = 1;                           ///< Which of its bands, counted from 1.
   Resampling  resampling = Resampling::Bilinear;  ///< How grid pixels are made from the file's.
 };
 
@@ -118,68 +112,5 @@ template <geo::Pixel pixel_t>
 
 // Each of the above is defined for each pixel type a raster can hold: std::int8_t, std::uint8_t, std::int16_t,
 // std::uint16_t, std::int32_t, std::uint32_t, float and double.
-
-/**
- * @brief The reader of a raster file as a layer of `kind_t`: what `raster_file` makes a layer with. A load gives the pixels in
- * the box of the location on the layer's grid, as a table that the file was pushed into gives them; each load opens the file
- * for itself, so loads run side by side.
- */
-template <RasterKind kind_t>
-class RasterFile : public Reader<kind_t> {
- public:
-  RasterFile(RasterSource source, const geo::Grid<PixelOf<kind_t>>& grid) : _source(std::move(source)), _grid(grid) {}
-
-  [[nodiscard]] std::string name() const override { return "'" + _source.path + "'"; }
-
-  [[nodiscard]] geo::Grid<PixelOf<kind_t>> settings() const override { return _grid; }
-
-  [[nodiscard]] typename kind_t::result_type load(const geo::Polygon& location) const override {
-    // The tiles a stream hands over, cut to the box as a table's are: a load and a stream can't then disagree.
-    std::vector<geo::Raster<PixelOf<kind_t>>> tiles;
-    read_tiles_in<PixelOf<kind_t>>(_source, _grid, location, TILES_AT_A_TIME, [&tiles](std::vector<geo::Raster<PixelOf<kind_t>>> chunk) {
-      tiles.insert(tiles.end(), std::make_move_iterator(chunk.begin()), std::make_move_iterator(chunk.end()));
-
-      return true;
-    });
-
-    return RasterLayer<PixelOf<kind_t>>::window(tiles, location);
-  }
-
-  void stream(const geo::Polygon& location, std::size_t chunk_rows, const Reader<kind_t>::OnChunk& on_chunk) const override {
-    read_tiles_in<PixelOf<kind_t>>(_source, _grid, location, chunk_rows, on_chunk);
-  }
-
-  [[nodiscard]] std::vector<std::string> problems() const override { return problems_of<PixelOf<kind_t>>(_source, _grid); }
-
- private:
-  static constexpr std::size_t TILES_AT_A_TIME = 64;  // how many tiles of a load are read before they are taken over
-
-  RasterSource               _source;
-  geo::Grid<PixelOf<kind_t>> _grid;
-
- public:
-  RasterFile(const RasterFile&) = delete;
-  RasterFile(RasterFile&&) = delete;
-  RasterFile& operator=(const RasterFile&) = delete;
-  RasterFile& operator=(RasterFile&&) = delete;
-  ~RasterFile() override = default;
-};
-
-/**
- * @return The layer of `kind_t` that is `source`, a raster file, warped onto `grid` and read in place of a table:
- *
- * @code
- * miniverse::Miniverse world(miniverse::gdal::raster_file<Elevation>({.path = "town.tif"}, {.pixels_per_degree = 3600, .tile_pixels = 256, .nodata = -32768}));
- * world.load<Elevation>(area).get();  // the file's heights in the area's box, on the grid
- * @endcode
- *
- * The grid is what a table's would be: given here as it is given to `Miniverse::create_table`, and what
- * `Miniverse::table_settings` then gives. The file is not opened until a load, or `Miniverse::verify`, which says what is
- * wrong with it.
- */
-template <RasterKind kind_t>
-[[nodiscard]] Layer<kind_t> raster_file(RasterSource source, const geo::Grid<PixelOf<kind_t>>& grid) {
-  return Layer<kind_t>(std::make_shared<RasterFile<kind_t>>(std::move(source), grid));
-}
 
 }  // namespace miniverse::gdal

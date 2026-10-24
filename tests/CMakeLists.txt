@@ -24,7 +24,11 @@ add_executable(
   unit/column_type_test.cpp
   unit/layer_test.cpp
   unit/feature_layer_test.cpp
+  unit/grid_test.cpp
   unit/raster_test.cpp
+  unit/raster_wkb_test.cpp
+  unit/raster_reach_test.cpp
+  unit/raster_tiles_test.cpp
   unit/raster_layer_test.cpp
   unit/reader_test.cpp
   integration/feature_layer_test.cpp

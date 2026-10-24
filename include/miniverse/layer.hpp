@@ -11,6 +11,10 @@
 #include "miniverse/reader.hpp"  // IWYU pragma: export
 #include "schemacht/schema/table.hpp"
 
+/**
+ * @file
+ * A layer of a miniverse: a kind, stored in a table named at run time or read by a reader.
+ */
 namespace miniverse {
 
 /**

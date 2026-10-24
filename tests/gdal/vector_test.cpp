@@ -27,8 +27,8 @@
 #include <utility>
 #include <vector>
 
+#include "miniverse/gdal/gdal.hpp"
 #include "support/files.hpp"
-#include "miniverse/gdal/vector.hpp"
 #include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/miniverse.hpp"
 

@@ -28,7 +28,7 @@
 #include <utility>
 #include <vector>
 
-#include "miniverse/layer/road_layer.hpp"
+#include "miniverse/layer/way.hpp"
 #include "schemacht/json/json.hpp"
 
 namespace miniverse::osm {

@@ -57,7 +57,8 @@
  * connection string: for a test, or a user with files alone.
  *
  * The `Miniverse` is a front: it holds the layers and the pool, and for each call tells a layer that is a table from one with
- * a reader. What a call then does is in world/: load.hpp, push.hpp, verify.hpp, tables.hpp and settings.hpp, one each.
+ * a reader. What a call then does is in world/, one idea each: load.hpp, push.hpp (with push_in_parts.hpp and
+ * write_batches.hpp), verify.hpp, tables.hpp, settings.hpp, and async.hpp for how a call becomes a future.
  */
 namespace miniverse {
 

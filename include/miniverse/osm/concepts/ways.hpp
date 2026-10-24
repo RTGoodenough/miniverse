@@ -3,8 +3,12 @@
 #include <concepts>
 
 #include "miniverse/concepts/miniverse.hpp"
-#include "miniverse/layer/road_layer.hpp"
+#include "miniverse/layer/way.hpp"
 
+/**
+ * @file
+ * Which layer kinds an OpenStreetMap file can be read as, in place of a table (road_file.hpp): those whose load gives `Ways`.
+ */
 namespace miniverse::osm {
 
 /**
