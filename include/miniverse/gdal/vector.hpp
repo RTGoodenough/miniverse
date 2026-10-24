@@ -17,6 +17,7 @@
 #include "miniverse/reader.hpp"
 
 /**
+ * @file
  * Vector files as features, read with GDAL's OGR: a GeoPackage, a shapefile, GeoJSON, or anything else OGR opens, as the
  * `Features` a `FeatureLayer` is pushed.
  *

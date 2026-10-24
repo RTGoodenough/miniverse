@@ -30,6 +30,7 @@
 #include "schemacht/util/futures.hpp"
 
 /**
+ * @file
  * A miniverse: the layers of the world a worker reads, each a kind of data in its own PostGIS table, loaded by polygon.
  * This header holds the `Miniverse` alone; miniverse.hpp adds the built-in kinds (`FeatureLayer`, `RoadLayer`, `RasterLayer`).
  *

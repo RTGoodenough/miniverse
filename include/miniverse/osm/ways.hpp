@@ -14,6 +14,7 @@
 #include "miniverse/reader.hpp"
 
 /**
+ * @file
  * OpenStreetMap files as ways, read with libosmium: a `.osm.pbf` extract, or any other form libosmium opens (`.osm`,
  * `.osm.bz2`), as the `Ways` a `RoadLayer` is pushed: each way with its node ids, which other formats of the same data drop.
  *
@@ -113,7 +114,10 @@ class WaysInMemory {
 template <WayKind kind_t>
 class RoadFile : public Reader<kind_t> {
  public:
-  /** @param name What the ways are called in a message: the file they were read from. */
+  /**
+   * @param name What the ways are called in a message: the file they were read from.
+   * @param ways The ways the layer holds.
+   */
   RoadFile(std::string name, Ways ways) : _name(std::move(name)), _ways(std::move(ways)) {}
 
   [[nodiscard]] std::string name() const override { return _name; }

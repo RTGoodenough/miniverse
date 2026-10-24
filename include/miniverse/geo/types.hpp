@@ -10,6 +10,7 @@
 #include <boost/geometry/geometries/polygon.hpp>
 
 /**
+ * @file
  * The geometry miniverse reads and writes: Boost.Geometry's models, in longitude and latitude degrees (WGS 84, SRID 4326).
  *
  * They are plain Boost.Geometry types, so its algorithms (`boost::geometry::envelope`, `intersects`, `length`, ...) work on

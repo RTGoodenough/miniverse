@@ -10,6 +10,7 @@
 #include "miniverse/geo/types.hpp"
 
 /**
+ * @file
  * A reader: where a layer that is not a table is read from. A `Layer<Kind>` is made from a table's name or from a reader, and
  * a miniverse loads and streams it the same way either way, so a worker's code does not know which it has: a table in
  * production, a file in a test (`miniverse::gdal` and `miniverse::osm` have readers of files), or a reader of your own that

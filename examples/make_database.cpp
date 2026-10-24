@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -102,12 +103,22 @@ std::string make_database(const std::string& server, const std::string& name) {
   return made;
 }
 
+/** @return What `read` gives, or its error with `what` the input was in front of it: the libraries' own messages name no role. */
+template <std::invocable read_t>
+auto about(const std::string& what, read_t read) {
+  try {
+    return read();
+  } catch ( const std::exception& error ) {
+    throw std::runtime_error(what + ": " + error.what());
+  }
+}
+
 /** @brief Writes the roads and paths of the OpenStreetMap file at `path`, all of them or none. */
 void write_roads(World& world, const std::string& path) {
   miniverse::PushInParts<Roads> roads = world.begin_push<Roads>().get();
 
-  const miniverse::osm::WayRead read = miniverse::osm::read_ways({.path = path, .keys = {"highway"}}, 10'000, [&roads](miniverse::Ways chunk) {
-    roads.add(std::move(chunk)).get();
+  const miniverse::osm::WayRead read = about("the OpenStreetMap file '" + path + "'", [&] {
+    return miniverse::osm::read_ways({.path = path, .keys = {"highway"}}, 10'000, [&roads](miniverse::Ways chunk) { roads.add(std::move(chunk)).get(); });
   });
 
   roads.commit().get();
@@ -115,11 +126,12 @@ void write_roads(World& world, const std::string& path) {
   std::cout << "roads: " << read.ways << " written, " << read.without_nodes << " left out, of " << path << '\n';
 }
 
-/**
- * @brief Writes the GeoTIFFs of `directory` in the order of their names, each all of it or none. Where two files overlap, as
- * neighbours of a survey do by a few pixels, the later one's data is what the table has.
- */
-void write_heights(World& world, const std::string& directory) {
+/** @return The GeoTIFFs of `directory`, by name. Checked before anything is made: a wrong path then costs nothing. */
+std::vector<std::filesystem::path> geotiffs_of(const std::string& directory) {
+  if ( ! std::filesystem::is_directory(directory) ) {
+    throw std::runtime_error("'" + directory + "' is not a directory: the GeoTIFFs are read from one");
+  }
+
   std::vector<std::filesystem::path> files;
   for ( const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(directory) ) {
     if ( entry.is_regular_file() && (entry.path().extension() == ".tif" || entry.path().extension() == ".tiff") ) {
@@ -128,6 +140,18 @@ void write_heights(World& world, const std::string& directory) {
   }
   std::ranges::sort(files);
 
+  if ( files.empty() ) {
+    throw std::runtime_error("'" + directory + "' holds no .tif or .tiff file");
+  }
+
+  return files;
+}
+
+/**
+ * @brief Writes the GeoTIFFs `files` in order, each all of it or none. Where two files overlap, as neighbours of a survey do
+ * by a few pixels, the later one's data is what the table has.
+ */
+void write_heights(World& world, const std::vector<std::filesystem::path>& files) {
   const geo::Grid<std::int16_t> grid = world.table_settings<Elevation>().get();
 
   std::size_t written = 0;
@@ -135,10 +159,11 @@ void write_heights(World& world, const std::string& directory) {
     miniverse::PushInParts<Elevation> heights = world.begin_push<Elevation>().get();
 
     // Windows of 2 by 2 tiles, 1024 pixels a side: each is held twice while it is made, and once more as it is sent.
-    const miniverse::gdal::RasterRead read =
-        miniverse::gdal::read_raster<std::int16_t>({.path = file.string()}, grid, 2, [&heights](geo::Raster<std::int16_t> window) {
-          heights.add(std::move(window)).get();
-        });
+    const miniverse::gdal::RasterRead read = about("the GeoTIFF '" + file.string() + "'", [&] {
+      return miniverse::gdal::read_raster<std::int16_t>({.path = file.string()}, grid, 2, [&heights](geo::Raster<std::int16_t> window) {
+        heights.add(std::move(window)).get();
+      });
+    });
 
     heights.commit().get();
 
@@ -157,6 +182,16 @@ int main(int argc, char** argv) {
   }
 
   try {
+    // The inputs first, so that a wrong path makes no database.
+    const std::string roads_file = args[3];
+    if ( ! std::filesystem::is_regular_file(roads_file) ) {
+      throw std::runtime_error("'" + roads_file + "' is not a file: the OpenStreetMap extract is one");
+    }
+    if ( ! roads_file.ends_with(".pbf") && roads_file.find(".osm") == std::string::npos ) {  // libosmium tells the format by the suffix
+      throw std::runtime_error("'" + roads_file + "' is not named as an OpenStreetMap file (.osm.pbf, .osm, .osm.bz2)");
+    }
+    const std::vector<std::filesystem::path> geotiffs = geotiffs_of(args[4]);
+
     World world(make_database(args[1], args[2]), miniverse::Layer<Roads>("roads"), miniverse::Layer<Elevation>("elevation"));
 
     std::ignore = world.database().execute(postgres::unchecked_sql("CREATE EXTENSION IF NOT EXISTS postgis")).get();
@@ -167,8 +202,8 @@ int main(int argc, char** argv) {
     world.create_table<Roads>();
     world.create_table<Elevation>({.pixels_per_degree = 3600, .tile_pixels = 512, .nodata = -32768});
 
-    write_roads(world, args[3]);
-    write_heights(world, args[4]);
+    write_roads(world, roads_file);
+    write_heights(world, geotiffs);
 
     // What the planner knows of the new tables, now and not when the server next gets to it.
     std::ignore = world.database().execute(postgres::unchecked_sql("ANALYZE")).get();

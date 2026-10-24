@@ -10,6 +10,7 @@
 #include "schemacht/util/compile_time.hpp"
 
 /**
+ * @file
  * Well-known binary (WKB), the form PostGIS stores and sends geometry in, as PostGIS's extended WKB (EWKB): WKB with the
  * geometry's SRID after its type.
  *

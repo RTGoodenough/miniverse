@@ -18,6 +18,7 @@
 #include "miniverse/reader.hpp"
 
 /**
+ * @file
  * Raster files as rasters on a table's grid, read with GDAL: a GeoTIFF or anything else GDAL opens, warped onto the grid of
  * a `RasterLayer`'s table, for pushing into it.
  *

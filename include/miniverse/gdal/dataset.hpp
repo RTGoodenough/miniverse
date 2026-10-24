@@ -6,6 +6,7 @@
 #include "miniverse/geo/raster.hpp"
 
 /**
+ * @file
  * Rasters as GDAL's own datasets: what a load of a raster layer gives, from a table or from a file, handed to GDAL's tools
  * (a warp to a local projection, a slope, contours, a file of any format it writes).
  *

@@ -18,6 +18,8 @@ set_property(CACHE MINIVERSE_BUILD_GDAL PROPERTY STRINGS AUTO ON OFF)
 set(MINIVERSE_BUILD_OSM "AUTO" CACHE STRING "Build miniverse::osm, which reads OpenStreetMap files with libosmium: AUTO (if it is found), ON or OFF")
 set_property(CACHE MINIVERSE_BUILD_OSM PROPERTY STRINGS AUTO ON OFF)
 set(MINIVERSE_SCHEMACHT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../schemacht" CACHE PATH "schemacht's source tree, used when no installed schemacht is found")
+set(MINIVERSE_BUILD_DOCS "AUTO" CACHE STRING "Add the target `docs`, the API reference built from the headers with Doxygen: AUTO (if Doxygen is found), ON or OFF")
+set_property(CACHE MINIVERSE_BUILD_DOCS PROPERTY STRINGS AUTO ON OFF)
 
 # ==============================================================================
 # Dependencies
@@ -141,6 +143,49 @@ if(MINIVERSE_HAS_OSM)
   set_target_properties(miniverse_osm PROPERTIES EXPORT_NAME osm)
 endif()
 message(STATUS "miniverse::osm (MINIVERSE_BUILD_OSM=${MINIVERSE_BUILD_OSM}): ${MINIVERSE_HAS_OSM}")
+
+# ==============================================================================
+# Documentation: the target `docs`, if Doxygen is found
+# ==============================================================================
+# The API reference, from the comments in include/, with README.md as its front page and docs/ as further pages, written to
+# build/docs/html. No Doxyfile is kept: CMake's FindDoxygen writes one from the DOXYGEN_ variables below. Diagrams need
+# Graphviz (dot); without it the reference is built without them.
+string(TOUPPER "${MINIVERSE_BUILD_DOCS}" MINIVERSE_BUILD_DOCS_CHOICE)
+if(MINIVERSE_BUILD_DOCS_CHOICE STREQUAL "ON")
+  find_package(Doxygen REQUIRED OPTIONAL_COMPONENTS dot)
+elseif(MINIVERSE_BUILD_DOCS_CHOICE STREQUAL "AUTO")
+  find_package(Doxygen QUIET OPTIONAL_COMPONENTS dot)
+elseif(NOT MINIVERSE_BUILD_DOCS_CHOICE STREQUAL "OFF")
+  message(FATAL_ERROR "MINIVERSE_BUILD_DOCS is '${MINIVERSE_BUILD_DOCS}': AUTO, ON or OFF")
+endif()
+
+if(DOXYGEN_FOUND AND NOT MINIVERSE_BUILD_DOCS_CHOICE STREQUAL "OFF")
+  set(DOXYGEN_PROJECT_BRIEF "layers of the world in PostGIS, loaded by polygon")
+  set(DOXYGEN_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/docs)
+  set(DOXYGEN_USE_MDFILE_AS_MAINPAGE ${CMAKE_CURRENT_SOURCE_DIR}/README.md)
+  set(DOXYGEN_STRIP_FROM_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  set(DOXYGEN_STRIP_FROM_INC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  set(DOXYGEN_EXTRACT_ALL NO)
+  set(DOXYGEN_EXTRACT_PRIVATE NO)
+  set(DOXYGEN_HIDE_UNDOC_MEMBERS YES)
+  set(DOXYGEN_HIDE_UNDOC_CLASSES YES)
+  set(DOXYGEN_EXCLUDE_SYMBOLS "detail" "*::detail" "*::detail::*" "schemacht" "schemacht::*")  # schemacht's own types are documented in schemacht
+  set(DOXYGEN_MARKDOWN_ID_STYLE GITHUB)  # so that a link to a heading in docs/ resolves as it does on GitHub
+  set(DOXYGEN_JAVADOC_AUTOBRIEF YES)
+  set(DOXYGEN_GENERATE_LATEX NO)
+  set(DOXYGEN_GENERATE_TREEVIEW YES)
+  set(DOXYGEN_SHOW_INCLUDE_FILES NO)
+  set(DOXYGEN_SORT_MEMBER_DOCS NO)
+  set(DOXYGEN_WARN_IF_UNDOCUMENTED NO)
+  set(DOXYGEN_WARN_AS_ERROR NO)
+  set(DOXYGEN_QUIET YES)
+  set(DOXYGEN_FILE_PATTERNS "*.hpp" "*.md")
+  set(DOXYGEN_EXAMPLE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+
+  doxygen_add_docs(docs ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/README.md ${CMAKE_CURRENT_SOURCE_DIR}/docs
+                   COMMENT "The API reference, to ${CMAKE_BINARY_DIR}/docs/html")
+endif()
+message(STATUS "docs target (MINIVERSE_BUILD_DOCS=${MINIVERSE_BUILD_DOCS}): ${DOXYGEN_FOUND}")
 
 # ==============================================================================
 # Examples and tests

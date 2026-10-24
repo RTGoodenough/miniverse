@@ -15,14 +15,17 @@
 #include "schemacht/util/hex.hpp"
 
 /**
+ * @file
  * The geometry types, and rasters (below), as schemacht column types: a `geo::LineString` can be a `Field`'s type, a query's argument, and inserted
  * and read like a built-in type.
  *
  * Each is a PostGIS `geometry` of its own kind in WGS 84 (`geometry(LineString,4326)`), so the database refuses another kind
  * or SRID in the column. Its text form is hex EWKB, which is what PostGIS prints, and what a `$n::geometry` argument reads;
  * its binary form is EWKB itself. There is no `binary_accepts`: `geometry` comes from an extension, so its type OID differs
- * between databases.
+ * between databases. Rasters are a `raster` column, read through `ST_AsBinary` (below).
  */
+
+/// @cond SCHEMACHT_SPECIALIZATIONS  Specializations of schemacht's templates, which the reference leaves to schemacht.
 template <miniverse::geo::wkb::Geometry geometry_t>
 struct schemacht::ColumnType<geometry_t> {
   static constexpr auto             SQL_TYPE_TEXT = util::concat_ctstrings<"geometry(", miniverse::geo::wkb::type_name<geometry_t>(), ",4326)">();
@@ -72,3 +75,4 @@ class schemacht::query::sql::SelectExpression<miniverse::geo::Raster<pixel_t>> {
  public:
   static constexpr std::string_view FUNCTION = "ST_AsBinary";
 };
+/// @endcond

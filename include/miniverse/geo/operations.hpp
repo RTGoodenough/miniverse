@@ -6,6 +6,7 @@
 #include "miniverse/geo/types.hpp"
 
 /**
+ * @file
  * PostGIS tests for schemacht's query builder: `Ways::col<"geom">().apply<geo::Intersects>(query::arg<0>())`. Each names
  * its SQL function or operator and the type of its argument, which may differ from the column's (a polygon tested against a line).
  */

@@ -12,6 +12,7 @@
 #include "schemacht/schema/table_name.hpp"
 
 /**
+ * @file
  * What a kind of layer is: a kind of data (roads, elevation, ...) and how it is stored. A kind is a type, used only as a name,
  * never made; `Miniverse<Roads, Elevation>` holds one layer of each, and each layer names its table when the miniverse is
  * made (`Layer<Roads>("osm_roads")`). Two datasets of the same kind are two types: `struct Roads : RoadLayer {};` and
