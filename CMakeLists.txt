@@ -18,7 +18,7 @@ set_property(CACHE MINIVERSE_BUILD_GDAL PROPERTY STRINGS AUTO ON OFF)
 set(MINIVERSE_BUILD_OSM "AUTO" CACHE STRING "Build miniverse::osm, which reads OpenStreetMap files with libosmium: AUTO (if it is found), ON or OFF")
 set_property(CACHE MINIVERSE_BUILD_OSM PROPERTY STRINGS AUTO ON OFF)
 set(MINIVERSE_SCHEMACHT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../schemacht" CACHE PATH "schemacht's source tree, used when no installed schemacht is found")
-set(MINIVERSE_BUILD_DOCS "AUTO" CACHE STRING "Add the target `docs`, the API reference built from the headers with Doxygen: AUTO (if Doxygen is found), ON or OFF")
+set(MINIVERSE_BUILD_DOCS "AUTO" CACHE STRING "Add the target `miniverse_docs`, the API reference built from the headers with Doxygen: AUTO (if Doxygen is found), ON or OFF")
 set_property(CACHE MINIVERSE_BUILD_DOCS PROPERTY STRINGS AUTO ON OFF)
 
 # ==============================================================================
@@ -145,7 +145,7 @@ endif()
 message(STATUS "miniverse::osm (MINIVERSE_BUILD_OSM=${MINIVERSE_BUILD_OSM}): ${MINIVERSE_HAS_OSM}")
 
 # ==============================================================================
-# Documentation: the target `docs`, if Doxygen is found
+# Documentation: the target `miniverse_docs`, if Doxygen is found
 # ==============================================================================
 # The API reference, from the comments in include/, with README.md as its front page and docs/ as further pages, written to
 # build/docs/html. No Doxyfile is kept: CMake's FindDoxygen writes one from the DOXYGEN_ variables below. Diagrams need
@@ -182,10 +182,10 @@ if(DOXYGEN_FOUND AND NOT MINIVERSE_BUILD_DOCS_CHOICE STREQUAL "OFF")
   set(DOXYGEN_FILE_PATTERNS "*.hpp" "*.md")
   set(DOXYGEN_EXAMPLE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/examples)
 
-  doxygen_add_docs(docs ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/README.md ${CMAKE_CURRENT_SOURCE_DIR}/docs
+  doxygen_add_docs(miniverse_docs ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/README.md ${CMAKE_CURRENT_SOURCE_DIR}/docs
                    COMMENT "The API reference, to ${CMAKE_BINARY_DIR}/docs/html")
 endif()
-message(STATUS "docs target (MINIVERSE_BUILD_DOCS=${MINIVERSE_BUILD_DOCS}): ${DOXYGEN_FOUND}")
+message(STATUS "miniverse_docs target (MINIVERSE_BUILD_DOCS=${MINIVERSE_BUILD_DOCS}): ${DOXYGEN_FOUND}")
 
 # ==============================================================================
 # Examples and tests

@@ -7,9 +7,13 @@ How the library is put together, how to add to it, and how to build, test and li
 
 ```
 include/miniverse/
-  world.hpp              Miniverse, PushInParts, TablesDiffer
+  world.hpp              Miniverse: the front that holds the layers and the pool and tells a table from a reader
+  world/                 one idea each: load.hpp (loads and streams), push.hpp, push_in_parts.hpp (PushInParts),
+                         write_batches.hpp, verify.hpp (TablesDiffer, the checks), tables.hpp (make, drop),
+                         settings.hpp, async.hpp
   layer.hpp              Layer<Kind>: a table name or a reader
-  reader.hpp             Reader<Kind>, check_location
+  reader.hpp             Reader<Kind>
+  location.hpp           check_location: what a reader's load holds a polygon to, as a table's would refuse
   miniverse.hpp          umbrella: world.hpp plus the built-in kinds and geo types
   concepts/              LayerKind, HasSettings, HasNoSettings, HasOwnChunks, ChunkCallback
   geo/                   Point/LineString/Polygon/... (Boost.Geometry), Raster, Grid, WKB, column types, PostGIS operations
@@ -59,19 +63,26 @@ column: `col<"geom">().apply<geo::Intersects>(arg<0>())`.
 
 ### A load, a stream, a push
 
+`Miniverse` holds the layers and the pool. Each public call checks that the miniverse has the kind, tells a layer that
+is a table from one with a reader, and calls a function template in `world/`, in `namespace miniverse::detail`: the
+table side takes the `Database` and the layer's `Table`, the reader side the `Reader`. What follows is what those do.
+
 - **load:** `Miniverse::load<Kind>` binds the kind's load statement to the location, runs it on the pool, and hands the
   rows to `from_rows` on a pool thread. The future carries the result or the error. For a layer with a reader, the
-  reader's `load` runs on a thread started for the call (`on_a_thread`).
+  reader's `load` runs on a thread started for the call (`on_a_thread`, in `world/async.hpp`). Both in `world/load.hpp`.
 - **stream:** the statement runs in schemacht's chunked mode (`ReadOptions::chunk_rows`); each chunk of rows goes through
   `from_rows` or `chunk_from_rows` and to the callback, one call at a time, on a pool thread. A callback returning
   `false` cancels the statement.
 - **push:** `to_rows` makes the batches (on the caller's thread for a kind without settings; on a pool thread after the
   settings are read, for one with). `write_rows` begins a transaction, sends one batch per statement, each completion
   sending the next, then commits; any failure rolls back and the future carries that statement's own error.
-  `PushInParts` keeps the transaction open across `add` calls and commits on `commit`.
+  `PushInParts` keeps the transaction open across `add` calls and commits on `commit`. Both share `write_batches` in
+  `world/write_batches.hpp`; the settings read is `world/settings.hpp`.
 - **verify:** schemacht's `table_differences_statement` for each table, all at once; the settings statement for kinds
-  with settings; `Reader::problems` for readers. The results are gathered by `Checks` and settled together.
-- **create_table:** `CREATE TABLE` from the schema and the kind's `setup_sql`, in one transaction, waited for.
+  with settings; `Reader::problems` for readers. The results are gathered by `Checks` in `world/verify.hpp` and settled
+  together.
+- **create_table:** `CREATE TABLE` from the schema and the kind's `setup_sql`, in one transaction, waited for
+  (`world/tables.hpp`).
 
 Thread boundaries: everything after a statement is sent runs on the pool's threads, including the kinds' conversions
 and the stream callbacks; `PushInParts::add` makes its rows on the calling thread. Reader loads run on threads of their
@@ -166,7 +177,7 @@ Options:
 |---|---|---|
 | `MINIVERSE_BUILD_GDAL`, `MINIVERSE_BUILD_OSM` | `AUTO` | build the component if its dependencies are found; `ON` fails without them |
 | `MINIVERSE_BUILD_TESTS`, `MINIVERSE_BUILD_EXAMPLES` | on when top level | |
-| `MINIVERSE_BUILD_DOCS` | `AUTO` | the `docs` target, if Doxygen is found |
+| `MINIVERSE_BUILD_DOCS` | `AUTO` | the `miniverse_docs` target, if Doxygen is found |
 | `MINIVERSE_INSTALL` | on when top level | the install rules and the CMake package |
 | `MINIVERSE_SCHEMACHT_DIR` | `../schemacht` | schemacht's source tree, used when no installed schemacht is found |
 
@@ -235,5 +246,5 @@ Conventions the code follows:
   comments (`@brief`, `@return`, `@throws`, with `@code` examples where a call is not obvious).
 - No hand-rolled parsers or formats where a library does it (Boost.JSON for JSON, GDAL and libosmium for files).
 
-The API reference is built from those comments: `cmake --build build --target docs` writes `build/docs/html/` when
+The API reference is built from those comments: `cmake --build build --target miniverse_docs` writes `build/docs/html/` when
 Doxygen is installed (`MINIVERSE_BUILD_DOCS`). README.md is its front page and the files in `docs/` are further pages.

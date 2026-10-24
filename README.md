@@ -125,5 +125,5 @@ shares, and leave it.
 
 - [docs/guide.md](docs/guide.md): using miniverse, from layers and locations to files and readers of your own.
 - [docs/developer.md](docs/developer.md): how it is put together, how to add a kind, how to build, test and lint.
-- The API reference is generated from the headers with Doxygen: `cmake --build build --target docs`, then open
+- The API reference is generated from the headers with Doxygen: `cmake --build build --target miniverse_docs`, then open
   `build/docs/html/index.html`. The headers carry the same comments.

@@ -13,6 +13,7 @@
 #include "miniverse/geo/raster.hpp"             // IWYU pragma: export
 #include "miniverse/geo/types.hpp"              // IWYU pragma: export
 #include "miniverse/layer.hpp"                  // IWYU pragma: export
+#include "miniverse/location.hpp"               // IWYU pragma: export
 #include "miniverse/layer/feature_layer.hpp"    // IWYU pragma: export
 #include "miniverse/layer/raster_layer.hpp"     // IWYU pragma: export
 #include "miniverse/layer/road_layer.hpp"       // IWYU pragma: export

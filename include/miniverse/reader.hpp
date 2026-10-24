@@ -2,7 +2,6 @@
 
 #include <cstddef>
 #include <functional>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -35,32 +34,6 @@
  * the thread that asks the miniverse, before its call returns, so they should not take long.
  */
 namespace miniverse {
-
-/**
- * @brief Throws unless `location` is a polygon every table's load takes: each of its rings closed (its last point its first
- * again), and of four points or more. PostGIS can't test an unclosed ring against a line, an area or a raster's tile, and
- * fails the load when it comes to one (against points it has a test of its own, which does not mind); a miniverse refuses
- * such a location for every layer with a reader, before the reader is asked, so that a worker tried on files does not fail
- * on tables. A polygon of no points at all is taken: nothing is in it.
- * @throws std::invalid_argument for such a ring.
- */
-inline void check_location(const geo::Polygon& location) {
-  const auto check = [](const auto& ring) {
-    constexpr std::size_t FEWEST_POINTS = 4;
-    if ( ring.empty() ) {
-      return;
-    }
-
-    if ( ring.size() < FEWEST_POINTS || ring.front().x() != ring.back().x() || ring.front().y() != ring.back().y() ) {
-      throw std::invalid_argument("a ring of a location must be closed, its last point its first again, and have four points or more");
-    }
-  };
-
-  check(location.outer());
-  for ( const auto& hole : location.inners() ) {
-    check(hole);
-  }
-}
 
 /** @brief The part of a `Reader` that only a kind with settings has; for a kind without, nothing. */
 template <typename kind_t>
@@ -104,7 +77,7 @@ class Reader : public ReaderSettings<kind_t> {
   [[nodiscard]] virtual std::string name() const = 0;
 
   /**
-   * @return What the layer holds in `location`, a polygon in WGS 84 longitude and latitude that `check_location` has passed:
+   * @return What the layer holds in `location`, a polygon in WGS 84 longitude and latitude that `check_location` (location.hpp) has passed:
    * what a load of a table of the kind would give for the same data. What it throws is the load's error.
    */
   [[nodiscard]] virtual typename kind_t::result_type load(const geo::Polygon& location) const = 0;
