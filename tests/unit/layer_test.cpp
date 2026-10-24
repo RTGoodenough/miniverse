@@ -5,6 +5,7 @@
 
 #include <boost/geometry/io/wkt/read.hpp>
 
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -46,6 +47,15 @@ TEST_CASE("layer: a road layer's statements are aimed at its table", "[layer]") 
       R"(SELECT "way_id", "node_ids", "geom", "tags" FROM "osm_roads" WHERE ST_Intersects("geom", $1::geometry(Polygon,4326)) ORDER BY "way_id")"
   );
   CHECK(
-      Roads::setup_sql(layer.table().name()) == std::vector<std::string>{R"(CREATE INDEX ON "osm_roads" USING gist (geom))"}
+      Roads::setup_sql(layer.table().name()) ==
+      std::vector<std::string>{R"(CREATE INDEX ON "osm_roads" USING gist (geom))", R"(CREATE INDEX ON "osm_roads" (dataset))"}
+  );
+  CHECK(
+      std::string(Roads::sweep_statement_type::bind(std::string("town"), std::int64_t{7}).on(layer.table()).sql()) ==
+      R"(DELETE FROM "osm_roads" WHERE "dataset" = $1 AND "pushed" <> $2)"
+  );
+  CHECK(
+      std::string(Roads::remove_statement_type::bind(std::string("town")).on(layer.table()).sql()) ==
+      R"(DELETE FROM "osm_roads" WHERE "dataset" = $1)"
   );
 }

@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "miniverse/dataset.hpp"
 #include "miniverse/geo/types.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/table_name.hpp"
@@ -14,11 +16,11 @@
 namespace miniverse {
 
 std::vector<std::string> RoadLayer::setup_sql(const schemacht::schema::TableName& table) {
-  return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)"};
+  return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)", "CREATE INDEX ON " + table.quoted() + " (dataset)"};
 }
 
-std::vector<std::vector<RoadLayer::row_type>> RoadLayer::to_rows(Ways ways) {
-  std::vector<std::vector<row_type>> batches;
+std::vector<std::vector<RoadLayer::insert_row_type>> RoadLayer::to_rows(Ways ways, const Dataset& dataset, std::int64_t stamp) {
+  std::vector<std::vector<insert_row_type>> batches;
 
   for ( std::size_t i = 0; i < ways.size(); ++i ) {
     Way& way = ways.at(i);
@@ -34,18 +36,19 @@ std::vector<std::vector<RoadLayer::row_type>> RoadLayer::to_rows(Ways ways) {
     }
 
     batches.back().emplace_back(
-        road::WayId{way.id}, road::NodeIds{std::move(way.node_ids)}, road::Geom{std::move(way.coordinates)}, road::Tags{std::move(way.tags)}
+        road::DatasetName{dataset.name}, road::NodeIds{std::move(way.node_ids)}, road::Geom{std::move(way.coordinates)},
+        road::Tags{std::move(way.tags)}, road::Pushed{stamp}
     );
   }
 
   return batches;
 }
 
-Ways RoadLayer::from_rows(std::vector<row_type> rows, const geo::Polygon& /*location*/) {
+Ways RoadLayer::from_rows(std::vector<load_statement_type::result_type> rows, const geo::Polygon& /*location*/) {
   Ways ways;
 
   ways.reserve(rows.size());
-  for ( row_type& row : rows ) {
+  for ( auto& row : rows ) {
     ways.push_back(
         Way{
             .id = schemacht::schema::get<"way_id">(row),

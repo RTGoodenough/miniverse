@@ -64,7 +64,8 @@ std::string without_database(const std::string& conninfo) {
 
   // Each value in quotes, with the two characters that mean something inside them escaped. The array ends with a keyword of none.
   std::string result;
-  for ( const PQconninfoOption* option = options.get(); option->keyword != nullptr; ++option ) {  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+  for ( const PQconninfoOption* option = options.get(); option->keyword != nullptr;
+        ++option ) {  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
     if ( option->val == nullptr || std::string_view(option->keyword) == "dbname" ) {
       continue;
     }
@@ -115,10 +116,12 @@ auto about(const std::string& what, read_t read) {
 
 /** @brief Writes the roads and paths of the OpenStreetMap file at `path`, all of them or none. */
 void write_roads(World& world, const std::string& path) {
-  miniverse::PushInParts<Roads> roads = world.begin_push<Roads>().get();
+  miniverse::PushInParts<Roads> roads = world.begin_push<Roads>(miniverse::Dataset{std::filesystem::path(path).filename().string()}).get();
 
   const miniverse::osm::WayRead read = about("the OpenStreetMap file '" + path + "'", [&] {
-    return miniverse::osm::read_ways({.path = path, .keys = {"highway"}}, 10'000, [&roads](miniverse::Ways chunk) { roads.add(std::move(chunk)).get(); });
+    return miniverse::osm::read_ways({.path = path, .keys = {"highway"}}, 10'000, [&roads](miniverse::Ways chunk) {
+      roads.add(std::move(chunk)).get();
+    });
   });
 
   roads.commit().get();
@@ -167,8 +170,8 @@ void write_heights(World& world, const std::vector<std::filesystem::path>& files
 
     heights.commit().get();
 
-    std::cout << "elevation: " << ++written << " of " << files.size() << ", " << file.filename().string() << ": " << read.windows << " windows written, "
-              << read.without_data << " with no data left out\n";
+    std::cout << "elevation: " << ++written << " of " << files.size() << ", " << file.filename().string() << ": " << read.windows
+              << " windows written, " << read.without_data << " with no data left out\n";
   }
 }
 

@@ -28,7 +28,7 @@ int main(int argc, char** argv) {
     world.create_tables();
 
     // One transaction for the whole file. Each chunk is waited for before the next is read.
-    miniverse::PushInParts<Roads> roads = world.begin_push<Roads>().get();
+    miniverse::PushInParts<Roads> roads = world.begin_push<Roads>(miniverse::Dataset{"town.osm.pbf"}).get();
 
     // The ways with a `highway` tag, which are OpenStreetMap's roads and paths, 10000 at a time.
     const miniverse::osm::WayRead read =

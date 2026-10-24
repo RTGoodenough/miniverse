@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
     world.create_tables();
 
     // One transaction for the whole file. Each chunk is waited for before the next is read, so one chunk is held at a time.
-    miniverse::PushInParts<Buildings> buildings = world.begin_push<Buildings>().get();
+    miniverse::PushInParts<Buildings> buildings = world.begin_push<Buildings>(miniverse::Dataset{"buildings.geojson"}).get();
 
     const miniverse::gdal::VectorRead read = miniverse::gdal::read_features<geo::MultiPolygon>(
         {.path = MINIVERSE_EXAMPLE_DATA "/buildings.geojson"}, 10'000,
@@ -42,8 +42,8 @@ int main(int argc, char** argv) {
 
     std::cout << read.features << " buildings written, " << read.without_geometry << " without a geometry left out\n";
 
-    // The buildings of the village: all but the file's barn, which is out of this area. Each has the file's id for it, its
-    // fields as tags, and its polygons: a single polygon is a multipolygon of one.
+    // The buildings of the village: all but the file's barn, which is out of this area. Each has the id the database gave it
+    // (the file's is not kept), its fields as tags, and its polygons: a single polygon is a multipolygon of one.
     std::cout << "in the village:\n";
     for ( const Building& building : world.load<Buildings>(example::box(10, 50, 10.01, 50.01)).get() ) {
       std::cout << "  building " << building.id << ", " << building.geometry.size() << (building.geometry.size() == 1 ? " part: " : " parts: ")

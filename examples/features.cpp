@@ -16,7 +16,6 @@
 
 #include "miniverse/miniverse.hpp"
 #include "schemacht/json/json.hpp"
-#include "schemacht/postgres/async_client.hpp"
 #include "support.hpp"
 
 namespace geo = miniverse::geo;
@@ -36,19 +35,26 @@ int main(int argc, char** argv) {
     world.create_tables();  // each with its spatial index
 
     // Started together, then waited for: the two layers are written at once, on the miniverse's pool of connections.
-    // Positions are longitude, then latitude.
-    std::future<void> cafes_written = world.push<Cafes>({
-        {.id = 1, .geometry = geo::Point(10.004, 50.003), .tags = Json(R"({"name": "The Bandstand", "outdoor_seating": true})")},
-        {.id = 2, .geometry = geo::Point(10.011, 50.002), .tags = Json(R"({"name": "Corner Cup"})")},
-        {.id = 3, .geometry = geo::Point(10.250, 50.100)},  // across town, and without tags
-    });
-    std::future<void> parks_written = world.push<Parks>({
-        {
-            .id = 7,
-            .geometry = example::box(10.000, 50.000, 10.010, 50.006),
-            .tags = Json(R"({"name": "Old Common", "leisure": "park"})"),
-        },
-    });
+    // Positions are longitude, then latitude. Each push is of a dataset, the export the features came from: the ids given
+    // here are not kept (the database numbers the rows), and a later push of the same dataset replaces it.
+    const miniverse::Dataset survey{"town-survey"};
+
+    std::future<void> cafes_written = world.push<Cafes>(
+        survey, {
+                    {.id = 1, .geometry = geo::Point(10.004, 50.003), .tags = Json(R"({"name": "The Bandstand", "outdoor_seating": true})")},
+                    {.id = 2, .geometry = geo::Point(10.011, 50.002), .tags = Json(R"({"name": "Corner Cup"})")},
+                    {.id = 3, .geometry = geo::Point(10.250, 50.100)},  // across town, and without tags
+                }
+    );
+    std::future<void> parks_written = world.push<Parks>(
+        survey, {
+                    {
+                        .id = 7,
+                        .geometry = example::box(10.000, 50.000, 10.010, 50.006),
+                        .tags = Json(R"({"name": "Old Common", "leisure": "park"})"),
+                    },
+                }
+    );
     cafes_written.get();
     parks_written.get();
 
@@ -75,12 +81,14 @@ int main(int argc, char** argv) {
       std::cout << '\n';
     }
 
-    // A push writes all of its features or none. An error comes through the future, as here: cafe 1 is already there.
-    try {
-      world.push<Cafes>({{.id = 4, .geometry = geo::Point(10.006, 50.001)}, {.id = 1, .geometry = geo::Point(10.004, 50.003)}}).get();
-    } catch ( const schemacht::postgres::QueryError& ) {
-      std::cout << "a push with a cafe that is already there is refused whole: " << world.load<Cafes>(neighbourhood).get().size() << " cafes still\n";
-    }
+    // A second push of the dataset replaces it, all at once: the survey now has two cafes, one of them new, and the others
+    // are gone. A different dataset would be added beside it instead.
+    world
+        .push<Cafes>(
+            survey, {{.geometry = geo::Point(10.004, 50.003), .tags = Json(R"({"name": "The Bandstand"})")}, {.geometry = geo::Point(10.006, 50.001)}}
+        )
+        .get();
+    std::cout << "after the survey is pushed again: " << world.load<Cafes>(neighbourhood).get().size() << " cafes in the neighbourhood\n";
 
     world.drop_tables();
 

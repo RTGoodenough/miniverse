@@ -9,6 +9,7 @@
 struct Roads : miniverse::RoadLayer {};
 struct Tracks : miniverse::RoadLayer {};
 struct Elevation : miniverse::RasterLayer<std::int16_t> {};
+struct Shops : miniverse::FeatureLayer<miniverse::geo::Point> {};
 
 #if defined(CASE_LOAD_LAYER_NOT_HELD)
 void load_tracks(miniverse::Miniverse<Roads>& world) { std::ignore = world.load<Tracks>(miniverse::geo::Polygon()); }
@@ -22,6 +23,16 @@ void stream_tracks(miniverse::Miniverse<Roads>& world) {
 
 #if defined(CASE_PUSH_LAYER_NOT_HELD)
 void push_tracks(miniverse::Miniverse<Roads>& world) { std::ignore = world.push<Tracks>(miniverse::Ways()); }
+#endif
+
+#if defined(CASE_PUSH_NEEDS_DATASET)
+void push_shops(miniverse::Miniverse<Shops>& world) { std::ignore = world.push<Shops>(miniverse::Features<miniverse::geo::Point>()); }
+#endif
+
+#if defined(CASE_PUSH_TAKES_NO_DATASET)
+void push_heights(miniverse::Miniverse<Elevation>& world) {
+  std::ignore = world.push<Elevation>(miniverse::Dataset{"srtm"}, miniverse::geo::Raster<std::int16_t>());
+}
 #endif
 
 #if defined(CASE_CREATE_TABLES_NEED_SETTINGS)

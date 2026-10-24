@@ -138,7 +138,7 @@ int main(int argc, char** argv) {
     // The uploader's part, done once, somewhere else: examples/import_osm.cpp fills a road table from an OpenStreetMap file.
     world.drop_tables();
     world.create_tables();
-    world.push<Roads>(village()).get();
+    world.push<Roads>(miniverse::Dataset{"village"}, village()).get();
 
     // The worker's part. When it starts: is the table there, and is it a road table? One that is not fails here, with a
     // `miniverse::TablesDiffer` that says how each table differs, and not at the first load.

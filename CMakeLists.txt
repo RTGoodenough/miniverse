@@ -53,6 +53,7 @@ add_library(
   src/layer/raster/tiles.cpp
   src/layer/raster_layer.cpp
   src/layer/road_layer.cpp
+  src/world/datasets.cpp
 )
 
 target_include_directories(

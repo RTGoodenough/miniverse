@@ -8,7 +8,7 @@
 #include "miniverse/geo/types.hpp"
 #include "miniverse/layer.hpp"
 #include "miniverse/layer/way.hpp"
-#include "miniverse/osm/concepts/ways.hpp"
+#include "miniverse/osm/concepts/ways.hpp"  // IWYU pragma: export
 #include "miniverse/osm/ways.hpp"
 #include "miniverse/osm/ways_in_memory.hpp"
 #include "miniverse/reader.hpp"

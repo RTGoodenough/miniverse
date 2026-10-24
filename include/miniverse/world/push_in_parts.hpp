@@ -10,7 +10,6 @@
 #include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/world/async.hpp"
 #include "miniverse/world/write_batches.hpp"
-#include "schemacht/postgres/transaction.hpp"
 #include "schemacht/schema/table.hpp"
 #include "schemacht/util/futures.hpp"
 
@@ -21,8 +20,8 @@
 namespace miniverse {
 
 /**
- * @brief A push that takes its data in parts, all of them written or none: for a dataset too large to hold at once, such as a
- * file a loader reads a chunk at a time. Made by `Miniverse::begin_push`.
+ * @brief A push that takes its data in parts, all of them written or none: for data too large to hold at once, such as a file a
+ * loader reads a chunk at a time. Made by `Miniverse::begin_push`.
  *
  * @code
  * auto buildings = world.begin_push<Buildings>().get();
@@ -38,7 +37,9 @@ namespace miniverse {
  * part's error.
  *
  * One call at a time: wait for an `add`'s future before the next `add` or the `commit`. Wait for every `add` before the
- * miniverse ends. One that was moved from fails every call.
+ * miniverse ends. One that was moved from fails every call. For a kind with datasets, the push is of one dataset, which it
+ * replaces when it commits: the dataset's rows that no part wrote are deleted then, so a commit with no parts leaves the
+ * dataset empty, as a push of no data does (see `Miniverse::begin_push`).
  */
 template <LayerKind kind_t>
 class PushInParts {
@@ -46,11 +47,12 @@ class PushInParts {
   using ToRows = std::function<RowBatches<kind_t>(typename kind_t::result_type)>;
 
   /**
-   * @brief The push `transaction` is, begun on `table`'s database, whose parts' rows `to_rows` makes. What
-   * `Miniverse::begin_push` makes one with: a program has no call to.
+   * @brief The push whose transaction, begun on `table`'s database, `state` holds, with what it runs before it commits (a
+   * dataset's sweep; nothing, for most kinds), and whose parts' rows `to_rows` makes. What `Miniverse::begin_push` makes one
+   * with: a program has no call to.
    */
-  PushInParts(schemacht::postgres::Transaction transaction, const schemacht::schema::Table<typename kind_t::schema_type>& table, ToRows to_rows)
-      : _state(detail::push_begun(std::move(transaction))), _table(&table), _to_rows(std::move(to_rows)) {}
+  PushInParts(std::shared_ptr<detail::PushState> state, const schemacht::schema::Table<typename kind_t::schema_type>& table, ToRows to_rows)
+      : _state(std::move(state)), _table(&table), _to_rows(std::move(to_rows)) {}
 
   /**
    * @return A future that completes once `data`, a part, is written into the push, or holds the error, which ends the push. The
@@ -80,7 +82,7 @@ class PushInParts {
         return;
       }
 
-      detail::guarded(done, [&] { _state->transaction.commit(done); });
+      detail::commit_push(_state, done);
     });
   }
 

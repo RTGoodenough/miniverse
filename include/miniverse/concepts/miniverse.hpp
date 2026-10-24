@@ -1,11 +1,13 @@
 #pragma once
 
 #include <concepts>
+#include <cstdint>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "miniverse/dataset.hpp"
 #include "miniverse/geo/types.hpp"
 #include "schemacht/postgres/concepts/statements.hpp"
 #include "schemacht/schema/table.hpp"
@@ -15,7 +17,7 @@
  * @file
  * What a kind of layer is: a kind of data (roads, elevation, ...) and how it is stored. A kind is a type, used only as a name,
  * never made; `Miniverse<Roads, Elevation>` holds one layer of each, and each layer names its table when the miniverse is
- * made (`Layer<Roads>("osm_roads")`). Two datasets of the same kind are two types: `struct Roads : RoadLayer {};` and
+ * made (`Layer<Roads>("osm_roads")`). Two layers of one kind are two types: `struct Roads : RoadLayer {};` and
  * `struct Tracks : RoadLayer {};`.
  *
  * A kind says:
@@ -33,15 +35,21 @@
  *   fails the push) or upsert (`upsert_statement`: it is merged), aimed at the layer's table (`on`). A push runs one per batch,
  *   all in one transaction.
  *
- * The `...` is the kind's settings, if its table is made with any beside its name:
- * - A kind without settings (`HasNoSettings`, a `RoadLayer`) makes its table the same way every time: `setup_sql(table)`,
- *   `to_rows(result)`.
+ * The `...` is what a kind's writes need beside the data, and a kind is one of three:
+ * - A kind without settings (`HasNoSettings`, a kind of your own with plain inserts) makes its table the same way every time:
+ *   `setup_sql(table)`, `to_rows(result)`.
  * - A kind with settings (`HasSettings`, a `RasterLayer`'s grid) has a `settings_type`. Its table is made with them,
  *   `setup_sql(table, settings)`, once, by `Miniverse::create_table<Kind>(settings)`, and the table keeps them. To write, the
  *   kind reads them back from the table: `settings_statement_type`, a statement whose one argument is the table's quoted
  *   name, and `settings_from_rows(rows)`, its rows made into a `settings_type`; a push does so before `to_rows(result,
  *   settings)`, and `Miniverse::table_settings` gives them to a writer, to warp its source onto. A worker that only loads
  *   never needs them.
+ * - A kind with datasets (`HasDatasets`, a `FeatureLayer` or `RoadLayer`) writes its rows under a `Dataset`, the export they
+ *   came from, and a push replaces the dataset: `to_rows(result, dataset, stamp)` marks each row with the dataset's name and
+ *   the push's stamp (a number the push chooses), and once the rows are written, `sweep_statement_type`, bound to the name
+ *   and the stamp, deletes the dataset's rows the push did not write, before the transaction commits. `remove_statement_type`,
+ *   bound to the name, deletes a dataset outright (`Miniverse::remove`). Its ids are the database's own (a generated key):
+ *   `to_rows` leaves them out, as `schema_type::insert_row_type` does, and `from_rows` reads them.
  *
  * A streamed load (`Miniverse::stream`) hands its callback a chunk of what a load would give, made from some of the rows as
  * they arrive. For most kinds a chunk is a `result_type`, made by `from_rows`: some of the features. A kind whose `from_rows`
@@ -57,9 +65,9 @@ namespace miniverse {
 template <typename kind_t>
 using LoadedRows = std::vector<typename kind_t::load_statement_type::result_type>;
 
-/** @brief The rows of `kind_t`'s table: what `write_statement` takes, one batch. */
+/** @brief The rows of `kind_t`'s table as they are written, without a generated column: what `write_statement` takes, one batch. */
 template <typename kind_t>
-using RowsOf = std::vector<typename kind_t::schema_type::row_type>;
+using RowsOf = std::vector<typename kind_t::schema_type::insert_row_type>;
 
 /** @brief The rows of `kind_t`'s table in batches, each the rows of one statement: what `to_rows` makes. */
 template <typename kind_t>
@@ -81,12 +89,22 @@ template <typename kind_t>
 concept HasSettings = requires(const std::string& quoted_table) {
   typename kind_t::settings_type;
   { kind_t::settings_statement_type::bind(quoted_table) } -> schemacht::postgres::RunnableStatement;
-} && requires(
-    const schemacht::schema::TableName& table, const kind_t::settings_type& settings, kind_t::result_type data, SettingsRows<kind_t> rows
-) {
+} && requires(const schemacht::schema::TableName& table, const kind_t::settings_type& settings, kind_t::result_type data, SettingsRows<kind_t> rows) {
   { kind_t::setup_sql(table, settings) } -> std::same_as<std::vector<std::string>>;
   { kind_t::settings_from_rows(std::move(rows)) } -> std::same_as<typename kind_t::settings_type>;
   { kind_t::to_rows(std::move(data), settings) } -> std::same_as<RowBatches<kind_t>>;
+};
+
+/** @brief Whether `kind_t` writes its rows under a `Dataset`, which a push replaces: see the top of this file. */
+template <typename kind_t>
+concept HasDatasets = requires(
+    const schemacht::schema::TableName& table, kind_t::result_type data, const Dataset& dataset, std::int64_t stamp,
+    const schemacht::schema::Table<typename kind_t::schema_type>& schema_table
+) {
+  { kind_t::setup_sql(table) } -> std::same_as<std::vector<std::string>>;
+  { kind_t::to_rows(std::move(data), dataset, stamp) } -> std::same_as<RowBatches<kind_t>>;
+  { kind_t::sweep_statement_type::bind(dataset.name, stamp).on(schema_table) } -> schemacht::postgres::CommandStatement;
+  { kind_t::remove_statement_type::bind(dataset.name).on(schema_table) } -> schemacht::postgres::CommandStatement;
 };
 
 /** @brief Whether `kind_t` says what a streamed chunk of it is, other than a `result_type`: see the top of this file. */
@@ -113,7 +131,8 @@ concept LayerKind =
       { kind_t::from_rows(std::move(rows), location) } -> std::same_as<typename kind_t::result_type>;
       { kind_t::write_statement(written).on(schema_table) } -> schemacht::postgres::CommandStatement;
     } &&
-    (HasNoSettings<kind_t> || HasSettings<kind_t>) &&
+    // One of the three, not two: a kind with settings and datasets would be written by `push(dataset, data)` without them.
+    (int{HasNoSettings<kind_t>} + int{HasSettings<kind_t>} + int{HasDatasets<kind_t>} == 1) &&
     // A kind that names a `chunk_type` must make chunks of it: else its streams would fall back to `from_rows` unnoticed.
     (! requires { typename kind_t::chunk_type; } || HasOwnChunks<kind_t>);
 
@@ -137,8 +156,7 @@ using ChunkOf = ChunkType<kind_t>::type;
  * `bool` where `false` means it wants no more.
  */
 template <typename callback_t, typename kind_t>
-concept ChunkCallback =
-    std::invocable<callback_t&, ChunkOf<kind_t>> && (std::same_as<std::invoke_result_t<callback_t&, ChunkOf<kind_t>>, void> ||
-                                                     std::same_as<std::invoke_result_t<callback_t&, ChunkOf<kind_t>>, bool>);
+concept ChunkCallback = std::invocable<callback_t&, ChunkOf<kind_t>> && (std::same_as<std::invoke_result_t<callback_t&, ChunkOf<kind_t>>, void> ||
+                                                                         std::same_as<std::invoke_result_t<callback_t&, ChunkOf<kind_t>>, bool>);
 
 }  // namespace miniverse

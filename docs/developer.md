@@ -9,13 +9,14 @@ How the library is put together, how to add to it, and how to build, test and li
 include/miniverse/
   world.hpp              Miniverse: the front that holds the layers and the pool and tells a table from a reader
   world/                 one idea each: load.hpp (loads and streams), push.hpp, push_in_parts.hpp (PushInParts),
-                         write_batches.hpp, verify.hpp (TablesDiffer, the checks), tables.hpp (make, drop),
-                         settings.hpp, async.hpp
+                         write_batches.hpp, datasets.hpp (stamp, lock, sweep, remove), verify.hpp (TablesDiffer, the
+                         checks), tables.hpp (make, drop), settings.hpp, async.hpp
+  dataset.hpp            Dataset: the export a vector push writes under and replaces
   layer.hpp              Layer<Kind>: a table name or a reader
   reader.hpp             Reader<Kind>
   location.hpp           check_location: what a reader's load holds a polygon to, as a table's would refuse
   miniverse.hpp          umbrella: world.hpp plus the built-in kinds and geo types
-  concepts/              LayerKind, HasSettings, HasNoSettings, HasOwnChunks, ChunkCallback
+  concepts/              LayerKind, HasSettings, HasNoSettings, HasDatasets, HasOwnChunks, ChunkCallback
   geo/                   one idea each: types.hpp (Boost.Geometry), grid.hpp, raster.hpp, wkb.hpp and raster_wkb.hpp
                          (over wkb_bytes.hpp), column_types.hpp, operations.hpp (PostGIS tests); concepts/ under
                          each area holds its concepts
@@ -54,11 +55,15 @@ A kind is a type that is never instantiated; `Miniverse<Roads, Elevation>` holds
 | `schema_type` | the table's columns, as a schemacht `Schema`; its own name is a placeholder, the `Layer` names the table |
 | `load_statement_type` | a `schemacht::query::Prepared` select against `schema_type` whose argument 0 is the location polygon |
 | `from_rows(rows, location)` | the load statement's rows made into a `result_type` |
-| `to_rows(result[, settings])` | the other way, in batches of one statement each; the kind sizes them |
+| `to_rows(result[, settings \| dataset, stamp])` | the other way, in batches of one statement each; the kind sizes them |
 | `write_statement(rows)` | the insert or upsert of one batch |
 | `setup_sql(table[, settings])` | what runs after `CREATE TABLE`: an index, constraints, a function |
+| `sweep_statement_type`, `remove_statement_type` | for a kind with datasets: the deletes of a dataset's unstamped rows, and of a dataset |
 
-A kind with settings (`HasSettings`: a raster's grid) also has `settings_type`, `settings_statement_type` and
+A kind is exactly one of `HasNoSettings`, `HasSettings` and `HasDatasets`. A kind with datasets (the two vector kinds)
+has a generated id column, a `dataset` column and a `pushed` stamp; `to_rows(result, dataset, stamp)` produces
+`insert_row_type` rows without the id, and `RowsOf`/`RowBatches` are those for every kind (the same as `row_type` when
+nothing is generated). A kind with settings (`HasSettings`: a raster's grid) also has `settings_type`, `settings_statement_type` and
 `settings_from_rows`, so a push can read the settings back from the table. A kind whose result cannot be made from part
 of the rows (`HasOwnChunks`: a raster, stitched from all its tiles) says what a streamed chunk is instead: `chunk_type`
 and `chunk_from_rows`.
@@ -84,6 +89,10 @@ table side takes the `Database` and the layer's `Table`, the reader side the `Re
   sending the next, then commits; any failure rolls back and the future carries that statement's own error.
   `PushInParts` keeps the transaction open across `add` calls and commits on `commit`. Both share `write_batches` in
   `world/write_batches.hpp`; the settings read is `world/settings.hpp`.
+- **push of a dataset** (`world/datasets.hpp`): a random 64-bit stamp is drawn; the transaction begins with an advisory
+  lock on the dataset's name (`pg_advisory_xact_lock(hashtext(name))`), so two pushes of one dataset run in turn; the
+  rows carry the dataset and the stamp; before the commit the kind's sweep deletes the dataset's rows whose stamp is
+  another push's. A failure anywhere rolls the whole back. `remove` runs the kind's remove statement outside a transaction.
 - **verify:** schemacht's `table_differences_statement` for each table, all at once; the settings statement for kinds
   with settings; `Reader::problems` for readers. The results are gathered by `Checks` in `world/verify.hpp` and settled
   together.
@@ -98,11 +107,15 @@ own, and their futures wait for that thread when dropped. What runs on the calle
 
 ### The built-in kinds
 
-- **FeatureLayer<G>** (`layer/feature_layer.hpp`): `feature_id bigint PRIMARY KEY, geom geometry(<G>,4326), tags jsonb`,
-  a GiST index on `geom`. Geometries are written and read as PostGIS WKB (`geo/wkb.hpp`). Batches are bounded by
-  `FEATURES_PER_STATEMENT` and `POINTS_PER_STATEMENT`.
-- **RoadLayer** (`layer/road_layer.hpp`): `way_id, node_ids bigint[], geom geometry(LineString,4326), tags jsonb`, a GiST
-  index. Batches of `WAYS_PER_STATEMENT`.
+- **FeatureLayer<G>** (`layer/feature_layer.hpp`): `feature_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, dataset
+  text, geom geometry(<G>,4326), tags jsonb, pushed bigint`, a GiST index on `geom` and a btree on `dataset`. Writes are
+  plain inserts; the load projects id, geometry and tags. Geometries are written and read as PostGIS WKB (`geo/wkb.hpp`).
+  Batches are bounded by `FEATURES_PER_STATEMENT` and `POINTS_PER_STATEMENT`.
+- **RoadLayer** (`layer/road_layer.hpp`): `way_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, dataset text, node_ids
+  bigint[] UNIQUE, geom geometry(LineString,4326), tags jsonb, pushed bigint`, a GiST index and a btree on `dataset`.
+  Writes are schemacht's `upsert_statement` with `ConflictOn<"node_ids">`: a way of nodes already there updates that
+  row and keeps its id. The database numbers every row a statement tries, matched or not, so ids have gaps. Batches of
+  `WAYS_PER_STATEMENT`.
 - **RasterLayer<P>** (`layer/raster_layer.hpp`, `src/layer/raster_layer.cpp`; the pixel arithmetic in `layer/raster/tiles.hpp`,
   which tiles a location has in `layer/raster/reach.hpp`): `tile_id bigint PRIMARY KEY, rast raster`.
   The tile id is the tile's row and column in the world grid. `setup_sql` makes the schema `miniverse_functions` and its
@@ -150,7 +163,9 @@ dependencies are private.
    such a kind needs only `world.hpp` and the `geo` headers.
 
 A kind with settings adds `settings_type`, `settings_statement_type` (a `RawStatement` taking the table's quoted name)
-and `settings_from_rows`; `RasterLayer` is the example.
+and `settings_from_rows`; `RasterLayer` is the example. A kind with datasets adds a `dataset` and a `pushed` column,
+`to_rows(result, dataset, stamp)`, and `sweep_statement_type` and `remove_statement_type` as `query::delete_where`
+commands; `FeatureLayer` is the plain example and `RoadLayer` the one with an identity of its own (`UNIQUE (node_ids)`).
 
 ### Add a reader
 

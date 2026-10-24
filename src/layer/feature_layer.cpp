@@ -3,10 +3,12 @@
 #include <boost/geometry/algorithms/num_points.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "miniverse/dataset.hpp"
 #include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/geo/types.hpp"
 #include "schemacht/schema/field.hpp"
@@ -16,13 +18,15 @@ namespace miniverse {
 
 template <geo::wkb::Geometry geometry_t>
 std::vector<std::string> FeatureLayer<geometry_t>::setup_sql(const schemacht::schema::TableName& table) {
-  return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)"};
+  return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)", "CREATE INDEX ON " + table.quoted() + " (dataset)"};
 }
 
 template <geo::wkb::Geometry geometry_t>
-std::vector<std::vector<typename FeatureLayer<geometry_t>::row_type>> FeatureLayer<geometry_t>::to_rows(result_type features) {
-  std::vector<std::vector<row_type>> batches;
-  std::size_t                        points = 0;  // in the last batch
+std::vector<std::vector<typename FeatureLayer<geometry_t>::insert_row_type>> FeatureLayer<geometry_t>::to_rows(
+    result_type features, const Dataset& dataset, std::int64_t stamp
+) {
+  std::vector<std::vector<insert_row_type>> batches;
+  std::size_t                               points = 0;  // in the last batch
 
   for ( Feature<geometry_t>& each : features ) {
     const std::size_t more = boost::geometry::num_points(each.geometry);
@@ -32,18 +36,22 @@ std::vector<std::vector<typename FeatureLayer<geometry_t>::row_type>> FeatureLay
     }
 
     points += more;
-    batches.back().emplace_back(feature::Id{each.id}, feature::Geom<geometry_t>{std::move(each.geometry)}, feature::Tags{std::move(each.tags)});
+    batches.back().emplace_back(
+        feature::DatasetName{dataset.name}, feature::Geom<geometry_t>{std::move(each.geometry)}, feature::Tags{std::move(each.tags)},
+        feature::Pushed{stamp}
+    );
   }
 
   return batches;
 }
 
 template <geo::wkb::Geometry geometry_t>
-Features<geometry_t> FeatureLayer<geometry_t>::from_rows(std::vector<row_type> rows, const geo::Polygon& /*location*/) {
+Features<geometry_t>
+FeatureLayer<geometry_t>::from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& /*location*/) {
   Features<geometry_t> features;
 
   features.reserve(rows.size());
-  for ( row_type& row : rows ) {
+  for ( auto& row : rows ) {
     features.push_back(
         Feature<geometry_t>{
             .id = schemacht::schema::get<"feature_id">(row),

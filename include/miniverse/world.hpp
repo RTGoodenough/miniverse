@@ -14,9 +14,11 @@
 #include <vector>
 
 #include "miniverse/concepts/miniverse.hpp"
+#include "miniverse/dataset.hpp"  // IWYU pragma: export
 #include "miniverse/geo/types.hpp"
 #include "miniverse/layer.hpp"  // IWYU pragma: export
 #include "miniverse/world/async.hpp"
+#include "miniverse/world/datasets.hpp"
 #include "miniverse/world/load.hpp"
 #include "miniverse/world/push.hpp"
 #include "miniverse/world/push_in_parts.hpp"  // IWYU pragma: export
@@ -181,15 +183,16 @@ class Miniverse {
    * pool's connections until it ends (with one connection, nothing else runs during a push). For data too large to hold at
    * once, `begin_push` takes it in parts.
    *
-   * The kind's `write_statement` says what happens to a row already there: a `RoadLayer`'s way fails the push, and an
-   * `RasterLayer`'s tile is merged with it (new pixels win, and where the new tile has no data the old pixel stays). Pushes
-   * that overlap are merged in the order they commit: where both have data, the last to commit wins.
+   * The kind's `write_statement` says what happens to a row already there: a `RasterLayer`'s tile is merged with it (new
+   * pixels win, and where the new tile has no data the old pixel stays). Pushes that overlap are merged in the order they
+   * commit: where both have data, the last to commit wins. A kind with datasets is pushed with one: `push(dataset, data)`.
    *
    * A layer with a reader is only read: a push to it fails with a `std::logic_error`.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<void> push(kind_t::result_type data) {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
+    static_assert(! HasDatasets<kind_t>, "this kind's rows belong to a dataset: push<Kind>(Dataset{\"name\"}, data) replaces it");
 
     if ( ! layer<kind_t>().is_table() ) {
       return only_read<kind_t, void>();
@@ -200,19 +203,88 @@ class Miniverse {
 
   /**
    * @return A future for a push of the layer `kind_t` that takes its data in parts, all of them written or none (see
-   * `PushInParts`): for a dataset too large to hold at once. For a kind with settings, the table's are read first, once, and
+   * `PushInParts`): for data too large to hold at once. For a kind with settings, the table's are read first, once, and
    * every part's rows are made with them. It holds the error instead if they can't be read, or no transaction begun, or the
    * layer has a reader (a `std::logic_error`: it is only read).
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<PushInParts<kind_t>> begin_push() {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
+    static_assert(! HasDatasets<kind_t>, "this kind's rows belong to a dataset: begin_push<Kind>(Dataset{\"name\"}) replaces it");
 
     if ( ! layer<kind_t>().is_table() ) {
       return only_read<kind_t, PushInParts<kind_t>>();
     }
 
     return detail::begin_push<kind_t>(database(), layer<kind_t>().table());
+  }
+
+  /**
+   * @return A future that completes once `data` has replaced `dataset` in the layer `kind_t`'s table, or holds the error
+   * (nothing is then changed). For a kind with datasets (`HasDatasets`: a `FeatureLayer`, a `RoadLayer`): the rows are made by
+   * the kind on the calling thread, written in its batches, and the dataset's rows that this push did not write are deleted,
+   * all in one transaction. So the first push of a name writes the dataset, and every later push of it replaces it: what
+   * the new data lacks is gone, what it has is there, and a row the kind can tell is the same as one already there (a
+   * `RoadLayer`'s way, by its nodes) keeps its id. A dataset is an export of a region, named by the pusher: see `Dataset`.
+   * Two pushes of one dataset at once take turns (a lock on the name, held for the transaction); pushes of different datasets
+   * run side by side.
+   *
+   * The ids a load gives are the database's own, never the data's. A push of a `RoadLayer` dataset may also take over a
+   * row of another dataset: a way of the same nodes, such as a way both of two neighbouring exports carry whole.
+   *
+   * A layer with a reader is only read: a push to it fails with a `std::logic_error`.
+   */
+  template <LayerKind kind_t>
+  [[nodiscard]] std::future<void> push(const Dataset& dataset, kind_t::result_type data) {
+    static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
+    static_assert(HasDatasets<kind_t>, "this kind has no datasets: push<Kind>(data) writes it");
+
+    if constexpr ( HasDatasets<kind_t> ) {
+      if ( ! layer<kind_t>().is_table() ) {
+        return only_read<kind_t, void>();
+      }
+
+      return detail::push<kind_t>(database(), layer<kind_t>().table(), dataset, std::move(data));
+    }
+  }
+
+  /**
+   * @return A future for a push of `dataset` into the layer `kind_t` that takes its data in parts (see `PushInParts`): for an
+   * export too large to hold at once. The dataset is replaced when the push commits, as `push(dataset, data)` replaces it;
+   * until then nothing of it has changed, and a commit with no parts leaves it empty, as a push of no data does. It holds the
+   * error instead if no transaction could be begun, or the layer has a reader (a `std::logic_error`: it is only read).
+   */
+  template <LayerKind kind_t>
+  [[nodiscard]] std::future<PushInParts<kind_t>> begin_push(const Dataset& dataset) {
+    static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
+    static_assert(HasDatasets<kind_t>, "this kind has no datasets: begin_push<Kind>() writes it");
+
+    if constexpr ( HasDatasets<kind_t> ) {
+      if ( ! layer<kind_t>().is_table() ) {
+        return only_read<kind_t, PushInParts<kind_t>>();
+      }
+
+      return detail::begin_push<kind_t>(database(), layer<kind_t>().table(), dataset);
+    }
+  }
+
+  /**
+   * @return A future that completes once every row of `dataset` is deleted from the layer `kind_t`'s table, or holds the
+   * error. A name that no push wrote is nothing to delete, not an error. A layer with a reader is only read: it fails with
+   * a `std::logic_error`.
+   */
+  template <LayerKind kind_t>
+  [[nodiscard]] std::future<void> remove(const Dataset& dataset) {
+    static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
+    static_assert(HasDatasets<kind_t>, "this kind has no datasets to remove");
+
+    if constexpr ( HasDatasets<kind_t> ) {
+      if ( ! layer<kind_t>().is_table() ) {
+        return only_read<kind_t, void>();
+      }
+
+      return detail::remove<kind_t>(database(), layer<kind_t>().table(), dataset);
+    }
   }
 
   /**
@@ -306,7 +378,7 @@ class Miniverse {
   template <LayerKind kind_t>
   static constexpr std::size_t COUNT_OF = (std::size_t{0} + ... + std::size_t{std::same_as<kind_t, kind_ts>});
 
-  static_assert(((COUNT_OF<kind_ts> == 1) && ...), "a miniverse holds one layer of each kind: make another kind for a second dataset");
+  static_assert(((COUNT_OF<kind_ts> == 1) && ...), "a miniverse holds one layer of each kind: make another kind for a second layer of it");
 
   template <LayerKind kind_t>
   [[nodiscard]] static consteval bool holds() {
@@ -344,7 +416,7 @@ class Miniverse {
       detail::guarded(done, [&] {
         done.fail(
             std::make_exception_ptr(
-                std::logic_error("the layer read from " + layer<kind_t>().name() + " is only read: a push needs a layer that is a table")
+                std::logic_error("the layer read from " + layer<kind_t>().name() + " is only read: a push or a remove needs a layer that is a table")
             )
         );
       });

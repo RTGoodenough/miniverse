@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "miniverse/gdal/concepts/vector.hpp"
+#include "miniverse/gdal/concepts/vector.hpp"  // IWYU pragma: export
 #include "miniverse/gdal/vector.hpp"
 #include "miniverse/geo/types.hpp"
 #include "miniverse/layer.hpp"

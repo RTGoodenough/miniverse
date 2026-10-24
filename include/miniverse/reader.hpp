@@ -25,8 +25,9 @@
  * @endcode
  *
  * What a reader gives is meant to be what a table of the same data gives, and the readers of files are tested against one.
- * Two things are a reader's own all the same: the order (a file's, where a table's is by id), and the spelling of tags (a
- * file's JSON as its reader writes it, where a table's is as PostgreSQL's `jsonb` prints it: the same document, another text).
+ * Three things are a reader's own all the same: the ids (a file's, where a table's are the database's own), the order (a
+ * file's, where a table's is by id), and the spelling of tags (a file's JSON as its reader writes it, where a table's is as
+ * PostgreSQL's `jsonb` prints it: the same document, another text).
  *
  * A layer with a reader is only read: a push to it fails. Its reader is shared by the layer's copies and by the loads that
  * run, and loads run at the same time, each on a thread of its own: every member is `const`, and must be safe to call from

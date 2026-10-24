@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <functional>
 #include <memory>
 #include <utility>
 
@@ -13,8 +14,9 @@
 
 /**
  * @file
- * Writing a kind's batches into a transaction, one statement at a time, each completion sending the next: what a whole push
- * and each part of a `PushInParts` share, with the state of the push they write into and how a failed batch ends it.
+ * Writing a kind's batches into a transaction, one statement at a time, each completion sending the next, and the commit at
+ * the end, with what a push runs before it: what a whole push and each part of a `PushInParts` share, with the state of the
+ * push they write into and how a failed batch ends it.
  */
 namespace miniverse::detail {
 
@@ -24,15 +26,25 @@ enum class AfterWrite : std::uint8_t {
   GoOn,
 };
 
-/** @brief A push while it runs, shared with each write of it: its transaction, and why it ended if a part has failed. */
+/**
+ * @brief What a push runs in its transaction once every row is written and before it commits (a dataset's sweep). It calls
+ * `done` exactly once, with the error if it failed, or throws before it has queued anything: never both.
+ */
+using BeforeCommit = std::function<void(schemacht::postgres::Transaction&, std::function<void(const std::exception_ptr&)> done)>;
+
+/**
+ * @brief A push while it runs, shared with each write of it: its transaction, what runs before it commits (a dataset's sweep:
+ * nothing, for most kinds), and why it ended if a part has failed.
+ */
 struct PushState {
   schemacht::postgres::Transaction transaction;
+  BeforeCommit                     before_commit;
   std::exception_ptr               failed;  ///< Set before the transaction is rolled back; what every later call gets.
 };
 
-/** @return The state of a push begun with `transaction`. */
-[[nodiscard]] inline std::shared_ptr<PushState> push_begun(schemacht::postgres::Transaction transaction) {
-  return std::make_shared<PushState>(PushState{.transaction = std::move(transaction), .failed = nullptr});
+/** @return The state of a push begun with `transaction`, that runs `before_commit` (if any) before it commits. */
+[[nodiscard]] inline std::shared_ptr<PushState> push_begun(schemacht::postgres::Transaction transaction, BeforeCommit before_commit = {}) {
+  return std::make_shared<PushState>(PushState{.transaction = std::move(transaction), .before_commit = std::move(before_commit), .failed = nullptr});
 }
 
 /**
@@ -46,6 +58,38 @@ inline void end_push(const std::shared_ptr<PushState>& state, const schemacht::u
     state->transaction.rollback([state, done, error](const std::exception_ptr& /*rolled_back*/) { done.fail(error); });
   } catch ( ... ) {
     done.fail(error);  // the rollback couldn't be sent: dropping the transaction rolls it back
+  }
+}
+
+/**
+ * @brief Commits the push `state` is, after what it runs before a commit, and settles `done`: with the error of either, which
+ * ends the push, or with success.
+ */
+inline void commit_push(const std::shared_ptr<PushState>& state, const schemacht::util::Settler<void>& done) {
+  const auto commit = [state, done] {
+    try {
+      state->transaction.commit(done);
+    } catch ( ... ) {
+      done.fail(std::current_exception());
+    }
+  };
+
+  if ( ! state->before_commit ) {
+    commit();
+    return;
+  }
+
+  try {
+    state->before_commit(state->transaction, [state, done, commit](const std::exception_ptr& error) {
+      if ( error ) {
+        end_push(state, done, error);
+        return;
+      }
+
+      commit();
+    });
+  } catch ( ... ) {
+    end_push(state, done, std::current_exception());
   }
 }
 
@@ -71,7 +115,7 @@ void send_next(std::shared_ptr<BatchWrite<kind_t>> write) {
   try {
     if ( running.sent == running.batches.size() ) {
       if ( running.then == AfterWrite::Commit ) {
-        running.state->transaction.commit(running.done);
+        commit_push(running.state, running.done);
       } else {
         running.done(nullptr);
       }

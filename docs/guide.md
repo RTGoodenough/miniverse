@@ -29,7 +29,7 @@ The table names are given when the miniverse is made, so one program serves whic
 A `Layer` can also take a schema name (`Layer<Roads>("gis", "roads")`) or a reader (see [Files as layers](#files-as-layers)).
 Asking the miniverse for a kind it does not hold is a compile error.
 
-The calls that read and write data (`load`, `stream`, `push`, `begin_push`, `verify`, `table_settings`) return a
+The calls that read and write data (`load`, `stream`, `push`, `begin_push`, `remove`, `verify`, `table_settings`) return a
 `std::future`, and their errors arrive through it, not as exceptions from the call. The constructor, `create_table`,
 `drop_tables` and `Layer` itself wait and throw directly. The miniverse must outlive the futures it hands out.
 
@@ -68,17 +68,25 @@ packages and images are.
 ### Pushing
 
 ```cpp
-world.push<Roads>(std::move(roads)).get();
+world.push<Roads>(miniverse::Dataset{"village"}, std::move(roads)).get();
+world.push<Elevation>(std::move(heights)).get();
 ```
 
-A push writes all of its data or none: the rows go in batches of one statement each, inside one transaction. What
-happens to a row already there is the kind's choice: a road with an id already in the table fails the push; a raster
-tile is merged onto the one there. The transaction holds one of the pool's connections until it ends.
+A push writes all of its data or none: the rows go in batches of one statement each, inside one transaction. The
+transaction holds one of the pool's connections until it ends.
+
+Feature and road layers are pushed as datasets. A `Dataset` is a name for an export: the file a producer made of a
+region, under whatever name the pusher gives it. The first push of a name writes the dataset; every later push of the
+same name replaces it, all at once: what the new export lacks is gone, what it has is there. `remove` deletes a dataset.
+A worker never sees dataset names: a load gives the layer as one whole, with ids the database gave the rows, not the
+export's ids. So refresh a region by pushing its export again under the name it was first pushed under, and keep a name
+to the same ground over time. Two pushes of one dataset at once take turns; pushes of different datasets run side by
+side. A raster layer is not pushed as a dataset: each tile is merged onto the one already there.
 
 For data too large to hold at once, `begin_push` opens a push that takes parts, from `examples/import_osm.cpp`:
 
 ```cpp
-miniverse::PushInParts<Roads> roads = world.begin_push<Roads>().get();
+miniverse::PushInParts<Roads> roads = world.begin_push<Roads>(miniverse::Dataset{"town.osm.pbf"}).get();
 
 miniverse::osm::read_ways({.path = path, .keys = {"highway"}}, 10'000, [&roads](miniverse::Ways chunk) {
   roads.add(std::move(chunk)).get();
@@ -88,7 +96,9 @@ roads.commit().get();  // now they are all there, for everyone at once
 ```
 
 Every part is written in the same transaction, so a file that fails halfway leaves nothing, and workers see nothing
-until the commit.
+until the commit. For a dataset, the parts together are the dataset: it is replaced when the push commits, so a file
+read a chunk at a time goes through one `begin_push`, never a `push` per chunk, which would replace the dataset with
+each chunk. A commit with no parts, like a push of no data, leaves the dataset empty.
 
 ### Loading
 
@@ -174,7 +184,10 @@ miniverse::gdal::read_features<geo::MultiPolygon>({.path = path}, 10'000, [&buil
 ```
 
 A `VectorSource` names the file, optionally the layer in it, and optionally a whole-number field to take ids from
-(otherwise the file's own feature ids are used).
+(otherwise the file's own feature ids are used). Those ids are the features' when a file is read or a file layer is
+loaded; in a table they are not kept: a loaded feature's `id` is the database's own, and a dataset pushed again gives
+its features new ids. Nothing tells a feature of one dataset from one of another, so two datasets that cover the same
+ground are both loaded there: cut feature datasets to each other.
 
 ## Road layers
 
@@ -186,6 +199,21 @@ two ways that meet share a node. `examples/road_network.cpp` builds a graph from
 for roads), in the file's order. It holds the position of every node of the file while it reads, 16 bytes each, so read
 an extract of the area wanted rather than a continent. A way with a node the file lacks (an extract cuts ways at its
 edge) is left out and counted.
+
+In a table a way is its nodes. The table holds one row per sequence of node ids: a way that two exports both carry whole
+(one that crosses the line between them) is one row, of the dataset that last pushed it, and a way pushed again with the
+same nodes keeps its id, whatever its id in the export. The export's way ids are not kept, and need mean nothing. A
+load gives the layer as one network, joined by node ids, whatever exports it came from. What this asks of the data:
+
+- One layer, one node id space. Node ids are stable across exports and over time, and never reused for another place. A
+  producer that cannot promise that gets a layer of its own.
+- Way ids carry no meaning. They may change on every export.
+- Two ways with the same ordered node ids are the same way; the later push's line and tags win.
+- An export holds its ways whole, as `osmium extract` and Geofabrik produce them; a way with a missing node is dropped on
+  read.
+- A dataset is refreshed under the name it was first pushed under, and a name covers the same ground over time.
+
+A way that a neighbouring export took over and then dropped stays until that neighbour is pushed again.
 
 ## Raster layers
 
@@ -292,14 +320,15 @@ The readers are in `miniverse/gdal/feature_file.hpp`, `miniverse/gdal/raster_fil
 built-in kinds or the `Miniverse` itself: include `miniverse/miniverse.hpp` (or `world.hpp`, with kinds of your own)
 beside them.
 
-`load`, `stream`, `verify` and `table_settings` work the same on these layers; `push` and `begin_push` fail with a
-`std::logic_error`, since a file is only read; `create_table` and `drop_tables` skip them, so one setup serves a world of
+`load`, `stream`, `verify` and `table_settings` work the same on these layers; `push`, `begin_push` and `remove` fail with
+a `std::logic_error`, since a file is only read; `create_table` and `drop_tables` skip them, so one setup serves a world of
 tables and a world of files. A load of a reader runs on a thread started for it, so loads of several file layers run at
 once; the future of such a load waits for that thread if it is dropped before it is done.
 
-What a file layer gives is what a table of the same data gives, with two differences: the order is the file's own, where
-a table's is by id, and tags are spelt as the reader writes the JSON, where a table's are as PostgreSQL's `jsonb` prints
-it (the same document, another text). The tests push each test file into a table and compare the loads.
+What a file layer gives is what a table of the same data gives, with three differences: the ids are the file's own,
+where a table's are the database's; the order is the file's own, where a table's is by id; and tags are spelt as the
+reader writes the JSON, where a table's are as PostgreSQL's `jsonb` prints it (the same document, another text). The
+tests push each test file into a table and compare the loads by geometry and nodes.
 
 ## A reader of your own
 
@@ -366,3 +395,5 @@ the load; `name`, `settings` and `problems` on the caller's thread.
 - A location that is a point or a line lying exactly along the line between two raster tiles has no tile; strictly inside
   a tile it has that tile.
 - `verify` needs PostgreSQL 17 for the catalog query it uses.
+- A dataset cannot be deleted by area, only whole, by name. Tables made before datasets existed do not verify against the
+  current kinds and must be made again; there is no migration.

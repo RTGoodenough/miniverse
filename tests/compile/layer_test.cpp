@@ -43,7 +43,7 @@ struct PlacesByRoadQuery : Places {
 struct PlacesWithUnreadSettings : Places {
   using settings_type = int;
 
-  static std::vector<std::string>           setup_sql(const sch::TableName& table, int settings);
+  static std::vector<std::string>                        setup_sql(const sch::TableName& table, int settings);
   static std::vector<std::vector<schema_type::row_type>> to_rows(result_type places, int settings);
 };
 
@@ -63,11 +63,12 @@ struct NotAKind {
 static_assert(miniverse::LayerKind<Roads>);
 static_assert(miniverse::LayerKind<Shops> && miniverse::LayerKind<Paths> && miniverse::LayerKind<Parks>);
 static_assert(miniverse::LayerKind<Rivers> && miniverse::LayerKind<Buildings>);
-static_assert(miniverse::HasNoSettings<Buildings>);
+static_assert(miniverse::HasDatasets<Buildings> && ! miniverse::HasNoSettings<Buildings> && ! miniverse::HasSettings<Buildings>);
+static_assert(miniverse::HasNoSettings<Places> && ! miniverse::HasDatasets<Places>);
 static_assert(std::same_as<Buildings::result_type, std::vector<miniverse::Feature<geo::MultiPolygon>>>);
 static_assert(miniverse::LayerKind<Places>);
 static_assert(miniverse::LayerKind<Elevation>);
-static_assert(miniverse::HasSettings<Elevation>);
+static_assert(miniverse::HasSettings<Elevation> && ! miniverse::HasDatasets<Elevation>);
 static_assert(! miniverse::HasSettings<Roads>);
 static_assert(! miniverse::LayerKind<PlacesByRoadQuery>);
 static_assert(! miniverse::LayerKind<PlacesWithUnreadSettings>);
@@ -88,7 +89,10 @@ static_assert(! miniverse::ChunkCallback<void (*)(geo::Raster<std::int16_t>), Ro
 
 // A push in parts is of one kind, and is handed on, not copied: it is one transaction.
 static_assert(std::movable<miniverse::PushInParts<Roads>> && ! std::copyable<miniverse::PushInParts<Roads>>);
-static_assert(std::same_as<decltype(std::declval<miniverse::Miniverse<Roads, Elevation>&>().begin_push<Elevation>()), std::future<miniverse::PushInParts<Elevation>>>);
+static_assert(
+    std::same_as<
+        decltype(std::declval<miniverse::Miniverse<Roads, Elevation>&>().begin_push<Elevation>()), std::future<miniverse::PushInParts<Elevation>>>
+);
 
 // A layer is made from its table's name alone, whether or not its kind has settings: the table keeps those.
 static_assert(std::constructible_from<miniverse::Layer<Roads>, const char*>);
@@ -106,7 +110,10 @@ static_assert(std::same_as<
 
 // So are those of a miniverse with no database, whose layers have readers; one of no layers at all is not made that way.
 static_assert(std::constructible_from<miniverse::Layer<Roads>, std::shared_ptr<const miniverse::Reader<Roads>>>);
-static_assert(std::same_as<decltype(miniverse::Miniverse(miniverse::Layer<Roads>("roads"), miniverse::Layer<Places>("places"))), miniverse::Miniverse<Roads, Places>>);
+static_assert(
+    std::same_as<
+        decltype(miniverse::Miniverse(miniverse::Layer<Roads>("roads"), miniverse::Layer<Places>("places"))), miniverse::Miniverse<Roads, Places>>
+);
 static_assert(! std::default_initializable<miniverse::Miniverse<>>);
 
 static_assert(schemacht::query::sql::type_name<miniverse::geo::Point>() == "geometry(Point,4326)");

@@ -20,11 +20,11 @@ using GeometryOf = decltype(std::declval<typename kind_t::result_type::value_typ
 
 /**
  * @brief Whether `kind_t` is a layer kind of features: a load gives `Features` of one geometry type, a streamed load some of
- * them, and its table is made without settings. Every `FeatureLayer` is one; so is a kind of your own with that result,
+ * them, and its rows are written under a `Dataset`. Every `FeatureLayer` is one; so is a kind of your own with that result,
  * whatever its table's columns.
  */
 template <typename kind_t>
-concept FeatureKind = LayerKind<kind_t> && HasNoSettings<kind_t> && ! HasOwnChunks<kind_t> && requires { typename GeometryOf<kind_t>; } &&
+concept FeatureKind = LayerKind<kind_t> && HasDatasets<kind_t> && ! HasOwnChunks<kind_t> && requires { typename GeometryOf<kind_t>; } &&
                       geo::wkb::Geometry<GeometryOf<kind_t>> && std::same_as<typename kind_t::result_type, Features<GeometryOf<kind_t>>>;
 
 }  // namespace miniverse::gdal

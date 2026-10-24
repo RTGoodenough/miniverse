@@ -12,10 +12,10 @@
 namespace miniverse::osm {
 
 /**
- * @brief Whether `kind_t` is a layer kind of ways: a load gives `Ways`, a streamed load some of them, and its table is made
- * without settings. Every `RoadLayer` is one.
+ * @brief Whether `kind_t` is a layer kind of ways: a load gives `Ways`, a streamed load some of them, and its rows are written
+ * under a `Dataset`. Every `RoadLayer` is one.
  */
 template <typename kind_t>
-concept WayKind = LayerKind<kind_t> && HasNoSettings<kind_t> && ! HasOwnChunks<kind_t> && std::same_as<typename kind_t::result_type, Ways>;
+concept WayKind = LayerKind<kind_t> && HasDatasets<kind_t> && ! HasOwnChunks<kind_t> && std::same_as<typename kind_t::result_type, Ways>;
 
 }  // namespace miniverse::osm

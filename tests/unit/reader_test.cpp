@@ -23,8 +23,8 @@
 #include <utility>
 #include <vector>
 
-#include "support/files.hpp"
 #include "miniverse/miniverse.hpp"
+#include "support/files.hpp"
 
 namespace geo = miniverse::geo;
 
@@ -239,8 +239,10 @@ TEST_CASE("reader: what a callback or a reader throws comes through the future",
 TEST_CASE("reader: a layer with a reader is only read", "[reader]") {
   Miniverse world(fixed<Shops>(shops()), Layer<Elevation>(std::make_shared<NoHeights>()));
 
-  CHECK_THROWS_WITH(world.push<Shops>({{.id = 7, .geometry = geo::Point(1, 1)}}).get(), ContainsSubstring("fixed points"));
-  CHECK_THROWS_AS(world.begin_push<Shops>().get(), std::logic_error);
+  CHECK_THROWS_WITH(
+      world.push<Shops>(miniverse::Dataset{"market"}, {{.id = 7, .geometry = geo::Point(1, 1)}}).get(), ContainsSubstring("fixed points")
+  );
+  CHECK_THROWS_AS(world.begin_push<Shops>(miniverse::Dataset{"market"}).get(), std::logic_error);
   CHECK_THROWS_AS(world.push<Elevation>({}).get(), std::logic_error);
   CHECK_THROWS_AS(world.begin_push<Elevation>().get(), std::logic_error);
   CHECK(ids(world.load<Shops>(NEAR_ORIGIN).get()).size() == 5);
@@ -278,7 +280,7 @@ TEST_CASE("integration: a miniverse holds tables and readers side by side", "[in
   Miniverse world(test::test_db(), Layer<Shops>("miniverse_test_reader_shops"), fixed<Stalls>({{.id = 9, .geometry = geo::Point(2, 2)}}));
   world.drop_tables();
   world.create_tables();  // the table's; the reader has none
-  world.push<Shops>(shops()).get();
+  world.push<Shops>(miniverse::Dataset{"market"}, shops()).get();
 
   std::future<Points> near_shops = world.load<Shops>(NEAR_ORIGIN);
   std::future<Points> near_stalls = world.load<Stalls>(NEAR_ORIGIN);
@@ -286,7 +288,7 @@ TEST_CASE("integration: a miniverse holds tables and readers side by side", "[in
   CHECK(ids(near_shops.get()) == std::vector<std::int64_t>{1, 2, 3, 4, 5});
   CHECK(ids(near_stalls.get()) == std::vector<std::int64_t>{9});
   CHECK_NOTHROW(world.verify().get());
-  CHECK_THROWS_AS(world.push<Stalls>({}).get(), std::logic_error);
+  CHECK_THROWS_AS(world.push<Stalls>(miniverse::Dataset{"market"}, {}).get(), std::logic_error);
 
   world.drop_tables();
 }

@@ -56,7 +56,7 @@ class Stocked {
       shops.push_back({.id = id, .geometry = geo::Point(static_cast<double>(id) / 2, 1)});
     }
     shops.push_back({.id = 6, .geometry = geo::Point(50, 50)});
-    _world.push<Shops>(std::move(shops)).get();
+    _world.push<Shops>(miniverse::Dataset{"shops"}, std::move(shops)).get();
   }
 
   [[nodiscard]] World& world() noexcept { return _world; }

@@ -18,7 +18,8 @@ It is built on schemacht, a sibling library, which describes tables as C++ types
   is a type that names its table's columns, its query and its result.
 - **Loading by polygon:** `load` gives everything in an area as one value; `stream` hands it to a callback a chunk at a
   time. Every call returns a `std::future`, so several layers load at once.
-- **Pushing:** `push` writes a dataset in one transaction; `begin_push` takes a large dataset in parts, all written or none.
+- **Pushing:** `push` writes in one transaction; `begin_push` takes large data in parts, all written or none. Vector
+  layers are pushed as datasets, the exports they came from: a push of a dataset replaces it, and `remove` deletes one.
   Raster pushes merge onto the tiles already there.
 - **Files as layers:** a GeoPackage, shapefile or GeoJSON (`gdal::feature_file`), a GeoTIFF or anything else GDAL opens
   (`gdal::raster_file`), an OpenStreetMap extract (`osm::road_file`), or a reader you write (`Reader<Kind>`).
@@ -111,7 +112,7 @@ shares, and leave it.
 
 | Example | Shows | Needs |
 |---|---|---|
-| `features` | a feature layer in one line, pushed and loaded by polygon | database |
+| `features` | a feature layer in one line, pushed as a dataset, loaded by polygon, pushed again | database |
 | `road_network` | roads streamed into a graph of the worker's own, with routing | database |
 | `elevation` | a raster table's grid, merged pushes, loads and streams, `value_at` | database |
 | `own_kind` | a layer kind written by hand, with typed columns and its own query | database |

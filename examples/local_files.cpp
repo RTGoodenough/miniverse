@@ -83,7 +83,7 @@ int main(int argc, char** argv) {
     tables.drop_tables();
     tables.create_table<Roads>();
     tables.create_table<Elevation>(grid);
-    tables.push<Roads>(miniverse::osm::read_ways(streets)).get();
+    tables.push<Roads>(miniverse::Dataset{"streets"}, miniverse::osm::read_ways(streets)).get();
     tables.push<Elevation>(miniverse::gdal::read_raster<std::int16_t>(heights, grid)).get();
     const Survey from_tables = survey(tables, area);
 

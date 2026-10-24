@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "miniverse/gdal/concepts/raster.hpp"
+#include "miniverse/gdal/concepts/raster.hpp"  // IWYU pragma: export
 #include "miniverse/gdal/raster.hpp"
 #include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/raster.hpp"
