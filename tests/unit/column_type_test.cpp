@@ -7,7 +7,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -19,6 +18,7 @@
 #include "schemacht/postgres/field_codec.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/util/hex.hpp"
+#include "support/checks.hpp"
 
 namespace bg = boost::geometry;
 namespace geo = miniverse::geo;
@@ -28,17 +28,7 @@ namespace {
 // What PostgreSQL prints for SRID=4326;LINESTRING(1 2,3.5 -4) (`geom::text`): hex EWKB in capitals.
 constexpr std::string_view LINE_TEXT = "0102000020E610000002000000000000000000F03F00000000000000400000000000000C4000000000000010C0";
 
-/** @return The rows of `batches`, in order: for checks that don't care about the batching. */
-template <typename row_t>
-[[nodiscard]] std::vector<row_t> rows(std::vector<std::vector<row_t>> batches) {
-  std::vector<row_t> all;
-
-  for ( auto& batch : batches ) {
-    all.insert(all.end(), std::move_iterator(batch.begin()), std::move_iterator(batch.end()));
-  }
-
-  return all;
-}
+using test::rows;
 
 }  // namespace
 

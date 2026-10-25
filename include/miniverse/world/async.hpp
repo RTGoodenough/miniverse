@@ -13,7 +13,7 @@
 
 /**
  * @file
- * How a miniverse's calls become futures: a step of one guarded so that its throw settles the future, a read run on a thread
+ * How a miniverse's calls become futures: a step of one guarded so that its throw settles the future, work run on a thread
  * of its own, and a statement run on the pool whose rows are converted into the future's value.
  */
 namespace miniverse::detail {
@@ -29,15 +29,15 @@ void guarded(const schemacht::util::Settler<value_t>& done, step_t step) {
 }
 
 /**
- * @return A future for what `read` gives, run on a thread started for it; it holds what `read` throws instead, or why no
- * thread could be started.
+ * @return A future for what `work` gives, run on a thread started for it (a reader's load, a push); it holds what `work`
+ * throws instead, or why no thread could be started. The future waits for the thread if it is dropped before it is done.
  */
-template <std::invocable read_t>
-[[nodiscard]] std::future<std::invoke_result_t<read_t>> on_a_thread(read_t read) {
+template <std::invocable work_t>
+[[nodiscard]] std::future<std::invoke_result_t<work_t>> on_a_thread(work_t work) {
   try {
-    return std::async(std::launch::async, std::move(read));
+    return std::async(std::launch::async, std::move(work));
   } catch ( ... ) {
-    std::promise<std::invoke_result_t<read_t>> failed;
+    std::promise<std::invoke_result_t<work_t>> failed;
     failed.set_exception(std::current_exception());
 
     return failed.get_future();

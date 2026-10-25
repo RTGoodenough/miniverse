@@ -10,7 +10,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <future>
 #include <stdexcept>
 #include <string>
@@ -23,9 +22,14 @@
 #include "schemacht/query/raw_statement.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/table_name.hpp"
+#include "support/checks.hpp"
+#include "support/database.hpp"
+#include "support/geometry.hpp"
 
 namespace bg = boost::geometry;
 namespace geo = miniverse::geo;
+
+using test::test_db;
 
 namespace {
 
@@ -33,22 +37,13 @@ struct TestRoads : miniverse::RoadLayer {};
 
 using World = miniverse::Miniverse<TestRoads>;
 
-[[nodiscard]] std::string test_db() {
-  const char* conninfo = std::getenv("MINIVERSE_TEST_DB");
-  if ( conninfo == nullptr ) {
-    SKIP("MINIVERSE_TEST_DB is not set");
-  }
-
-  return conninfo;
-}
-
 [[nodiscard]] miniverse::Way way(std::int64_t id, std::vector<std::int64_t> node_ids, const std::string& wkt, std::string tags) {
   return miniverse::Way{
       .id = id, .node_ids = std::move(node_ids), .coordinates = bg::from_wkt<geo::LineString>(wkt), .tags = schemacht::json::Json(std::move(tags))
   };
 }
 
-[[nodiscard]] geo::Polygon polygon(const std::string& wkt) { return bg::from_wkt<geo::Polygon>(wkt); }
+using test::polygon;
 
 // The places loaded, as closed rings that run counter-clockwise.
 const geo::Polygon NEAR_ORIGIN = polygon("POLYGON((-1 -1,2 -1,2 4,-1 4,-1 -1))");
@@ -93,47 +88,21 @@ const miniverse::Dataset FAR_EAST_SURVEY{"far east"};
 
 const geo::Polygon FAR_EAST = polygon("POLYGON((50 50,51 50,51 51,50 51,50 50))");
 
-[[nodiscard]] std::vector<std::int64_t> ids(const miniverse::Ways& ways) {
-  std::vector<std::int64_t> result;
-
-  result.reserve(ways.size());
-  for ( const miniverse::Way& loaded : ways ) {
-    result.push_back(loaded.id);
-  }
-
-  return result;
-}
+using test::ids;
 
 /**
  * @brief A world with the network in it as the dataset `NETWORK`, its table made fresh and dropped afterwards. The ids a load
  * gives are the database's: 1 to 4, in the order pushed, which is the network's.
  */
-class Loaded {
- public:
-  explicit Loaded(const std::string& conninfo) : _world(conninfo, miniverse::Layer<TestRoads>("miniverse_test_roads")) {
-    _world.drop_tables();
-    _world.create_tables();
-    _world.push<TestRoads>(NETWORK, network()).get();
-  }
-
-  [[nodiscard]] World& world() noexcept { return _world; }
-
- private:
-  World _world;
-
- public:
-  Loaded(const Loaded&) = delete;
-  Loaded(Loaded&&) = delete;
-  Loaded& operator=(const Loaded&) = delete;
-  Loaded& operator=(Loaded&&) = delete;
-  ~Loaded() {
-    // A lost database must not end the run from a destructor, and the next test drops the table first anyway.
-    try {
-      _world.drop_tables();
-    } catch ( ... ) {  // NOLINT(bugprone-empty-catch)
-    }
-  }
-};
+[[nodiscard]] test::Fresh<World> with_network(const std::string& conninfo) {
+  return test::Fresh<World>(
+      [](World& world) {
+        world.create_tables();
+        world.push<TestRoads>(NETWORK, network()).get();
+      },
+      conninfo, miniverse::Layer<TestRoads>("miniverse_test_roads")
+  );
+}
 
 // A kind whose setup fails: the table made with it is rolled back.
 struct BrokenSetup : miniverse::RoadLayer {
@@ -152,8 +121,8 @@ using IndexNames = schemacht::query::RawStatement<
 }  // namespace
 
 TEST_CASE("integration: a load gives the ways that intersect the polygon, ordered by id", "[integration]") {
-  Loaded loaded(test_db());
-  World& world = loaded.world();
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
 
   CHECK(ids(world.load<TestRoads>(NEAR_ORIGIN).get()) == std::vector<std::int64_t>{1, 3});
   CHECK(ids(world.load<TestRoads>(NORTH_EAST).get()) == std::vector<std::int64_t>{2});
@@ -165,7 +134,7 @@ TEST_CASE("integration: a load gives the ways that intersect the polygon, ordere
 }
 
 TEST_CASE("integration: a loaded way is the way that was pushed", "[integration]") {
-  Loaded loaded(test_db());
+  test::Fresh<World> loaded = with_network(test_db());
 
   const miniverse::Ways ways = loaded.world().load<TestRoads>(NORTH_EAST).get();
 
@@ -178,8 +147,8 @@ TEST_CASE("integration: a loaded way is the way that was pushed", "[integration]
 }
 
 TEST_CASE("integration: several loads run at once on one miniverse", "[integration]") {
-  Loaded loaded(test_db());
-  World& world = loaded.world();
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
 
   std::future<miniverse::Ways> south_west = world.load<TestRoads>(NEAR_ORIGIN);
   std::future<miniverse::Ways> north_east = world.load<TestRoads>(NORTH_EAST);
@@ -189,7 +158,7 @@ TEST_CASE("integration: several loads run at once on one miniverse", "[integrati
 }
 
 TEST_CASE("integration: create_tables makes the spatial index the loads use", "[integration]") {
-  Loaded loaded(test_db());
+  test::Fresh<World> loaded = with_network(test_db());
 
   World& world = loaded.world();
 
@@ -211,7 +180,7 @@ TEST_CASE("integration: create_tables makes the spatial index the loads use", "[
 }
 
 TEST_CASE("integration: a stream of roads hands the ways over a chunk at a time, ordered by id", "[integration]") {
-  Loaded loaded(test_db());
+  test::Fresh<World> loaded = with_network(test_db());
 
   // On a pool thread, one call at a time: read here only once the future is done.
   std::vector<std::vector<std::int64_t>> chunks;
@@ -222,8 +191,8 @@ TEST_CASE("integration: a stream of roads hands the ways over a chunk at a time,
 }
 
 TEST_CASE("integration: a load that fails reports why through its future", "[integration]") {
-  Loaded loaded(test_db());
-  World& world = loaded.world();
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
   world.drop_tables();
 
   std::future<miniverse::Ways> roads = world.load<TestRoads>(EVERYWHERE);
@@ -232,8 +201,8 @@ TEST_CASE("integration: a load that fails reports why through its future", "[int
 }
 
 TEST_CASE("integration: a push that breaks the table's rules writes nothing and reports why", "[integration]") {
-  Loaded loaded(test_db());
-  World& world = loaded.world();
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
 
   // Two ways of the same nodes in one statement: the database can't update one row twice in a statement.
   miniverse::Ways twice{way(5, {51, 52}, "LINESTRING(0 0,1 1)", "{}"), way(6, {51, 52}, "LINESTRING(0 0,1 1)", R"({"highway": "path"})")};
@@ -248,8 +217,8 @@ TEST_CASE("integration: a push that breaks the table's rules writes nothing and 
 }
 
 TEST_CASE("integration: a push of more ways than one statement holds writes them all", "[integration]") {
-  Loaded loaded(test_db());
-  World& world = loaded.world();
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
 
   world.push<TestRoads>(FAR_EAST_SURVEY, many_ways(1000)).get();
 
@@ -261,8 +230,8 @@ TEST_CASE("integration: a push of more ways than one statement holds writes them
 }
 
 TEST_CASE("integration: a push whose later statement breaks the table's rules writes nothing", "[integration]") {
-  Loaded loaded(test_db());
-  World& world = loaded.world();
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
 
   miniverse::Ways ways = many_ways(1000);
   ways.push_back(ways.back());  // the second statement now holds two ways of the same nodes
@@ -280,8 +249,8 @@ TEST_CASE("integration: a push whose later statement breaks the table's rules wr
 }
 
 TEST_CASE("integration: a push in parts is there for everyone once it commits, and for no one before", "[integration]") {
-  Loaded loaded(test_db());
-  World& world = loaded.world();
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
 
   miniverse::PushInParts<TestRoads> parts = world.begin_push<TestRoads>(FAR_EAST_SURVEY).get();
   parts.add({way(10, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}"), way(11, {2, 3}, "LINESTRING(50.2 50.2,50.3 50.3)", "{}")}).get();
@@ -294,8 +263,8 @@ TEST_CASE("integration: a push in parts is there for everyone once it commits, a
 }
 
 TEST_CASE("integration: a push in parts that is dropped without a commit writes nothing", "[integration]") {
-  Loaded loaded(test_db());
-  World& world = loaded.world();
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
 
   {
     miniverse::PushInParts<TestRoads> parts = world.begin_push<TestRoads>(FAR_EAST_SURVEY).get();
@@ -307,8 +276,8 @@ TEST_CASE("integration: a push in parts that is dropped without a commit writes 
 }
 
 TEST_CASE("integration: a part that fails ends a push in parts, which then writes nothing", "[integration]") {
-  Loaded loaded(test_db());
-  World& world = loaded.world();
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
 
   miniverse::PushInParts<TestRoads> parts = world.begin_push<TestRoads>(FAR_EAST_SURVEY).get();
   parts.add({way(10, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get();
@@ -329,8 +298,8 @@ TEST_CASE("integration: a part that fails ends a push in parts, which then write
 }
 
 TEST_CASE("integration: a part whose rows can't be made ends a push in parts too", "[integration]") {
-  Loaded loaded(test_db());
-  World& world = loaded.world();
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
 
   miniverse::PushInParts<TestRoads> parts = world.begin_push<TestRoads>(FAR_EAST_SURVEY).get();
   parts.add({way(10, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get();
@@ -343,8 +312,8 @@ TEST_CASE("integration: a part whose rows can't be made ends a push in parts too
 }
 
 TEST_CASE("integration: a push in parts that was moved from takes no more calls", "[integration]") {
-  Loaded loaded(test_db());
-  World& world = loaded.world();
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
 
   miniverse::PushInParts<TestRoads> first = world.begin_push<TestRoads>(FAR_EAST_SURVEY).get();
   miniverse::PushInParts<TestRoads> second = std::move(first);
@@ -357,8 +326,8 @@ TEST_CASE("integration: a push in parts that was moved from takes no more calls"
 }
 
 TEST_CASE("integration: a push of a dataset again replaces it, and a way of the same nodes keeps its id", "[integration]") {
-  Loaded loaded(test_db());
-  World& world = loaded.world();
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
 
   // The network again from a newer export: way 1 unchanged but numbered 100, way 3 with new tags, way 4 gone, a new way 5.
   world
@@ -383,8 +352,8 @@ TEST_CASE("integration: a push of a dataset again replaces it, and a way of the 
 }
 
 TEST_CASE("integration: a way two datasets both carry is one row, of the dataset that last pushed it", "[integration]") {
-  Loaded loaded(test_db());
-  World& world = loaded.world();
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
 
   // A neighbouring export that carries way 2 whole too, and a way of its own.
   const miniverse::Dataset neighbour{"neighbour"};

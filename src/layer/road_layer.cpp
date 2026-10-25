@@ -10,13 +10,14 @@
 
 #include "miniverse/dataset.hpp"
 #include "miniverse/geo/types.hpp"
+#include "miniverse/layer/dataset_columns.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/table_name.hpp"
 
 namespace miniverse {
 
 std::vector<std::string> RoadLayer::setup_sql(const schemacht::schema::TableName& table) {
-  return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)", "CREATE INDEX ON " + table.quoted() + " (dataset)"};
+  return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)", dataset::index_sql(table)};
 }
 
 std::vector<std::vector<RoadLayer::insert_row_type>> RoadLayer::to_rows(Ways ways, const Dataset& dataset, std::int64_t stamp) {
@@ -36,8 +37,8 @@ std::vector<std::vector<RoadLayer::insert_row_type>> RoadLayer::to_rows(Ways way
     }
 
     batches.back().emplace_back(
-        road::DatasetName{dataset.name}, road::NodeIds{std::move(way.node_ids)}, road::Geom{std::move(way.coordinates)},
-        road::Tags{std::move(way.tags)}, road::Pushed{stamp}
+        dataset::Name{dataset.name}, road::NodeIds{std::move(way.node_ids)}, road::Geom{std::move(way.coordinates)}, road::Tags{std::move(way.tags)},
+        dataset::Pushed{stamp}
     );
   }
 

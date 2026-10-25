@@ -8,8 +8,8 @@ How the library is put together, how to add to it, and how to build, test and li
 ```
 include/miniverse/
   world.hpp              Miniverse: the front that holds the layers and the pool and tells a table from a reader
-  world/                 one idea each: load.hpp (loads and streams), push.hpp, push_in_parts.hpp (PushInParts),
-                         write_batches.hpp, datasets.hpp (stamp, lock, sweep, remove), verify.hpp (TablesDiffer, the
+  world/                 one idea each: load.hpp (loads and streams), push.hpp, push_in_parts.hpp (PushInParts and the
+                         push it runs), datasets.hpp (stamp, lock, sweep, remove), verify.hpp (TablesDiffer, the
                          checks), tables.hpp (make, drop), settings.hpp, async.hpp
   dataset.hpp            Dataset: the export a vector push writes under and replaces
   layer.hpp              Layer<Kind>: a table name or a reader
@@ -21,7 +21,8 @@ include/miniverse/
                          (over wkb_bytes.hpp), column_types.hpp, operations.hpp (PostGIS tests); concepts/ under
                          each area holds its concepts
   layer/                 feature.hpp and way.hpp (what a load gives), the kinds feature_layer.hpp, road_layer.hpp,
-                         raster_layer.hpp; raster/reach.hpp (which tiles a location has), raster/tiles.hpp (cut, window)
+                         raster_layer.hpp; dataset_columns.hpp (what a kind with datasets keeps in its table, and its sweep
+                         and remove); raster/reach.hpp (which tiles a location has), raster/tiles.hpp (cut, window)
   gdal/                  component miniverse::gdal: vector.hpp and raster.hpp (files read into layers), feature_file.hpp
                          and raster_file.hpp (files as layers), dataset.hpp; gdal.hpp is its umbrella
   osm/                   component miniverse::osm: ways.hpp (files read), ways_in_memory.hpp, road_file.hpp (a file as a
@@ -34,7 +35,8 @@ tests/
   unit/                  no database
   integration/           need MINIVERSE_TEST_DB
   gdal/, osm/            the components' tests, including the file-versus-table comparisons
-  support/               a hand-written test kind (Places), temporary files
+  support/               a hand-written test kind (Places), the scratch database and a fresh world on it (Fresh),
+                         temporary files, WKT polygons, small rasters, ids and rows for checks
 examples/                nine programs; eight run as tests (make_database needs files outside the repository)
 cmake/                   the installed package's config
 ```
@@ -84,11 +86,12 @@ table side takes the `Database` and the layer's `Table`, the reader side the `Re
 - **stream:** the statement runs in schemacht's chunked mode (`ReadOptions::chunk_rows`); each chunk of rows goes through
   `from_rows` or `chunk_from_rows` and to the callback, one call at a time, on a pool thread. A callback returning
   `false` cancels the statement.
-- **push:** `to_rows` makes the batches (on the caller's thread for a kind without settings; on a pool thread after the
-  settings are read, for one with). `write_rows` begins a transaction, sends one batch per statement, each completion
-  sending the next, then commits; any failure rolls back and the future carries that statement's own error.
-  `PushInParts` keeps the transaction open across `add` calls and commits on `commit`. Both share `write_batches` in
-  `world/write_batches.hpp`; the settings read is `world/settings.hpp`.
+- **push:** on a thread started for it (`on_a_thread`), `begun` reads the table's settings if the kind has any
+  (`world/settings.hpp`) and begins a transaction; `Push::add` makes the batches with `to_rows` and sends one statement
+  per batch, waiting for each; `Push::commit` runs what comes before the commit, then commits. A step that throws rolls
+  the transaction back and keeps the error, which every later step throws. A whole push is `begun`, one `add` and a
+  `commit` on one thread; a `PushInParts` holds the same `Push` and runs each `add` and the `commit` on a thread of its
+  own (`world/push.hpp`, `world/push_in_parts.hpp`).
 - **push of a dataset** (`world/datasets.hpp`): a random 64-bit stamp is drawn; the transaction begins with an advisory
   lock on the dataset's name (`pg_advisory_xact_lock(hashtext(name))`), so two pushes of one dataset run in turn; the
   rows carry the dataset and the stamp; before the commit the kind's sweep deletes the dataset's rows whose stamp is
@@ -99,9 +102,9 @@ table side takes the `Database` and the layer's `Table`, the reader side the `Re
 - **create_table:** `CREATE TABLE` from the schema and the kind's `setup_sql`, in one transaction, waited for
   (`world/tables.hpp`).
 
-Thread boundaries: everything after a statement is sent runs on the pool's threads, including the kinds' conversions
-and the stream callbacks; `PushInParts::add` makes its rows on the calling thread. Reader loads run on threads of their
-own, and their futures wait for that thread when dropped. What runs on the caller's thread and waits: the constructor
+Thread boundaries: a load's and a stream's conversions and the stream callbacks run on the pool's threads. A push, each
+`PushInParts::add` and its `commit`, and a reader's load run on a thread started for the call, where the kind makes the
+rows; their futures wait for that thread when dropped. What runs on the caller's thread and waits: the constructor
 (it opens the pool), `create_table` and `drop_tables`, `osm::road_file` (it reads the file), `Reader::settings` and
 `Reader::problems`, and the `.get()` calls the caller makes.
 
@@ -163,9 +166,10 @@ dependencies are private.
    such a kind needs only `world.hpp` and the `geo` headers.
 
 A kind with settings adds `settings_type`, `settings_statement_type` (a `RawStatement` taking the table's quoted name)
-and `settings_from_rows`; `RasterLayer` is the example. A kind with datasets adds a `dataset` and a `pushed` column,
-`to_rows(result, dataset, stamp)`, and `sweep_statement_type` and `remove_statement_type` as `query::delete_where`
-commands; `FeatureLayer` is the plain example and `RoadLayer` the one with an identity of its own (`UNIQUE (node_ids)`).
+and `settings_from_rows`; `RasterLayer` is the example. A kind with datasets puts `dataset::Name` and `dataset::Pushed`
+(`layer/dataset_columns.hpp`) in its schema, adds `to_rows(result, dataset, stamp)`, names `dataset::Sweep<schema_type>` and
+`dataset::Remove<schema_type>` as its `sweep_statement_type` and `remove_statement_type`, and has `dataset::index_sql` in its
+`setup_sql`; `FeatureLayer` is the plain example and `RoadLayer` the one with an identity of its own (`UNIQUE (node_ids)`).
 
 ### Add a reader
 
@@ -188,10 +192,10 @@ into a table and compares loads and streams of the two, as `tests/gdal/raster_te
 
 The pixel types are listed in `geo/concepts/raster.hpp` (`Pixel`, and `PixelType<P>` with PostGIS's name for each),
 `src/gdal/common.hpp` (`gdal_type`, which has a `static_assert` for a type it does not know), the `extern template`
-lists at the end of `geo/raster_wkb.hpp`, `layer/raster/tiles.hpp` and `layer/raster_layer.hpp`, and the explicit
-instantiation lists at the end of `src/geo/raster_wkb.cpp`, `src/layer/raster/tiles.cpp`,
-`src/layer/raster_layer.cpp`, `src/gdal/raster.cpp` and `src/gdal/dataset.cpp`. A missed instantiation is a link
-error; a missed `extern template` line is not reported, and costs only compile time.
+list at the end of `layer/raster_layer.hpp`, and the explicit instantiation lists at the end of `src/geo/raster_wkb.cpp`,
+`src/layer/raster/tiles.cpp`, `src/layer/raster_layer.cpp`, `src/gdal/raster.cpp` and `src/gdal/dataset.cpp`. A missed
+instantiation is a link error. The function templates are only declared in their headers, so they need no `extern
+template` lines: a comment at the end of each header names the types they are defined for, and takes the new one too.
 
 ## Building
 

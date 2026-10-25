@@ -58,16 +58,6 @@ template <Geometry geometry_t>
 template <Geometry geometry_t>
 [[nodiscard]] geometry_t read(std::span<const std::byte> bytes);
 
-extern template std::vector<std::byte> write<Point>(const Point& geometry);
-extern template std::vector<std::byte> write<LineString>(const LineString& geometry);
-extern template std::vector<std::byte> write<Polygon>(const Polygon& geometry);
-extern template std::vector<std::byte> write<MultiLineString>(const MultiLineString& geometry);
-extern template std::vector<std::byte> write<MultiPolygon>(const MultiPolygon& geometry);
-
-extern template Point      read<Point>(std::span<const std::byte> bytes);
-extern template LineString read<LineString>(std::span<const std::byte> bytes);
-extern template Polygon    read<Polygon>(std::span<const std::byte> bytes);
-extern template MultiLineString read<MultiLineString>(std::span<const std::byte> bytes);
-extern template MultiPolygon    read<MultiPolygon>(std::span<const std::byte> bytes);
+// Each is defined for each geometry type: Point, LineString, Polygon, MultiLineString and MultiPolygon.
 
 }  // namespace miniverse::geo::wkb

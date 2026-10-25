@@ -7,7 +7,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,6 +14,7 @@
 #include "miniverse/miniverse.hpp"
 #include "schemacht/json/json.hpp"
 #include "schemacht/schema/field.hpp"
+#include "support/checks.hpp"
 
 namespace bg = boost::geometry;
 namespace geo = miniverse::geo;
@@ -45,17 +45,7 @@ constexpr std::int64_t   STAMP = 42;
   return made;
 }
 
-/** @return The rows of `batches`, in order: for checks that don't care about the batching. */
-template <typename row_t>
-[[nodiscard]] std::vector<row_t> rows(std::vector<std::vector<row_t>> batches) {
-  std::vector<row_t> all;
-
-  for ( auto& batch : batches ) {
-    all.insert(all.end(), std::move_iterator(batch.begin()), std::move_iterator(batch.end()));
-  }
-
-  return all;
-}
+using test::rows;
 
 }  // namespace
 

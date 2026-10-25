@@ -8,18 +8,20 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <cstdint>
-#include <cstdlib>
 #include <string>
 #include <tuple>
 
 #include "miniverse/miniverse.hpp"
 #include "schemacht/postgres/statements.hpp"
+#include "support/database.hpp"
 
 namespace geo = miniverse::geo;
 
 using Catch::Matchers::ContainsSubstring;
 using miniverse::Layer;
 using miniverse::Miniverse;
+
+using test::test_db;
 
 namespace {
 
@@ -29,47 +31,20 @@ struct Elevation : miniverse::RasterLayer<std::int16_t> {};
 
 constexpr geo::Grid<std::int16_t> GRID{.pixels_per_degree = 4, .tile_pixels = 4, .nodata = -32768};
 
-[[nodiscard]] std::string test_db() {
-  const char* conninfo = std::getenv("MINIVERSE_TEST_DB");
-  if ( conninfo == nullptr ) {
-    SKIP("MINIVERSE_TEST_DB is not set");
-  }
-
-  return conninfo;
-}
+using World = Miniverse<Roads, Buildings, Elevation>;
 
 /** @brief A world of a road, a building and an elevation table, each made as its kind makes it; dropped afterwards. */
-class Made {
- public:
-  explicit Made(const std::string& conninfo)
-      : _world(
-            conninfo, Layer<Roads>("miniverse_test_verify_roads"), Layer<Buildings>("miniverse_test_verify_buildings"),
-            Layer<Elevation>("miniverse_test_verify_elevation")
-        ) {
-    _world.drop_tables();
-    _world.create_table<Roads>();
-    _world.create_table<Buildings>();
-    _world.create_table<Elevation>(GRID);
-  }
-
-  [[nodiscard]] Miniverse<Roads, Buildings, Elevation>& world() noexcept { return _world; }
-
- private:
-  Miniverse<Roads, Buildings, Elevation> _world;
-
- public:
-  Made(const Made&) = delete;
-  Made(Made&&) = delete;
-  Made& operator=(const Made&) = delete;
-  Made& operator=(Made&&) = delete;
-  ~Made() {
-    // A lost database must not end the run from a destructor, and the next test drops the tables first anyway.
-    try {
-      _world.drop_tables();
-    } catch ( ... ) {  // NOLINT(bugprone-empty-catch)
-    }
-  }
-};
+[[nodiscard]] test::Fresh<World> with_tables(const std::string& conninfo) {
+  return test::Fresh<World>(
+      [](World& world) {
+        world.create_table<Roads>();
+        world.create_table<Buildings>();
+        world.create_table<Elevation>(GRID);
+      },
+      conninfo, Layer<Roads>("miniverse_test_verify_roads"), Layer<Buildings>("miniverse_test_verify_buildings"),
+      Layer<Elevation>("miniverse_test_verify_elevation")
+  );
+}
 
 /** @return What a `verify` that finds differences says; nothing if it finds none. */
 template <miniverse::LayerKind... kind_ts>
@@ -86,7 +61,7 @@ template <miniverse::LayerKind... kind_ts>
 }  // namespace
 
 TEST_CASE("integration: a miniverse whose tables its own create_table made verifies", "[integration]") {
-  Made made(test_db());
+  test::Fresh<World> made = with_tables(test_db());
 
   // Of one layer, and of none, too.
   Miniverse   only_roads(test_db(), Layer<Roads>("miniverse_test_verify_roads"));
@@ -107,13 +82,15 @@ TEST_CASE("integration: a raster table in a schema of its own verifies, and is n
   CHECK(world.table_settings<Elevation>().get() == GRID);
 
   world.drop_tables();
-  CHECK_THAT(complaint_of(world), ContainsSubstring(R"("miniverse_test_verify_schema"."elevation": )") && ContainsSubstring("is not in the database"));
+  CHECK_THAT(
+      complaint_of(world), ContainsSubstring(R"("miniverse_test_verify_schema"."elevation": )") && ContainsSubstring("is not in the database")
+  );
 
   std::ignore = world.database().execute(schemacht::postgres::unchecked_sql("DROP SCHEMA miniverse_test_verify_schema CASCADE")).get();
 }
 
 TEST_CASE("integration: verify names a table that is not there", "[integration]") {
-  Made made(test_db());
+  test::Fresh<World> made = with_tables(test_db());
   std::ignore = made.world().database().execute(schemacht::postgres::unchecked_sql("DROP TABLE miniverse_test_verify_elevation")).get();
 
   const std::string complaint = complaint_of(made.world());
@@ -123,7 +100,7 @@ TEST_CASE("integration: verify names a table that is not there", "[integration]"
 }
 
 TEST_CASE("integration: verify says how a table of another kind differs", "[integration]") {
-  const Made made(test_db());
+  const test::Fresh<World> made = with_tables(test_db());
 
   // A road layer, and an elevation layer, each aimed at the buildings' table.
   Miniverse aimed_wrong(test_db(), Layer<Roads>("miniverse_test_verify_buildings"));
@@ -140,12 +117,15 @@ TEST_CASE("integration: verify says how a table of another kind differs", "[inte
 }
 
 TEST_CASE("integration: verify says when a raster table has no grid", "[integration]") {
-  Made made(test_db());
+  test::Fresh<World> made = with_tables(test_db());
   std::ignore = made.world().database().execute(schemacht::postgres::unchecked_sql("DROP TABLE miniverse_test_verify_elevation")).get();
-  std::ignore = made.world()
-                    .database()
-                    .execute(schemacht::postgres::unchecked_sql("CREATE TABLE miniverse_test_verify_elevation (tile_id bigint PRIMARY KEY, rast raster NOT NULL)"))
-                    .get();
+  std::ignore =
+      made.world()
+          .database()
+          .execute(
+              schemacht::postgres::unchecked_sql("CREATE TABLE miniverse_test_verify_elevation (tile_id bigint PRIMARY KEY, rast raster NOT NULL)")
+          )
+          .get();
 
   const std::string complaint = complaint_of(made.world());
 
@@ -155,7 +135,7 @@ TEST_CASE("integration: verify says when a raster table has no grid", "[integrat
 }
 
 TEST_CASE("integration: verify names every difference of every layer at once, in the layers' order", "[integration]") {
-  const Made made(test_db());
+  const test::Fresh<World> made = with_tables(test_db());
 
   // Roads aimed at the buildings' table, and an elevation table that is not there.
   Miniverse both_wrong(test_db(), Layer<Roads>("miniverse_test_verify_buildings"), Layer<Elevation>("miniverse_test_verify_nothing"));

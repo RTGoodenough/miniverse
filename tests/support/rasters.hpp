@@ -2,15 +2,11 @@
 
 // Small rasters on a coarse grid, for the raster tests that need no database: four pixels to a degree, in tiles of one degree.
 
-#include <boost/geometry/io/wkt/read.hpp>
-
 #include <cstddef>
 #include <cstdint>
-#include <string>
 
 #include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/raster.hpp"
-#include "miniverse/geo/types.hpp"
 
 namespace test {
 
@@ -18,8 +14,6 @@ constexpr std::int16_t NODATA = -32768;
 
 // Four pixels to a degree, in tiles of one degree.
 constexpr miniverse::geo::Grid<std::int16_t> GRID{.pixels_per_degree = 4, .tile_pixels = 4, .nodata = NODATA};
-
-[[nodiscard]] inline miniverse::geo::Polygon polygon(const std::string& wkt) { return boost::geometry::from_wkt<miniverse::geo::Polygon>(wkt); }
 
 /** @return `width` by `height` pixels of the grid from (`west`, `north`), each `column * 100 + row`. */
 [[nodiscard]] inline miniverse::geo::Raster<std::int16_t> numbered(double west, double north, std::size_t width, std::size_t height) {

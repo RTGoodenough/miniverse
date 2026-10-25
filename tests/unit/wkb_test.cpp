@@ -74,7 +74,8 @@ constexpr std::string_view LINES_Z =
     "01050000a0e610000001000000010200008002000000000000000000f03f00000000000000400000000000000840000000000000104000000000000014400000"
     "000000001840";
 constexpr std::string_view LINES_PLAIN = "010500000001000000010200000002000000000000000000f03f00000000000000400000000000000c4000000000000010c0";
-constexpr std::string_view LINES_3857 = "0105000020110f000001000000010200000002000000000000000000f03f00000000000000400000000000000c4000000000000010c0";
+constexpr std::string_view LINES_3857 =
+    "0105000020110f000001000000010200000002000000000000000000f03f00000000000000400000000000000c4000000000000010c0";
 constexpr std::string_view POINTS = "0104000020e6100000010000000101000000000000000000f03f0000000000000040";
 // The start of a SRID=4326 multilinestring of one member, and of two, for members made by hand below.
 constexpr std::string_view ONE_LINE_OF = "0105000020e610000001000000";
@@ -175,13 +176,13 @@ TEST_CASE("wkb: a multi-geometry is refused as a single one is, and for a member
   CHECK(refused<geo::MultiLineString>(LINES_Z));
   CHECK(refused<geo::MultiLineString>(LINES_PLAIN));  // no SRID
   CHECK(refused<geo::MultiLineString>(LINES_3857));
-  CHECK(refused<geo::MultiPolygon>(LINES));        // another type
-  CHECK(refused<geo::MultiLineString>(POINTS));    // a multipoint
-  CHECK(refused<geo::LineString>(LINES));          // a multi-geometry is not its member's type
-  CHECK(refused<geo::MultiLineString>(std::string(ONE_LINE_OF) + "0101000000000000000000f03f0000000000000040"));  // a point as its member
+  CHECK(refused<geo::MultiPolygon>(LINES));      // another type
+  CHECK(refused<geo::MultiLineString>(POINTS));  // a multipoint
+  CHECK(refused<geo::LineString>(LINES));        // a multi-geometry is not its member's type
+  CHECK(refused<geo::MultiLineString>(std::string(ONE_LINE_OF) + "0101000000000000000000f03f0000000000000040"));              // a point as its member
   CHECK(refused<geo::MultiLineString>(std::string(ONE_LINE_OF) + "0102000080" + std::string(LINE.substr(LINE_HEADER_HEX))));  // only its member has Z
-  CHECK(refused<geo::MultiLineString>(LINES.substr(0, LINES.size() - 2)));                                        // a byte short
-  CHECK(refused<geo::MultiLineString>(std::string(LINES) + "00"));                                                // a byte left over
-  CHECK(refused<geo::MultiLineString>("0105000020e6100000ffffffff"));                                             // a count larger than the bytes left
+  CHECK(refused<geo::MultiLineString>(LINES.substr(0, LINES.size() - 2)));                                                    // a byte short
+  CHECK(refused<geo::MultiLineString>(std::string(LINES) + "00"));                                                            // a byte left over
+  CHECK(refused<geo::MultiLineString>("0105000020e6100000ffffffff"));  // a count larger than the bytes left
   CHECK(! refused<geo::MultiPolygon>(POLYGONS));
 }

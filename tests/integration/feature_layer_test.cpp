@@ -10,7 +10,6 @@
 #include <boost/geometry/io/wkt/write.hpp>
 
 #include <cstdint>
-#include <cstdlib>
 #include <future>
 #include <string>
 #include <thread>
@@ -23,9 +22,13 @@
 #include "schemacht/postgres/async_client.hpp"
 #include "schemacht/query/raw_statement.hpp"
 #include "schemacht/schema/field.hpp"
+#include "support/checks.hpp"
+#include "support/database.hpp"
 
 namespace bg = boost::geometry;
 namespace geo = miniverse::geo;
+
+using test::test_db;
 
 namespace {
 
@@ -40,31 +43,12 @@ using IndexNames = schemacht::query::RawStatement<
     "SELECT indexname FROM pg_indexes WHERE tablename = $1 ORDER BY indexname", schemacht::query::RawArguments<std::string>,
     schemacht::schema::Field<std::string, "indexname">>;
 
-[[nodiscard]] std::string test_db() {
-  const char* conninfo = std::getenv("MINIVERSE_TEST_DB");
-  if ( conninfo == nullptr ) {
-    SKIP("MINIVERSE_TEST_DB is not set");
-  }
-
-  return conninfo;
-}
-
 template <geo::wkb::Geometry geometry_t>
 [[nodiscard]] miniverse::Feature<geometry_t> feature(std::int64_t id, const std::string& wkt, std::string tags) {
   return {.id = id, .geometry = bg::from_wkt<geometry_t>(wkt), .tags = schemacht::json::Json(std::move(tags))};
 }
 
-template <geo::wkb::Geometry geometry_t>
-[[nodiscard]] std::vector<std::int64_t> ids(const miniverse::Features<geometry_t>& features) {
-  std::vector<std::int64_t> result;
-
-  result.reserve(features.size());
-  for ( const miniverse::Feature<geometry_t>& loaded : features ) {
-    result.push_back(loaded.id);
-  }
-
-  return result;
-}
+using test::ids;
 
 const miniverse::Dataset SURVEY{"survey-2026"};
 const miniverse::Dataset OTHER{"another-survey"};
@@ -77,73 +61,54 @@ const geo::Polygon EVERYWHERE = bg::from_wkt<geo::Polygon>("POLYGON((-10 -10,60 
  * @brief A world of the four layers, each with one feature near the origin and one far away, pushed as the dataset `SURVEY`;
  * its tables dropped afterwards. The ids a load gives are the database's: 1 and 2, in the order pushed.
  */
-class Filled {
- public:
-  explicit Filled(const std::string& conninfo)
-      : _world(
-            conninfo, miniverse::Layer<Buildings>("miniverse_test_buildings"), miniverse::Layer<Parks>("miniverse_test_parks"),
-            miniverse::Layer<Paths>("miniverse_test_paths"), miniverse::Layer<Shops>("miniverse_test_shops")
-        ) {
-    _world.drop_tables();
-    _world.create_tables();
+[[nodiscard]] test::Fresh<World> with_survey(const std::string& conninfo) {
+  return test::Fresh<World>(
+      [](World& world) {
+        world.create_tables();
 
-    // Started together, then waited for: four layers written at once on one pool.
-    std::future<void> buildings = _world.push<Buildings>(
-        SURVEY, {
-                    feature<geo::MultiPolygon>(
-                        1, "MULTIPOLYGON(((0 0,4 0,4 4,0 4,0 0),(1 1,1 2,2 2,2 1,1 1)),((4.5 4.5,4.6 4.5,4.6 4.6,4.5 4.5)))", R"({"building": "yes"})"
-                    ),
-                    feature<geo::MultiPolygon>(2, "MULTIPOLYGON(((50 50,51 50,51 51,50 50)))", "{}"),
-                }
-    );
-    std::future<void> parks = _world.push<Parks>(
-        SURVEY, {
-                    feature<geo::Polygon>(1, "POLYGON((0 0,3 0,3 3,0 3,0 0),(1 1,1 2,2 2,2 1,1 1))", R"({"leisure": "park"})"),
-                    feature<geo::Polygon>(2, "POLYGON((50 50,51 50,51 51,50 50))", "{}"),
-                }
-    );
-    std::future<void> paths = _world.push<Paths>(
-        SURVEY, {
-                    feature<geo::LineString>(1, "LINESTRING(0 0,1 1,2 0)", R"({"highway": "path"})"),
-                    feature<geo::LineString>(2, "LINESTRING(50 50,51 51)", "{}"),
-                }
-    );
-    std::future<void> shops = _world.push<Shops>(
-        SURVEY, {
-                    feature<geo::Point>(1, "POINT(1.5 1.5)", R"({"shop": "bakery", "name": "Crumb"})"),
-                    feature<geo::Point>(2, "POINT(50.5 50.5)", "{}"),
-                }
-    );
-    buildings.get();
-    parks.get();
-    paths.get();
-    shops.get();
-  }
-
-  [[nodiscard]] World& world() noexcept { return _world; }
-
- private:
-  World _world;
-
- public:
-  Filled(const Filled&) = delete;
-  Filled(Filled&&) = delete;
-  Filled& operator=(const Filled&) = delete;
-  Filled& operator=(Filled&&) = delete;
-  ~Filled() {
-    // A lost database must not end the run from a destructor, and the next test drops the tables first anyway.
-    try {
-      _world.drop_tables();
-    } catch ( ... ) {  // NOLINT(bugprone-empty-catch)
-    }
-  }
-};
+        // Started together, then waited for: four layers written at once on one pool.
+        std::future<void> buildings = world.push<Buildings>(
+            SURVEY,
+            {
+                feature<geo::MultiPolygon>(
+                    1, "MULTIPOLYGON(((0 0,4 0,4 4,0 4,0 0),(1 1,1 2,2 2,2 1,1 1)),((4.5 4.5,4.6 4.5,4.6 4.6,4.5 4.5)))", R"({"building": "yes"})"
+                ),
+                feature<geo::MultiPolygon>(2, "MULTIPOLYGON(((50 50,51 50,51 51,50 50)))", "{}"),
+            }
+        );
+        std::future<void> parks = world.push<Parks>(
+            SURVEY, {
+                        feature<geo::Polygon>(1, "POLYGON((0 0,3 0,3 3,0 3,0 0),(1 1,1 2,2 2,2 1,1 1))", R"({"leisure": "park"})"),
+                        feature<geo::Polygon>(2, "POLYGON((50 50,51 50,51 51,50 50))", "{}"),
+                    }
+        );
+        std::future<void> paths = world.push<Paths>(
+            SURVEY, {
+                        feature<geo::LineString>(1, "LINESTRING(0 0,1 1,2 0)", R"({"highway": "path"})"),
+                        feature<geo::LineString>(2, "LINESTRING(50 50,51 51)", "{}"),
+                    }
+        );
+        std::future<void> shops = world.push<Shops>(
+            SURVEY, {
+                        feature<geo::Point>(1, "POINT(1.5 1.5)", R"({"shop": "bakery", "name": "Crumb"})"),
+                        feature<geo::Point>(2, "POINT(50.5 50.5)", "{}"),
+                    }
+        );
+        buildings.get();
+        parks.get();
+        paths.get();
+        shops.get();
+      },
+      conninfo, miniverse::Layer<Buildings>("miniverse_test_buildings"), miniverse::Layer<Parks>("miniverse_test_parks"),
+      miniverse::Layer<Paths>("miniverse_test_paths"), miniverse::Layer<Shops>("miniverse_test_shops")
+  );
+}
 
 }  // namespace
 
 TEST_CASE("integration: a feature load gives the features that intersect the polygon, ordered by id", "[integration]") {
-  Filled filled(test_db());
-  World& world = filled.world();
+  test::Fresh<World> filled = with_survey(test_db());
+  World&             world = filled.world();
 
   CHECK(ids(world.load<Buildings>(NEAR_ORIGIN).get()) == std::vector<std::int64_t>{1});
   CHECK(ids(world.load<Buildings>(FAR_AWAY).get()) == std::vector<std::int64_t>{2});
@@ -158,8 +123,8 @@ TEST_CASE("integration: a feature load gives the features that intersect the pol
 }
 
 TEST_CASE("integration: a loaded feature is the feature that was pushed, of each geometry type", "[integration]") {
-  Filled filled(test_db());
-  World& world = filled.world();
+  test::Fresh<World> filled = with_survey(test_db());
+  World&             world = filled.world();
 
   const auto buildings = world.load<Buildings>(NEAR_ORIGIN).get();
   const auto parks = world.load<Parks>(NEAR_ORIGIN).get();
@@ -179,8 +144,8 @@ TEST_CASE("integration: a loaded feature is the feature that was pushed, of each
 }
 
 TEST_CASE("integration: create_tables makes the spatial index a feature load uses, and the dataset index a push's sweep uses", "[integration]") {
-  Filled filled(test_db());
-  World& world = filled.world();
+  test::Fresh<World> filled = with_survey(test_db());
+  World&             world = filled.world();
 
   const auto rows = world.database().execute(IndexNames::bind(world.table_name<Shops>().name())).get();
 
@@ -211,8 +176,8 @@ template <geo::wkb::Geometry geometry_t>
 }  // namespace
 
 TEST_CASE("integration: a push of a dataset again replaces it: what the new data lacks is gone, and the ids are new", "[integration]") {
-  Filled filled(test_db());
-  World& world = filled.world();
+  test::Fresh<World> filled = with_survey(test_db());
+  World&             world = filled.world();
 
   // Shop 1 again as it was, shop 2 gone, a new shop 3: the data's ids mean nothing, the geometries do.
   world.push<Shops>(SURVEY, {feature<geo::Point>(1, "POINT(1.5 1.5)", R"({"shop": "bakery"})"), feature<geo::Point>(3, "POINT(2 2)", "{}")}).get();
@@ -229,8 +194,8 @@ TEST_CASE("integration: a push of a dataset again replaces it: what the new data
 }
 
 TEST_CASE("integration: two datasets of one layer are pushed, replaced and removed apart, and loaded as one", "[integration]") {
-  Filled filled(test_db());
-  World& world = filled.world();
+  test::Fresh<World> filled = with_survey(test_db());
+  World&             world = filled.world();
 
   world.push<Shops>(OTHER, {feature<geo::Point>(1, "POINT(3 3)", R"({"shop": "books"})")}).get();
   CHECK(wkts(world.load<Shops>(EVERYWHERE).get()) == std::vector<std::string>{"POINT(1.5 1.5)", "POINT(50.5 50.5)", "POINT(3 3)"});
@@ -246,8 +211,8 @@ TEST_CASE("integration: two datasets of one layer are pushed, replaced and remov
 }
 
 TEST_CASE("integration: a push in parts replaces the dataset when it commits, and a part that fails leaves it as it was", "[integration]") {
-  Filled filled(test_db());
-  World& world = filled.world();
+  test::Fresh<World> filled = with_survey(test_db());
+  World&             world = filled.world();
 
   {
     miniverse::PushInParts<Shops> shops = world.begin_push<Shops>(SURVEY).get();
@@ -275,8 +240,8 @@ TEST_CASE("integration: a push in parts replaces the dataset when it commits, an
 }
 
 TEST_CASE("integration: a push that fails leaves the dataset as it was, and a push of no data empties it", "[integration]") {
-  Filled filled(test_db());
-  World& world = filled.world();
+  test::Fresh<World> filled = with_survey(test_db());
+  World&             world = filled.world();
 
   // Whole: the invalid JSON fails the statement, and the old rows stay.
   CHECK_THROWS_AS(world.push<Shops>(SURVEY, {feature<geo::Point>(1, "POINT(8 8)", "not json")}).get(), schemacht::postgres::QueryError);
@@ -288,8 +253,8 @@ TEST_CASE("integration: a push that fails leaves the dataset as it was, and a pu
 }
 
 TEST_CASE("integration: two pushes of one dataset at once take turns, so one of them is what remains", "[integration]") {
-  Filled filled(test_db());
-  World& world = filled.world();
+  test::Fresh<World> filled = with_survey(test_db());
+  World&             world = filled.world();
 
   // Each on a thread of its own, both as the survey: without the lock, each would sweep only what the other had committed
   // before it began, and both would remain.

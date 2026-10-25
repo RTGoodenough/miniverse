@@ -32,7 +32,10 @@
 #include "miniverse/miniverse.hpp"
 #include "miniverse/osm/osm.hpp"
 #include "schemacht/postgres/async_client.hpp"
+#include "support/checks.hpp"
+#include "support/database.hpp"
 #include "support/files.hpp"
+#include "support/geometry.hpp"
 
 namespace bg = boost::geometry;
 namespace geo = miniverse::geo;
@@ -88,16 +91,7 @@ void convert(const std::string& from, const std::string& to) {
 
 const miniverse::Dataset TOWN_DATASET{"town"};
 
-[[nodiscard]] std::vector<std::int64_t> ids(const miniverse::Ways& ways) {
-  std::vector<std::int64_t> result;
-
-  result.reserve(ways.size());
-  for ( const miniverse::Way& way : ways ) {
-    result.push_back(way.id);
-  }
-
-  return result;
-}
+using test::ids;
 
 struct Roads : miniverse::RoadLayer {};
 
@@ -123,7 +117,7 @@ constexpr std::string_view STREETS = R"(<?xml version='1.0' encoding='UTF-8'?>
 </osm>
 )";
 
-[[nodiscard]] geo::Polygon polygon(const std::string& wkt) { return bg::from_wkt<geo::Polygon>(wkt); }
+using test::polygon;
 
 }  // namespace
 

@@ -11,6 +11,7 @@
 #include "miniverse/dataset.hpp"
 #include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/geo/types.hpp"
+#include "miniverse/layer/dataset_columns.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/table_name.hpp"
 
@@ -18,7 +19,7 @@ namespace miniverse {
 
 template <geo::wkb::Geometry geometry_t>
 std::vector<std::string> FeatureLayer<geometry_t>::setup_sql(const schemacht::schema::TableName& table) {
-  return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)", "CREATE INDEX ON " + table.quoted() + " (dataset)"};
+  return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)", dataset::index_sql(table)};
 }
 
 template <geo::wkb::Geometry geometry_t>
@@ -37,8 +38,7 @@ std::vector<std::vector<typename FeatureLayer<geometry_t>::insert_row_type>> Fea
 
     points += more;
     batches.back().emplace_back(
-        feature::DatasetName{dataset.name}, feature::Geom<geometry_t>{std::move(each.geometry)}, feature::Tags{std::move(each.tags)},
-        feature::Pushed{stamp}
+        dataset::Name{dataset.name}, feature::Geom<geometry_t>{std::move(each.geometry)}, feature::Tags{std::move(each.tags)}, dataset::Pushed{stamp}
     );
   }
 

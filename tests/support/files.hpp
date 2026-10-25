@@ -1,10 +1,7 @@
 #pragma once
 
-// What the tests of the file loaders share: a directory for a test's files, and the scratch database.
+// A directory of its own for a test's files, removed with everything in it afterwards.
 
-#include <catch2/catch_test_macros.hpp>
-
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <random>
@@ -44,15 +41,5 @@ class Files {
     std::filesystem::remove_all(_directory, ignored);
   }
 };
-
-/** @return The scratch database's connection string (MINIVERSE_TEST_DB); a test that asks for it is skipped without one. */
-[[nodiscard]] inline std::string test_db() {
-  const char* conninfo = std::getenv("MINIVERSE_TEST_DB");
-  if ( conninfo == nullptr ) {
-    SKIP("MINIVERSE_TEST_DB is not set");
-  }
-
-  return conninfo;
-}
 
 }  // namespace test

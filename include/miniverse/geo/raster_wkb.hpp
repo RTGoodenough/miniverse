@@ -26,22 +26,7 @@ template <Pixel pixel_t>
 template <Pixel pixel_t>
 [[nodiscard]] Raster<pixel_t> read_raster(std::span<const std::byte> bytes);
 
-extern template std::vector<std::byte> write<std::int8_t>(const Raster<std::int8_t>& raster);
-extern template std::vector<std::byte> write<std::uint8_t>(const Raster<std::uint8_t>& raster);
-extern template std::vector<std::byte> write<std::int16_t>(const Raster<std::int16_t>& raster);
-extern template std::vector<std::byte> write<std::uint16_t>(const Raster<std::uint16_t>& raster);
-extern template std::vector<std::byte> write<std::int32_t>(const Raster<std::int32_t>& raster);
-extern template std::vector<std::byte> write<std::uint32_t>(const Raster<std::uint32_t>& raster);
-extern template std::vector<std::byte> write<float>(const Raster<float>& raster);
-extern template std::vector<std::byte> write<double>(const Raster<double>& raster);
-
-extern template Raster<std::int8_t>   read_raster<std::int8_t>(std::span<const std::byte> bytes);
-extern template Raster<std::uint8_t>  read_raster<std::uint8_t>(std::span<const std::byte> bytes);
-extern template Raster<std::int16_t>  read_raster<std::int16_t>(std::span<const std::byte> bytes);
-extern template Raster<std::uint16_t> read_raster<std::uint16_t>(std::span<const std::byte> bytes);
-extern template Raster<std::int32_t>  read_raster<std::int32_t>(std::span<const std::byte> bytes);
-extern template Raster<std::uint32_t> read_raster<std::uint32_t>(std::span<const std::byte> bytes);
-extern template Raster<float>         read_raster<float>(std::span<const std::byte> bytes);
-extern template Raster<double>        read_raster<double>(std::span<const std::byte> bytes);
+// Each is defined for each pixel type a raster can hold: std::int8_t, std::uint8_t, std::int16_t, std::uint16_t, std::int32_t,
+// std::uint32_t, float and double.
 
 }  // namespace miniverse::geo::wkb

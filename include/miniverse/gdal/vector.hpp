@@ -100,42 +100,6 @@ VectorRead read_features_in(
 template <geo::wkb::Geometry geometry_t>
 [[nodiscard]] std::vector<std::string> problems_of(const VectorSource& source);
 
-extern template VectorRead read_features<geo::Point>(const VectorSource&, std::size_t, const std::function<void(Features<geo::Point>)>&);
-extern template VectorRead read_features<geo::LineString>(const VectorSource&, std::size_t, const std::function<void(Features<geo::LineString>)>&);
-extern template VectorRead read_features<geo::Polygon>(const VectorSource&, std::size_t, const std::function<void(Features<geo::Polygon>)>&);
-extern template VectorRead read_features<geo::MultiLineString>(
-    const VectorSource&, std::size_t, const std::function<void(Features<geo::MultiLineString>)>&
-);
-extern template VectorRead read_features<geo::MultiPolygon>(
-    const VectorSource&, std::size_t, const std::function<void(Features<geo::MultiPolygon>)>&
-);
-
-extern template Features<geo::Point>           read_features<geo::Point>(const VectorSource&);
-extern template Features<geo::LineString>      read_features<geo::LineString>(const VectorSource&);
-extern template Features<geo::Polygon>         read_features<geo::Polygon>(const VectorSource&);
-extern template Features<geo::MultiLineString> read_features<geo::MultiLineString>(const VectorSource&);
-extern template Features<geo::MultiPolygon>    read_features<geo::MultiPolygon>(const VectorSource&);
-
-extern template VectorRead read_features_in<geo::Point>(
-    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::Point>)>&
-);
-extern template VectorRead read_features_in<geo::LineString>(
-    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::LineString>)>&
-);
-extern template VectorRead read_features_in<geo::Polygon>(
-    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::Polygon>)>&
-);
-extern template VectorRead read_features_in<geo::MultiLineString>(
-    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::MultiLineString>)>&
-);
-extern template VectorRead read_features_in<geo::MultiPolygon>(
-    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::MultiPolygon>)>&
-);
-
-extern template std::vector<std::string> problems_of<geo::Point>(const VectorSource&);
-extern template std::vector<std::string> problems_of<geo::LineString>(const VectorSource&);
-extern template std::vector<std::string> problems_of<geo::Polygon>(const VectorSource&);
-extern template std::vector<std::string> problems_of<geo::MultiLineString>(const VectorSource&);
-extern template std::vector<std::string> problems_of<geo::MultiPolygon>(const VectorSource&);
+// Each is defined for each geometry type: Point, LineString, Polygon, MultiLineString and MultiPolygon.
 
 }  // namespace miniverse::gdal

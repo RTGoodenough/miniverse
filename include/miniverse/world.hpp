@@ -60,7 +60,7 @@
  *
  * The `Miniverse` is a front: it holds the layers and the pool, and for each call tells a layer that is a table from one with
  * a reader. What a call then does is in world/, one idea each: load.hpp, push.hpp (with push_in_parts.hpp and
- * write_batches.hpp), verify.hpp, tables.hpp, settings.hpp, and async.hpp for how a call becomes a future.
+ * datasets.hpp), verify.hpp, tables.hpp, settings.hpp, and async.hpp for how a call becomes a future.
  */
 namespace miniverse {
 
@@ -176,12 +176,13 @@ class Miniverse {
    * @return A future that completes once `data` is written to the layer `kind_t`'s table, or holds the error (nothing is then
    * written). `data` is taken by value and moved into the rows: pass it with `std::move` unless it is still needed.
    *
-   * The rows are made by the kind. For a kind with settings, the table's are read first, and the rows are made with them on
-   * a thread of the pool's (a raster is cut into the tiles of the table's grid there); for a kind without, they are made on the
-   * calling thread. They are written in the kind's batches, one statement each, all in one transaction: so a push holds all
-   * of `data`'s rows but one statement's text at a time, and writes all of `data` or none. The transaction holds one of the
-   * pool's connections until it ends (with one connection, nothing else runs during a push). For data too large to hold at
-   * once, `begin_push` takes it in parts.
+   * The push runs on a thread started for it, so the call returns at once; the future waits for that thread if it is dropped
+   * before it is done. There the rows are made by the kind (for a kind with settings, with the table's, read first: a raster
+   * is cut into the tiles of the table's grid), and written in the kind's batches, one statement each, all in one
+   * transaction: so a push holds all of `data`'s rows but one statement's text at a time, and writes all of `data` or none.
+   * The transaction is begun before the rows are made, so data the kind refuses costs a transaction that is rolled back. It
+   * holds one of the pool's connections until it ends (with one connection, nothing else runs during a push). For data too
+   * large to hold at once, `begin_push` takes it in parts.
    *
    * The kind's `write_statement` says what happens to a row already there: a `RasterLayer`'s tile is merged with it (new
    * pixels win, and where the new tile has no data the old pixel stays). Pushes that overlap are merged in the order they
@@ -203,9 +204,10 @@ class Miniverse {
 
   /**
    * @return A future for a push of the layer `kind_t` that takes its data in parts, all of them written or none (see
-   * `PushInParts`): for data too large to hold at once. For a kind with settings, the table's are read first, once, and
-   * every part's rows are made with them. It holds the error instead if they can't be read, or no transaction begun, or the
-   * layer has a reader (a `std::logic_error`: it is only read).
+   * `PushInParts`): for data too large to hold at once. On a thread started for the call, for a kind with settings the
+   * table's are read first, once, and every part's rows are made with them; then the transaction is begun. It holds the error
+   * instead if they can't be read, or no transaction begun, or the layer has a reader (a `std::logic_error`: it is only read).
+   * Commit or drop the push before the miniverse ends: its transaction is the pool's.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<PushInParts<kind_t>> begin_push() {
@@ -221,9 +223,9 @@ class Miniverse {
 
   /**
    * @return A future that completes once `data` has replaced `dataset` in the layer `kind_t`'s table, or holds the error
-   * (nothing is then changed). For a kind with datasets (`HasDatasets`: a `FeatureLayer`, a `RoadLayer`): the rows are made by
-   * the kind on the calling thread, written in its batches, and the dataset's rows that this push did not write are deleted,
-   * all in one transaction. So the first push of a name writes the dataset, and every later push of it replaces it: what
+   * (nothing is then changed). For a kind with datasets (`HasDatasets`: a `FeatureLayer`, a `RoadLayer`): on a thread started
+   * for the push, the rows are made by the kind, written in its batches, and the dataset's rows that this push did not write
+   * are deleted, all in one transaction. So the first push of a name writes the dataset, and every later push of it replaces it: what
    * the new data lacks is gone, what it has is there, and a row the kind can tell is the same as one already there (a
    * `RoadLayer`'s way, by its nodes) keeps its id. A dataset is an export of a region, named by the pusher: see `Dataset`.
    * Two pushes of one dataset at once take turns (a lock on the name, held for the transaction); pushes of different datasets
@@ -251,8 +253,9 @@ class Miniverse {
   /**
    * @return A future for a push of `dataset` into the layer `kind_t` that takes its data in parts (see `PushInParts`): for an
    * export too large to hold at once. The dataset is replaced when the push commits, as `push(dataset, data)` replaces it;
-   * until then nothing of it has changed, and a commit with no parts leaves it empty, as a push of no data does. It holds the
-   * error instead if no transaction could be begun, or the layer has a reader (a `std::logic_error`: it is only read).
+   * until then nothing of it has changed, and a commit with no parts leaves it empty, as a push of no data does. On a thread
+   * started for the call, the transaction is begun and the dataset locked. It holds the error instead if either fails, or
+   * the layer has a reader (a `std::logic_error`: it is only read). Commit or drop the push before the miniverse ends.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<PushInParts<kind_t>> begin_push(const Dataset& dataset) {

@@ -7,7 +7,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -17,6 +16,8 @@
 #include "miniverse/miniverse.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/table_name.hpp"
+#include "support/checks.hpp"
+#include "support/geometry.hpp"
 #include "support/rasters.hpp"
 
 namespace geo = miniverse::geo;
@@ -34,16 +35,7 @@ using Raster = geo::Raster<std::int16_t>;
 using LoadedRow = Elevation::load_statement_type::result_type;
 using SettingsRow = Elevation::settings_statement_type::row_type;
 
-/** @return The rows of `batches`, in order: for checks that don't care about the batching. */
-[[nodiscard]] std::vector<Elevation::row_type> rows(std::vector<std::vector<Elevation::row_type>> batches) {
-  std::vector<Elevation::row_type> all;
-
-  for ( auto& batch : batches ) {
-    all.insert(all.end(), std::move_iterator(batch.begin()), std::move_iterator(batch.end()));
-  }
-
-  return all;
-}
+using test::rows;
 
 /** @return The tiles of `rows`, as a load reads them. */
 [[nodiscard]] std::vector<LoadedRow> loaded(std::vector<Elevation::row_type> rows) {

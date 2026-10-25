@@ -10,10 +10,10 @@
 #include "miniverse/geo/column_types.hpp"
 #include "miniverse/geo/operations.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer/way.hpp"  // IWYU pragma: export
+#include "miniverse/layer/dataset_columns.hpp"  // IWYU pragma: export
+#include "miniverse/layer/way.hpp"              // IWYU pragma: export
 #include "schemacht/json/json.hpp"
 #include "schemacht/postgres/statements.hpp"
-#include "schemacht/query/command.hpp"
 #include "schemacht/query/predicate.hpp"
 #include "schemacht/query/prepared.hpp"
 #include "schemacht/query/query.hpp"
@@ -27,23 +27,17 @@
  */
 namespace miniverse {
 
-/** @brief The columns of a road table, the same in every `RoadLayer`. */
+/** @brief The columns of a road table that are its own (the dataset's are dataset_columns.hpp), the same in every `RoadLayer`. */
 namespace road {
 
 /** @brief The way's id: the database's own, numbered as rows are written, never the data's. */
 using WayId = schemacht::schema::Field<std::int64_t, "way_id", schemacht::schema::KeyRole::Primary, true>;
-
-/** @brief The name of the `Dataset` the way was last pushed under: what a push replaces, and `Miniverse::remove` removes. */
-using DatasetName = schemacht::schema::Field<std::string, "dataset">;
 
 /** @brief The way's nodes, in order: unique, since a way is its nodes (a push of the same nodes updates the row). */
 using NodeIds = schemacht::schema::Field<std::vector<std::int64_t>, "node_ids", schemacht::schema::KeyRole::Unique>;
 
 using Geom = schemacht::schema::Field<geo::LineString, "geom">;
 using Tags = schemacht::schema::Field<schemacht::json::Json, "tags">;
-
-/** @brief The stamp of the push that last wrote the row: a push's sweep deletes its dataset's rows that carry another. */
-using Pushed = schemacht::schema::Field<std::int64_t, "pushed">;
 
 }  // namespace road
 
@@ -68,7 +62,7 @@ using Pushed = schemacht::schema::Field<std::int64_t, "pushed">;
 struct RoadLayer {
   using result_type = Ways;
   /// The table's layout. Its name, `roads`, is only a placeholder: a layer names its own table (`Layer`).
-  using schema_type = schemacht::schema::Schema<"roads", road::WayId, road::DatasetName, road::NodeIds, road::Geom, road::Tags, road::Pushed>;
+  using schema_type = schemacht::schema::Schema<"roads", road::WayId, dataset::Name, road::NodeIds, road::Geom, road::Tags, dataset::Pushed>;
   using row_type = schema_type::row_type;
   /// A row as it is written: without the id, which the database numbers.
   using insert_row_type = schema_type::insert_row_type;
@@ -86,24 +80,17 @@ struct RoadLayer {
           .order_by(schemacht::query::On<schema_type>::col<"way_id">().asc());
   using load_statement_type = schemacht::query::Prepared<LOAD>;
 
-  /** @brief The delete of the dataset named by argument 0's rows that a push, whose stamp is argument 1, did not write. */
-  static constexpr auto SWEEP = schemacht::query::delete_where(
-      schemacht::query::On<schema_type>::col<"dataset">() == schemacht::query::arg<0>() &&
-      schemacht::query::On<schema_type>::col<"pushed">() != schemacht::query::arg<1>()
-  );
-  using sweep_statement_type = schemacht::query::Prepared<SWEEP>;
-
-  /** @brief The delete of every row of the dataset named by argument 0. */
-  static constexpr auto REMOVE = schemacht::query::delete_where(schemacht::query::On<schema_type>::col<"dataset">() == schemacht::query::arg<0>());
-  using remove_statement_type = schemacht::query::Prepared<REMOVE>;
+  /// The sweep and the remove of a dataset (dataset_columns.hpp): what a push runs before it commits, and `Miniverse::remove` runs.
+  using sweep_statement_type = dataset::Sweep<schema_type>;
+  using remove_statement_type = dataset::Remove<schema_type>;
 
   /** @brief How many ways a push writes in one statement: a way is some hundreds of bytes to a few kilobytes as text. */
   static constexpr std::size_t WAYS_PER_STATEMENT = 5000;
 
   /**
-   * @return The spatial index that the load's `ST_Intersects` uses, and the index on `dataset` that a push's sweep and a
-   * remove use. Neither is named: PostgreSQL names them (`<table>_geom_idx`, `<table>_dataset_idx`), shortening and numbering
-   * the name as needed, so they never clash with another relation's.
+   * @return The spatial index that the load's `ST_Intersects` uses, and the index on `dataset` (`dataset::index_sql`). Neither
+   * is named: PostgreSQL names them (`<table>_geom_idx`, `<table>_dataset_idx`), shortening and numbering the name as needed,
+   * so they never clash with another relation's.
    */
   [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table);
 

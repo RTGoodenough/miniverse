@@ -30,7 +30,10 @@
 #include "miniverse/gdal/gdal.hpp"
 #include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/miniverse.hpp"
+#include "support/checks.hpp"
+#include "support/database.hpp"
 #include "support/files.hpp"
+#include "support/geometry.hpp"
 
 namespace bg = boost::geometry;
 namespace geo = miniverse::geo;
@@ -146,17 +149,9 @@ constexpr std::string_view AREAS_AND_A_POINT = R"({"type": "FeatureCollection", 
   {"type": "Feature", "id": 9, "properties": {}, "geometry": {"type": "Point", "coordinates": [11.5, 11.5]}}
 ]})";
 
-[[nodiscard]] geo::Polygon polygon(const std::string& wkt) { return bg::from_wkt<geo::Polygon>(wkt); }
+using test::polygon;
 
-template <geo::wkb::Geometry geometry_t>
-[[nodiscard]] std::vector<std::int64_t> ids(const miniverse::Features<geometry_t>& features) {
-  std::vector<std::int64_t> result;
-  for ( const miniverse::Feature<geometry_t>& feature : features ) {
-    result.push_back(feature.id);
-  }
-
-  return result;
-}
+using test::ids;
 
 /** @return The geometries of `features` as WKT, sorted: for comparing two loads as sets. */
 template <geo::wkb::Geometry geometry_t>

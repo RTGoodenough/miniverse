@@ -378,8 +378,10 @@ the load; `name`, `settings` and `problems` on the caller's thread.
 - Errors from the database and from a kind's conversions arrive through the future of the call. `verify` fails with
   `TablesDiffer`; a push to a file layer with `std::logic_error`; a wrong argument (a grid that is none, a chunk of zero
   rows) with `std::invalid_argument`; GDAL and libosmium errors as `std::runtime_error` with the library's message.
-- Stream callbacks run on the pool's threads (on the load's own thread for a file layer), one call at a time. A `push`
-  of a kind with settings makes its rows on a pool thread; a `PushInParts::add` makes them on the calling thread.
+- Stream callbacks run on the pool's threads (on the load's own thread for a file layer), one call at a time. A `push`, a
+  `begin_push`, and each `add` and the `commit` of a push in parts, run on a thread started for the call, which makes the
+  rows: the call returns at once, and its future waits for that thread if it is dropped before it is done. A push begins
+  its transaction before it makes its rows.
 - The constructor opens the pool and waits; `create_table` and `drop_tables` wait; `osm::road_file` reads its file when
   it is called.
 - A push holds one of the pool's connections for its transaction; with a pool of one connection nothing else runs

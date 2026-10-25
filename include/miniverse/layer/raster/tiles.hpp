@@ -55,22 +55,7 @@ template <geo::Pixel pixel_t>
   return window<pixel_t>(std::span<const geo::Raster<pixel_t>>(tiles), location);
 }
 
-extern template std::vector<Tile<std::int8_t>>   cut(const geo::Raster<std::int8_t>&, const geo::Grid<std::int8_t>&);
-extern template std::vector<Tile<std::uint8_t>>  cut(const geo::Raster<std::uint8_t>&, const geo::Grid<std::uint8_t>&);
-extern template std::vector<Tile<std::int16_t>>  cut(const geo::Raster<std::int16_t>&, const geo::Grid<std::int16_t>&);
-extern template std::vector<Tile<std::uint16_t>> cut(const geo::Raster<std::uint16_t>&, const geo::Grid<std::uint16_t>&);
-extern template std::vector<Tile<std::int32_t>>  cut(const geo::Raster<std::int32_t>&, const geo::Grid<std::int32_t>&);
-extern template std::vector<Tile<std::uint32_t>> cut(const geo::Raster<std::uint32_t>&, const geo::Grid<std::uint32_t>&);
-extern template std::vector<Tile<float>>         cut(const geo::Raster<float>&, const geo::Grid<float>&);
-extern template std::vector<Tile<double>>        cut(const geo::Raster<double>&, const geo::Grid<double>&);
-
-extern template geo::Raster<std::int8_t>   window(std::span<const geo::Raster<std::int8_t>>, const geo::Polygon&);
-extern template geo::Raster<std::uint8_t>  window(std::span<const geo::Raster<std::uint8_t>>, const geo::Polygon&);
-extern template geo::Raster<std::int16_t>  window(std::span<const geo::Raster<std::int16_t>>, const geo::Polygon&);
-extern template geo::Raster<std::uint16_t> window(std::span<const geo::Raster<std::uint16_t>>, const geo::Polygon&);
-extern template geo::Raster<std::int32_t>  window(std::span<const geo::Raster<std::int32_t>>, const geo::Polygon&);
-extern template geo::Raster<std::uint32_t> window(std::span<const geo::Raster<std::uint32_t>>, const geo::Polygon&);
-extern template geo::Raster<float>         window(std::span<const geo::Raster<float>>, const geo::Polygon&);
-extern template geo::Raster<double>        window(std::span<const geo::Raster<double>>, const geo::Polygon&);
+// Each is defined for each pixel type a raster can hold: std::int8_t, std::uint8_t, std::int16_t, std::uint16_t, std::int32_t,
+// std::uint32_t, float and double.
 
 }  // namespace miniverse::raster

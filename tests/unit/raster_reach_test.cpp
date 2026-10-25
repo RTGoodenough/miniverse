@@ -10,7 +10,7 @@
 
 #include "miniverse/geo/types.hpp"
 #include "miniverse/layer/raster/reach.hpp"
-#include "support/rasters.hpp"
+#include "support/geometry.hpp"
 
 namespace geo = miniverse::geo;
 

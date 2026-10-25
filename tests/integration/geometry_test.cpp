@@ -10,7 +10,6 @@
 #include <boost/geometry/io/wkt/write.hpp>
 
 #include <cstdint>
-#include <cstdlib>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -25,11 +24,14 @@
 #include "schemacht/query/raw_statement.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/schema.hpp"
+#include "support/database.hpp"
 
 namespace bg = boost::geometry;
 namespace geo = miniverse::geo;
 namespace q = schemacht::query;
 namespace sch = schemacht::schema;
+
+using test::test_db;
 
 namespace {
 
@@ -48,15 +50,6 @@ using InsertRiver = q::RawStatement<
     "INSERT INTO miniverse_test_rivers (id, geom) VALUES ($1, ST_GeomFromEWKT($2)) RETURNING id", q::RawArguments<std::int64_t, std::string>,
     sch::Field<std::int64_t, "id">>;
 
-[[nodiscard]] std::string test_db() {
-  const char* conninfo = std::getenv("MINIVERSE_TEST_DB");
-  if ( conninfo == nullptr ) {
-    SKIP("MINIVERSE_TEST_DB is not set");
-  }
-
-  return conninfo;
-}
-
 // Near the origin, with a hole and a second part; and far from it.
 const std::string NEAR_AREA = "MULTIPOLYGON(((0 0,4 0,4 4,0 4,0 0),(1 1,1 2,2 2,2 1,1 1)),((10 10,11 10,11 11,10 10)))";
 const std::string FAR_AREA = "MULTIPOLYGON(((50 50,51 50,51 51,50 50)))";
@@ -73,7 +66,8 @@ TEST_CASE("integration: a multipolygon column takes what C++ writes, and gives b
   std::ignore = database.drop_table<Areas>().get();
   std::ignore = database.create_table<Areas>().get();
 
-  std::ignore = database.insert<Areas>({Areas::row_type{Id{1}, sch::Field<geo::MultiPolygon, "geom">{bg::from_wkt<geo::MultiPolygon>(NEAR_AREA)}}}).get();
+  std::ignore =
+      database.insert<Areas>({Areas::row_type{Id{1}, sch::Field<geo::MultiPolygon, "geom">{bg::from_wkt<geo::MultiPolygon>(NEAR_AREA)}}}).get();
   std::ignore = database.execute(InsertArea::bind(2, "SRID=4326;" + FAR_AREA)).get();
   const auto everywhere = database.execute(q::Prepared<AREAS_IN>::bind(EVERYWHERE)).get();
   const auto near_origin = database.execute(q::Prepared<AREAS_IN>::bind(NEAR_ORIGIN)).get();
@@ -93,7 +87,9 @@ TEST_CASE("integration: a multilinestring column takes what C++ writes, and give
   std::ignore = database.create_table<Rivers>().get();
 
   std::ignore =
-      database.insert<Rivers>({Rivers::row_type{Id{1}, sch::Field<geo::MultiLineString, "geom">{bg::from_wkt<geo::MultiLineString>(NEAR_RIVER)}}}).get();
+      database.insert<Rivers>(
+                  {Rivers::row_type{Id{1}, sch::Field<geo::MultiLineString, "geom">{bg::from_wkt<geo::MultiLineString>(NEAR_RIVER)}}}
+      ).get();
   std::ignore = database.execute(InsertRiver::bind(2, "SRID=4326;" + FAR_RIVER)).get();
   const auto everywhere = database.execute(q::Prepared<RIVERS_IN>::bind(EVERYWHERE)).get();
   const auto near_origin = database.execute(q::Prepared<RIVERS_IN>::bind(NEAR_ORIGIN)).get();

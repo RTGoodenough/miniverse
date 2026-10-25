@@ -25,16 +25,18 @@
 #include <cstdint>
 #include <functional>
 #include <numbers>
-#include <stdexcept>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
 #include "miniverse/gdal/gdal.hpp"
-#include "support/files.hpp"
 #include "miniverse/miniverse.hpp"
+#include "support/database.hpp"
+#include "support/files.hpp"
+#include "support/geometry.hpp"
 
 namespace bg = boost::geometry;
 namespace geo = miniverse::geo;
@@ -120,7 +122,7 @@ constexpr double MERCATOR_DEGREE = 111319.49079327357;
 
 struct Elevation : miniverse::RasterLayer<std::int16_t> {};
 
-[[nodiscard]] geo::Polygon polygon(const std::string& wkt) { return bg::from_wkt<geo::Polygon>(wkt); }
+using test::polygon;
 
 /** @return `width * height` pixels with no pattern to them, the same every time: heights of 0 to 2999. */
 [[nodiscard]] std::vector<std::int16_t> rough(int width, int height) {
@@ -149,7 +151,9 @@ struct Elevation : miniverse::RasterLayer<std::int16_t> {};
  * @brief Checks that the file `source` on `grid` gives, for each of `locations`, what a table gives that it was pushed into:
  * the same raster for a load, and the same tiles for a stream.
  */
-void check_loads_as_a_table(const gdal::RasterSource& source, const std::vector<geo::Polygon>& locations, const geo::Grid<std::int16_t>& grid = GRID) {
+void check_loads_as_a_table(
+    const gdal::RasterSource& source, const std::vector<geo::Polygon>& locations, const geo::Grid<std::int16_t>& grid = GRID
+) {
   miniverse::Miniverse tables(test_db(), miniverse::Layer<Elevation>("miniverse_test_gdal_elevation"));
   tables.drop_tables();
   tables.create_table<Elevation>(grid);
@@ -223,7 +227,8 @@ TEST_CASE("gdal raster: a file is handed over in windows of whole tiles, from th
   write_tiff(path, {.epsg = 4326, .west = 1, .north = 3, .pixel = 0.25, .width = 8, .height = 8, .pixels = numbered(8, 8)});
 
   std::vector<Raster>    windows;
-  const gdal::RasterRead read = gdal::read_raster<std::int16_t>(as_it_is(path), GRID, 1, [&](Raster window) { windows.push_back(std::move(window)); });
+  const gdal::RasterRead read =
+      gdal::read_raster<std::int16_t>(as_it_is(path), GRID, 1, [&](Raster window) { windows.push_back(std::move(window)); });
 
   CHECK(read.windows == 4);
   CHECK(read.without_data == 0);
@@ -249,7 +254,8 @@ TEST_CASE("gdal raster: the last window of a row is the tiles that are left", "[
   write_tiff(path, {.epsg = 4326, .west = 1, .north = 3, .pixel = 0.25, .width = 12, .height = 4, .pixels = numbered(12, 4)});
 
   std::vector<Raster>    windows;
-  const gdal::RasterRead read = gdal::read_raster<std::int16_t>(as_it_is(path), GRID, 2, [&](Raster window) { windows.push_back(std::move(window)); });
+  const gdal::RasterRead read =
+      gdal::read_raster<std::int16_t>(as_it_is(path), GRID, 2, [&](Raster window) { windows.push_back(std::move(window)); });
 
   CHECK(read.windows == 2);
   REQUIRE(windows.size() == 2);
@@ -273,7 +279,8 @@ TEST_CASE("gdal raster: the file's nodata is the grid's, and a window with no da
   write_tiff(path, {.epsg = 4326, .west = 1, .north = 3, .pixel = 0.25, .width = 8, .height = 4, .pixels = pixels});
 
   std::vector<Raster>    windows;
-  const gdal::RasterRead read = gdal::read_raster<std::int16_t>(as_it_is(path), GRID, 1, [&](Raster window) { windows.push_back(std::move(window)); });
+  const gdal::RasterRead read =
+      gdal::read_raster<std::int16_t>(as_it_is(path), GRID, 1, [&](Raster window) { windows.push_back(std::move(window)); });
 
   CHECK(read.windows == 1);
   CHECK(read.without_data == 1);
@@ -286,12 +293,17 @@ TEST_CASE("gdal raster: the file's nodata is the grid's, and a window with no da
 TEST_CASE("gdal raster: a file in another coordinate system is warped onto the grid", "[gdal]") {
   // From longitude 1 to 2, and from latitude 2 nearly to 1, as ten pixels each way, every one 7: ten pixels of a tenth of a
   // degree of longitude end on longitude 2, and reach a little less far south, as a degree of latitude is longer there.
-  constexpr double PIXEL = MERCATOR_DEGREE / 10;
+  constexpr double  PIXEL = MERCATOR_DEGREE / 10;
   const Files       files;
   const std::string path = files.path_of("mercator.tif");
   write_tiff(
-      path,
-      {.epsg = 3857, .west = MERCATOR_DEGREE, .north = mercator_north(2), .pixel = PIXEL, .width = 10, .height = 10, .pixels = std::vector<std::int16_t>(100, 7)}
+      path, {.epsg = 3857,
+             .west = MERCATOR_DEGREE,
+             .north = mercator_north(2),
+             .pixel = PIXEL,
+             .width = 10,
+             .height = 10,
+             .pixels = std::vector<std::int16_t>(100, 7)}
   );
 
   const Raster raster = gdal::read_raster<std::int16_t>(as_it_is(path), GRID);
@@ -305,14 +317,17 @@ TEST_CASE("gdal raster: a file in another coordinate system is warped onto the g
 
 TEST_CASE("gdal raster: a warped file reads the same pixels in windows as whole", "[gdal]") {
   // Two degrees each way in Web Mercator, from longitude 1 and latitude 3, as numbered pixels: four tiles of the grid.
-  constexpr double PIXEL = MERCATOR_DEGREE / 10;
+  constexpr double  PIXEL = MERCATOR_DEGREE / 10;
   const Files       files;
   const std::string path = files.path_of("mercator.tif");
-  write_tiff(path, {.epsg = 3857, .west = MERCATOR_DEGREE, .north = mercator_north(3), .pixel = PIXEL, .width = 20, .height = 20, .pixels = numbered(20, 20)});
+  write_tiff(
+      path, {.epsg = 3857, .west = MERCATOR_DEGREE, .north = mercator_north(3), .pixel = PIXEL, .width = 20, .height = 20, .pixels = numbered(20, 20)}
+  );
 
   const Raster           whole = gdal::read_raster<std::int16_t>(as_it_is(path), GRID);
   std::vector<Raster>    windows;
-  const gdal::RasterRead read = gdal::read_raster<std::int16_t>(as_it_is(path), GRID, 1, [&](Raster window) { windows.push_back(std::move(window)); });
+  const gdal::RasterRead read =
+      gdal::read_raster<std::int16_t>(as_it_is(path), GRID, 1, [&](Raster window) { windows.push_back(std::move(window)); });
 
   REQUIRE(whole.width == 8);
   REQUIRE(whole.height == 8);
@@ -377,7 +392,7 @@ TEST_CASE("gdal raster: what the callback throws is passed on", "[gdal]") {
   const std::string path = files.path_of("on_grid.tif");
   write_tiff(path, {.epsg = 4326, .west = 1, .north = 3, .pixel = 0.25, .width = 8, .height = 8, .pixels = numbered(8, 8)});
 
-  std::size_t windows = 0;
+  std::size_t                       windows = 0;
   const std::function<void(Raster)> taking_one = [&](const Raster& /*window*/) {
     if ( ++windows == 2 ) {
       throw std::runtime_error("one window is enough");
@@ -398,9 +413,8 @@ TEST_CASE("integration: a GeoTIFF pushed a window at a time, onto the table's ow
   world.create_table<Elevation>(GRID);
 
   const geo::Grid<std::int16_t> grid = world.table_settings<Elevation>().get();  // as a writer gets it: from the table
-  const gdal::RasterRead         read = gdal::read_raster<std::int16_t>(as_it_is(path), grid, 1, [&](Raster window) {
-    world.push<Elevation>(std::move(window)).get();
-  });
+  const gdal::RasterRead        read =
+      gdal::read_raster<std::int16_t>(as_it_is(path), grid, 1, [&](Raster window) { world.push<Elevation>(std::move(window)).get(); });
   const Raster loaded = world.load<Elevation>(bg::from_wkt<geo::Polygon>("POLYGON((1 1,3 1,3 3,1 3,1 1))")).get();
 
   CHECK(read.windows == 4);
@@ -415,14 +429,18 @@ TEST_CASE("gdal raster: a file as a layer loads the box's pixels on the grid, an
   const Files       files;
   const std::string path = files.path_of("on_grid.tif");
   write_tiff(path, {.epsg = 4326, .west = 1, .north = 3, .pixel = 0.25, .width = 8, .height = 8, .pixels = numbered(8, 8)});
-  miniverse::Miniverse world(gdal::raster_file<Elevation>(as_it_is(path), GRID));
+  miniverse::Miniverse     world(gdal::raster_file<Elevation>(as_it_is(path), GRID));
   std::vector<std::size_t> chunks;
 
   world.verify().get();
   const Raster whole = world.load<Elevation>(polygon("POLYGON((1 1,3 1,3 3,1 3,1 1))")).get();
   const Raster part = world.load<Elevation>(polygon("POLYGON((1.3 2.3,1.6 2.3,1.6 2.6,1.3 2.6,1.3 2.3))")).get();
   const Raster past = world.load<Elevation>(polygon("POLYGON((2.5 2.5,3.5 2.5,3.5 3.5,2.5 3.5,2.5 2.5))")).get();
-  world.stream<Elevation>(polygon("POLYGON((0 0,5 0,5 5,0 5,0 0))"), [&chunks](const std::vector<Raster>& tiles) { chunks.push_back(tiles.size()); }, {.chunk_rows = 3})
+  world
+      .stream<Elevation>(
+          polygon("POLYGON((0 0,5 0,5 5,0 5,0 0))"), [&chunks](const std::vector<Raster>& tiles) { chunks.push_back(tiles.size()); },
+          {.chunk_rows = 3}
+      )
       .get();
 
   CHECK(world.table_settings<Elevation>().get() == GRID);
@@ -470,7 +488,8 @@ TEST_CASE("gdal raster: verify says what keeps a file from being a layer", "[gda
 
   CHECK_THROWS_WITH(world.load<Elevation>(polygon("POLYGON((0 0,1 0,1 1,0 0))")).get(), ContainsSubstring("can't be opened"));
   CHECK_THROWS_AS(
-      world.stream<Elevation>(polygon("POLYGON((0 0,1 0,1 1,0 0))"), [](const std::vector<Raster>& /*tiles*/) {}, {.chunk_rows = 0}).get(), std::invalid_argument
+      world.stream<Elevation>(polygon("POLYGON((0 0,1 0,1 1,0 0))"), [](const std::vector<Raster>& /*tiles*/) {}, {.chunk_rows = 0}).get(),
+      std::invalid_argument
   );
 }
 
@@ -502,8 +521,8 @@ TEST_CASE("integration: a raster file on the grid loads and streams as the table
           polygon("POLYGON((1 2.6,3 1.2,2 1.2,1 2.6))"),                      // a triangle: its box, from the tiles it reaches into
           polygon("POLYGON((1.1 1.6,1.12 1.58,3.4 2.88,3.38 2.9,1.1 1.6))"),  // a strip askew: few of its box's tiles
           polygon("POLYGON((0.5 0.5,4.5 0.5,4.5 3.5,0.5 3.5,0.5 0.5),(1.9 0.9,1.9 2.1,3.1 2.1,3.1 0.9,1.9 0.9))"),  // a tile in its hole
-          polygon("POLYGON((1.5 2,2.5 2,2.5 2,1.5 2))"),                      // a line along the line between tiles: nothing
-          polygon("POLYGON((40 40,41 40,41 41,40 41,40 40))"),                // far away
+          polygon("POLYGON((1.5 2,2.5 2,2.5 2,1.5 2))"),        // a line along the line between tiles: nothing
+          polygon("POLYGON((40 40,41 40,41 41,40 41,40 40))"),  // far away
       }
   );
 }
@@ -511,10 +530,12 @@ TEST_CASE("integration: a raster file on the grid loads and streams as the table
 TEST_CASE("integration: a raster file in another coordinate system loads and streams as the table it was pushed into", "[gdal][integration]") {
   // Two degrees each way in Web Mercator, from longitude 1 and latitude 3, as numbered pixels, made into the grid's by
   // bilinear weights: a pixel must come out the same whichever window it is warped in.
-  constexpr double PIXEL = MERCATOR_DEGREE / 10;
+  constexpr double  PIXEL = MERCATOR_DEGREE / 10;
   const Files       files;
   const std::string path = files.path_of("mercator.tif");
-  write_tiff(path, {.epsg = 3857, .west = MERCATOR_DEGREE, .north = mercator_north(3), .pixel = PIXEL, .width = 20, .height = 20, .pixels = numbered(20, 20)});
+  write_tiff(
+      path, {.epsg = 3857, .west = MERCATOR_DEGREE, .north = mercator_north(3), .pixel = PIXEL, .width = 20, .height = 20, .pixels = numbered(20, 20)}
+  );
 
   check_loads_as_a_table(
       {.path = path, .band = 1, .resampling = gdal::Resampling::Bilinear},
@@ -522,7 +543,7 @@ TEST_CASE("integration: a raster file in another coordinate system loads and str
           polygon("POLYGON((0 0,6 0,6 6,0 6,0 0))"),
           polygon("POLYGON((1.3 2.3,1.6 2.3,1.6 2.6,1.3 2.6,1.3 2.3))"),
           polygon("POLYGON((1.5 1.5,2.5 1.5,2.5 2.5,1.5 2.5,1.5 1.5))"),
-          polygon("POLYGON((2.6 0.5,3.4 0.5,3.4 1.4,2.6 1.4,2.6 0.5))"),  // over the file's south-east corner
+          polygon("POLYGON((2.6 0.5,3.4 0.5,3.4 1.4,2.6 1.4,2.6 0.5))"),      // over the file's south-east corner
           polygon("POLYGON((1.1 1.2,1.12 1.18,2.9 2.88,2.88 2.9,1.1 1.2))"),  // a strip askew
           polygon("POLYGON((0 2,1 2,1 3,0 3,0 2))"),
           polygon("POLYGON((40 40,41 40,41 41,40 41,40 40))"),
@@ -538,7 +559,10 @@ TEST_CASE("gdal raster: pixels made by weights are the same whichever window the
   const std::string plain = files.path_of("rough.tif");
   const std::string mercator = files.path_of("rough_mercator.tif");
   write_tiff(plain, {.epsg = 4326, .west = 1, .north = 3, .pixel = 0.1, .width = 20, .height = 20, .pixels = rough(20, 20)});
-  write_tiff(mercator, {.epsg = 3857, .west = MERCATOR_DEGREE, .north = mercator_north(3), .pixel = PIXEL, .width = 20, .height = 20, .pixels = rough(20, 20)});
+  write_tiff(
+      mercator,
+      {.epsg = 3857, .west = MERCATOR_DEGREE, .north = mercator_north(3), .pixel = PIXEL, .width = 20, .height = 20, .pixels = rough(20, 20)}
+  );
 
   for ( const std::string& path : {plain, mercator} ) {
     for ( const gdal::Resampling resampling : {gdal::Resampling::Bilinear, gdal::Resampling::Cubic, gdal::Resampling::Average} ) {
@@ -585,7 +609,9 @@ TEST_CASE("gdal raster: a read of tiles stops when its callback wants no more", 
 
   CHECK(sizes == std::vector<std::size_t>{1, 1});  // of four tiles
   CHECK_THROWS_AS(
-      gdal::read_tiles_in<std::int16_t>(as_it_is(path), {.pixels_per_degree = 100'000, .tile_pixels = 4, .nodata = GRID_NODATA}, polygon("POLYGON((0 0,1 0,1 1,0 0))"), 1, {}),
+      gdal::read_tiles_in<std::int16_t>(
+          as_it_is(path), {.pixels_per_degree = 100'000, .tile_pixels = 4, .nodata = GRID_NODATA}, polygon("POLYGON((0 0,1 0,1 1,0 0))"), 1, {}
+      ),
       std::invalid_argument
   );  // a grid no table can be made with is none for a file either
 }
@@ -604,11 +630,11 @@ TEST_CASE("integration: on a grid of tenths of a degree, a raster file loads and
           polygon("POLYGON((1 1,4 1,4 3,1 3,1 1))"),
           polygon("POLYGON((1.33 2.33,1.66 2.33,1.66 2.66,1.33 2.66,1.33 2.33))"),
           polygon("POLYGON((1.5 1.5,3.5 1.5,3.5 2.5,1.5 2.5,1.5 1.5))"),
-          polygon("POLYGON((0.7 2,1 2,1 3,0.7 3,0.7 2))"),    // west of it, touching its edge
-          polygon("POLYGON((2.1 0.5,2.4 0.5,2.4 0.9,2.1 0.9,2.1 0.5))"),  // on a tile's edge at 2.1, south of the file
+          polygon("POLYGON((0.7 2,1 2,1 3,0.7 3,0.7 2))"),                          // west of it, touching its edge
+          polygon("POLYGON((2.1 0.5,2.4 0.5,2.4 0.9,2.1 0.9,2.1 0.5))"),            // on a tile's edge at 2.1, south of the file
           polygon("POLYGON((1.05 1.25,1.07 1.23,3.95 2.93,3.93 2.95,1.05 1.25))"),  // a strip askew, across tiles of three tenths
           polygon("POLYGON((0.5 0.5,4.5 0.5,4.5 3.5,0.5 3.5,0.5 0.5),(1.7 1.4,1.7 2.5,2.8 2.5,2.8 1.4,1.7 1.4))"),  // tiles in its hole
-          polygon("POLYGON((1.2 1.5,1.2 2.4,2.1 2.4,2.1 1.5,1.2 1.5))"),      // its edges on tiles' edges, which no double holds
+          polygon("POLYGON((1.2 1.5,1.2 2.4,2.1 2.4,2.1 1.5,1.2 1.5))"),  // its edges on tiles' edges, which no double holds
           polygon("POLYGON((40 40,41 40,41 41,40 41,40 40))"),
       },
       {.pixels_per_degree = 10, .tile_pixels = 3, .nodata = GRID_NODATA}

@@ -24,7 +24,8 @@
 #include <vector>
 
 #include "miniverse/miniverse.hpp"
-#include "support/files.hpp"
+#include "support/checks.hpp"
+#include "support/database.hpp"
 
 namespace geo = miniverse::geo;
 
@@ -127,14 +128,7 @@ template <miniverse::LayerKind kind_t>
   return Layer<kind_t>(std::make_shared<FixedPoints<kind_t>>(std::move(points), std::move(problems)));
 }
 
-[[nodiscard]] std::vector<std::int64_t> ids(const Points& points) {
-  std::vector<std::int64_t> result;
-  for ( const miniverse::Feature<geo::Point>& point : points ) {
-    result.push_back(point.id);
-  }
-
-  return result;
-}
+using test::ids;
 
 }  // namespace
 

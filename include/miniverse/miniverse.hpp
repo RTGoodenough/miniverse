@@ -7,20 +7,21 @@
  * kinds use.
  */
 
-#include "miniverse/concepts/miniverse.hpp"   // IWYU pragma: export
-#include "miniverse/geo/column_types.hpp"     // IWYU pragma: export
-#include "miniverse/geo/grid.hpp"             // IWYU pragma: export
-#include "miniverse/geo/operations.hpp"       // IWYU pragma: export
-#include "miniverse/geo/raster.hpp"           // IWYU pragma: export
-#include "miniverse/geo/raster_wkb.hpp"       // IWYU pragma: export
-#include "miniverse/geo/types.hpp"            // IWYU pragma: export
-#include "miniverse/layer.hpp"                // IWYU pragma: export
-#include "miniverse/layer/feature.hpp"        // IWYU pragma: export
-#include "miniverse/layer/feature_layer.hpp"  // IWYU pragma: export
-#include "miniverse/layer/raster/reach.hpp"   // IWYU pragma: export
-#include "miniverse/layer/raster/tiles.hpp"   // IWYU pragma: export
-#include "miniverse/layer/raster_layer.hpp"   // IWYU pragma: export
-#include "miniverse/layer/road_layer.hpp"     // IWYU pragma: export
-#include "miniverse/layer/way.hpp"            // IWYU pragma: export
-#include "miniverse/location.hpp"             // IWYU pragma: export
-#include "miniverse/world.hpp"                // IWYU pragma: export
+#include "miniverse/concepts/miniverse.hpp"     // IWYU pragma: export
+#include "miniverse/geo/column_types.hpp"       // IWYU pragma: export
+#include "miniverse/geo/grid.hpp"               // IWYU pragma: export
+#include "miniverse/geo/operations.hpp"         // IWYU pragma: export
+#include "miniverse/geo/raster.hpp"             // IWYU pragma: export
+#include "miniverse/geo/raster_wkb.hpp"         // IWYU pragma: export
+#include "miniverse/geo/types.hpp"              // IWYU pragma: export
+#include "miniverse/layer.hpp"                  // IWYU pragma: export
+#include "miniverse/layer/dataset_columns.hpp"  // IWYU pragma: export
+#include "miniverse/layer/feature.hpp"          // IWYU pragma: export
+#include "miniverse/layer/feature_layer.hpp"    // IWYU pragma: export
+#include "miniverse/layer/raster/reach.hpp"     // IWYU pragma: export
+#include "miniverse/layer/raster/tiles.hpp"     // IWYU pragma: export
+#include "miniverse/layer/raster_layer.hpp"     // IWYU pragma: export
+#include "miniverse/layer/road_layer.hpp"       // IWYU pragma: export
+#include "miniverse/layer/way.hpp"              // IWYU pragma: export
+#include "miniverse/location.hpp"               // IWYU pragma: export
+#include "miniverse/world.hpp"                  // IWYU pragma: export
