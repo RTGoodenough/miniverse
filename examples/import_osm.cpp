@@ -27,7 +27,7 @@ int main(int argc, char** argv) {
     world.drop_tables();
     world.create_tables();
 
-    // A push in parts takes one call at a time: each chunk is waited for before the next is read.
+    // Each chunk is waited for before the next is read, so one chunk is held at a time.
     miniverse::PushInParts<Roads> roads = world.begin_push<Roads>(miniverse::Dataset{"town.osm.pbf"}).get();
 
     // The ways with a `highway` tag, which are OpenStreetMap's roads and paths.

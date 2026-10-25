@@ -10,12 +10,14 @@
 #include <utility>
 
 #include "miniverse/concepts/miniverse.hpp"
+#include "miniverse/world/async.hpp"
+#include "miniverse/world/step_thread.hpp"
 #include "schemacht/postgres/transaction.hpp"
 #include "schemacht/schema/table.hpp"
 
 /**
  * @file
- * A push run in steps: the steps, and the handle `Miniverse::begin_push` gives to run each on a thread of its own, which a
+ * A push run in steps: the steps, and the handle `Miniverse::begin_push` gives to run each on the push's own thread, which a
  * whole push runs in one go.
  */
 namespace miniverse {
@@ -25,7 +27,7 @@ namespace detail {
 /**
  * @brief A push while it runs: its transaction, how its rows are made, what it runs before it commits, and why it ended if a
  * step of it failed. A step runs on the thread that calls it and waits for each statement, so the push holds one statement's
- * text at a time; a step that fails rolls the transaction back, and every later step fails with its error. One step at a time.
+ * text at a time; a step that fails rolls the transaction back, and every later step fails with its error.
  */
 template <LayerKind kind_t>
 struct Push {
@@ -112,56 +114,45 @@ struct Push {
  * It holds one of the pool's connections from `begin_push` until it ends. A part that fails ends the push: it is rolled
  * back, and every later `add`, and the `commit`, fails with that part's error.
  *
- * Each `add` and the `commit` run on a thread started for the call, which makes the part's rows and writes them in the kind's
- * batches; the future waits for that thread if it is dropped. One call at a time: wait for an `add` before the next `add` or
- * the `commit`. Wait for every `add`, and commit or drop the push, before the miniverse ends. One that was moved from fails
- * every call. For a kind with datasets the push replaces its dataset when it commits, so a commit with no parts leaves the
- * dataset empty.
+ * The parts are made into rows and written on the push's own thread, in the order they are added: an `add` need not be
+ * waited for before the next, or before the `commit`. Each `add` holds its part until the part is written, so a reader far
+ * ahead of the writes holds that many parts; one that waits for the previous `add` before it reads the next holds two.
+ * Dropping the push runs what was added, ends its thread, and waits for that. Commit or drop the push before the miniverse
+ * ends. One that was moved from fails every call. For a kind with datasets the push replaces its dataset when it commits,
+ * so a commit with no parts leaves the dataset empty.
  */
 template <LayerKind kind_t>
 class PushInParts {
  public:
-  /** @brief The handle of `push`, a push that has begun. */
-  explicit PushInParts(std::shared_ptr<detail::Push<kind_t>> push) : _push(std::move(push)) {}
+  /** @brief The handle of `push`, a push that has begun, whose steps run on `thread`. */
+  PushInParts(detail::StepThread thread, std::shared_ptr<detail::Push<kind_t>> push) : _push(std::move(push)), _thread(std::move(thread)) {}
 
   /** @return A future that completes once `data`, a part, is written into the push, or holds the error, which ends the push. */
   [[nodiscard]] std::future<void> add(kind_t::result_type data) {
-    return started([push = _push, data = std::move(data)]() mutable { live(push).add(std::move(data)); });
+    return step([push = _push, data = std::move(data)]() mutable { push->add(std::move(data)); });
   }
 
   /** @return A future that completes once every part added is there for everyone, or holds the error (nothing is then written). */
   [[nodiscard]] std::future<void> commit() {
-    return started([push = _push] { live(push).commit(); });
+    return step([push = _push] { push->commit(); });
   }
 
  private:
-  std::shared_ptr<detail::Push<kind_t>> _push;  // null once moved from
+  std::shared_ptr<detail::Push<kind_t>> _push;    // null once moved from
+  detail::StepThread                    _thread;  // after the push: its steps hold the push until they have run
 
-  /** @return A future for `step`, run on a thread started for it. If no thread can be started the step is lost, so the push ends with that error. */
-  template <std::invocable step_t>
-  [[nodiscard]] std::future<void> started(step_t step) {
+  /** @return A future for `run`, a step of the push, posted to its thread; it holds the error if there is no push (moved from) or the step was lost. */
+  template <std::invocable run_t>
+  [[nodiscard]] std::future<void> step(run_t run) {
+    if ( ! _push ) {
+      return detail::failed<void>(std::make_exception_ptr(std::logic_error("this push in parts was moved from: it is the other one now")));
+    }
+
     try {
-      return std::async(std::launch::async, std::move(step));
+      return _thread.post(std::move(run));
     } catch ( ... ) {
-      const std::exception_ptr not_started = std::current_exception();
-      if ( _push ) {
-        _push->end(not_started);
-      }
-
-      std::promise<void> failed;
-      failed.set_exception(not_started);
-
-      return failed.get_future();
+      return detail::failed<void>(std::current_exception());
     }
-  }
-
-  /** @return The push `push` holds, for a step of it. @throws std::logic_error if it holds none: this push in parts was moved from. */
-  [[nodiscard]] static detail::Push<kind_t>& live(const std::shared_ptr<detail::Push<kind_t>>& push) {
-    if ( ! push ) {
-      throw std::logic_error("this push in parts was moved from: it is the other one now");
-    }
-
-    return *push;
   }
 
  public:

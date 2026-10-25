@@ -187,9 +187,9 @@ class Miniverse {
 
   /**
    * @return A future for a push of the layer `kind_t` that takes its data in parts, all written or none (`PushInParts`). On a
-   * thread started for the call, the table's settings are read if the kind has any, and the transaction is begun. It holds
-   * the error instead if either fails, or the layer has a reader (`std::logic_error`). Commit or drop the push before the
-   * miniverse ends.
+   * thread started for the call, the table's settings are read if the kind has any, the transaction is begun, and the push's
+   * own thread, which its parts then run on, is started. It holds the error instead if any of that fails, or the layer has a
+   * reader (`std::logic_error`). Commit or drop the push before the miniverse ends.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<PushInParts<kind_t>> begin_push() {
@@ -230,8 +230,9 @@ class Miniverse {
   /**
    * @return A future for a push of `dataset` into the layer `kind_t` that takes its data in parts (`PushInParts`). The dataset is
    * replaced when the push commits, as `push(dataset, data)` replaces it; a commit with no parts leaves it empty. On a thread
-   * started for the call, the transaction is begun and the dataset locked. It holds the error instead if either fails, or
-   * the layer has a reader (`std::logic_error`). Commit or drop the push before the miniverse ends.
+   * started for the call, the transaction is begun, the dataset locked, and the push's own thread, which its parts then run
+   * on, is started. It holds the error instead if any of that fails, or the layer has a reader (`std::logic_error`). Commit
+   * or drop the push before the miniverse ends.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<PushInParts<kind_t>> begin_push(const Dataset& dataset) {

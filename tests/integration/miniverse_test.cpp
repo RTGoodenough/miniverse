@@ -262,6 +262,35 @@ TEST_CASE("integration: a push in parts is there for everyone once it commits, a
   CHECK(ids(world.load<TestRoads>(FAR_EAST).get()) == std::vector<std::int64_t>{5, 6, 7});
 }
 
+TEST_CASE("integration: the parts of a push in parts are written in the order added, and need not be waited for", "[integration]") {
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
+
+  miniverse::PushInParts<TestRoads> parts = world.begin_push<TestRoads>(FAR_EAST_SURVEY).get();
+  std::future<void>                 first = parts.add({way(10, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")});
+  std::future<void>                 second = parts.add({way(11, {2, 3}, "LINESTRING(50.2 50.2,50.3 50.3)", "{}")});
+  std::future<void>                 committed = parts.commit();
+
+  committed.get();
+  first.get();
+  second.get();
+  CHECK(ids(world.load<TestRoads>(FAR_EAST).get()) == std::vector<std::int64_t>{5, 6});
+}
+
+TEST_CASE("integration: a push in parts assigned over another drops the other, which then writes nothing", "[integration]") {
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
+
+  miniverse::PushInParts<TestRoads> parts = world.begin_push<TestRoads>(FAR_EAST_SURVEY).get();
+  parts.add({way(10, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get();
+
+  parts = world.begin_push<TestRoads>(miniverse::Dataset{"far_east_again"}).get();  // another dataset: the first push holds its lock
+  parts.add({way(11, {2, 3}, "LINESTRING(50.2 50.2,50.3 50.3)", "{}")}).get();
+  parts.commit().get();
+
+  CHECK(ids(world.load<TestRoads>(FAR_EAST).get()) == std::vector<std::int64_t>{6});
+}
+
 TEST_CASE("integration: a push in parts that is dropped without a commit writes nothing", "[integration]") {
   test::Fresh<World> loaded = with_network(test_db());
   World&             world = loaded.world();

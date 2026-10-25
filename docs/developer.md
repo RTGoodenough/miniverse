@@ -9,8 +9,9 @@ How the library is put together, how to add to it, and how to build, test and li
 include/miniverse/
   world.hpp              Miniverse: the front that holds the layers and the pool and tells a table from a reader
   world/                 one idea each: load.hpp (loads and streams), push.hpp, push_in_parts.hpp (PushInParts and the
-                         push it runs), datasets.hpp (stamp, lock, sweep, remove), verify.hpp (TablesDiffer, the
-                         checks), tables.hpp (make, drop), settings.hpp, async.hpp
+                         push it runs), step_thread.hpp (the thread a push in parts runs on), datasets.hpp (stamp, lock,
+                         sweep, remove), verify.hpp (TablesDiffer, the checks), tables.hpp (make, drop), settings.hpp,
+                         async.hpp
   dataset.hpp            Dataset: the export a vector push writes under and replaces
   layer.hpp              Layer<Kind>: a table name or a reader
   reader.hpp             Reader<Kind>
@@ -89,8 +90,10 @@ table side takes the `Database` and the layer's `Table`, the reader side the `Re
   (`world/settings.hpp`) and begins a transaction; `Push::add` makes the batches with `to_rows` and sends one statement
   per batch, waiting for each; `Push::commit` runs what comes before the commit, then commits. A step that throws rolls
   the transaction back and keeps the error, which every later step throws. A whole push is `begun`, one `add` and a
-  `commit` on one thread; a `PushInParts` holds the same `Push` and runs each `add` and the `commit` on a thread of its
-  own (`world/push.hpp`, `world/push_in_parts.hpp`).
+  `commit` on one thread. `begin_push` runs `begun` on a thread started for the call too, and there starts a `StepThread`
+  (`world/step_thread.hpp`), a thread with a queue of steps, which the `PushInParts` holds with the `Push`: each `add`
+  and the `commit` post a step to it, so they run in order; dropping the handle runs the steps queued and joins the thread
+  (`world/push.hpp`, `world/push_in_parts.hpp`).
 - **push of a dataset** (`world/datasets.hpp`): a random 64-bit stamp is drawn; the transaction begins with an advisory
   lock on the dataset's name (`pg_advisory_xact_lock(hashtext(name))`), so two pushes of one dataset run in turn; the
   rows carry the dataset and the stamp; before the commit the kind's sweep deletes the dataset's rows whose stamp is
@@ -101,9 +104,10 @@ table side takes the `Database` and the layer's `Table`, the reader side the `Re
 - **create_table:** `CREATE TABLE` from the schema and the kind's `setup_sql`, in one transaction, waited for
   (`world/tables.hpp`).
 
-Thread boundaries: a load's and a stream's conversions and the stream callbacks run on the pool's threads. A push, each
-`PushInParts::add` and its `commit`, and a reader's load run on a thread started for the call, where the kind makes the
-rows; their futures wait for that thread when dropped. What runs on the caller's thread and waits: the constructor
+Thread boundaries: a load's and a stream's conversions and the stream callbacks run on the pool's threads. A push and a
+reader's load run on a thread started for the call, where the kind makes the rows; their futures wait for that thread
+when dropped. The parts of a push in parts run on the push's own thread, started with the push and joined when the
+handle is dropped. What runs on the caller's thread and waits: the constructor
 (it opens the pool), `create_table` and `drop_tables`, `osm::road_file` (it reads the file), `Reader::settings` and
 `Reader::problems`, and the `.get()` calls the caller makes.
 
@@ -251,11 +255,13 @@ Parts of the suite:
   touch tile edges. Use a grid of tenths of a degree and rough pixels for such tests: a dyadic grid and smooth data hide
   rounding differences.
 - `tests/unit/reader_test.cpp`: the reader contract, including that loads run on their own threads.
+- `tests/unit/step_thread_test.cpp`: the thread a push in parts runs on.
 - `tests/integration/raster_layer_test.cpp`: the table's constraints, index use (by `EXPLAIN`), merging, lz4.
 
 A ThreadSanitizer build of `miniverse_tests` with the components off (`-DCMAKE_CXX_FLAGS=-fsanitize=thread
 -DMINIVERSE_BUILD_GDAL=OFF -DMINIVERSE_BUILD_OSM=OFF -DMINIVERSE_BUILD_EXAMPLES=OFF`) is the check for the threaded
-paths: run `./miniverse_tests "[reader],[integration]"` from it. The test discovery step fails under TSan; the binary
+paths: run `setarch $(uname -m) -R ./miniverse_tests "[reader],[step_thread],[integration]"` from it. The test
+discovery step fails under TSan, and the binary crashes at startup unless address randomization is off (`setarch -R`); it
 still links.
 
 ## Static checks and style

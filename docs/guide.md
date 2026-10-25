@@ -96,9 +96,11 @@ roads.commit().get();  // now they are all there, for everyone at once
 ```
 
 Every part is written in the same transaction, so a file that fails halfway leaves nothing, and workers see nothing
-until the commit. For a dataset, the parts together are the dataset: it is replaced when the push commits, so a file
-read a chunk at a time goes through one `begin_push`, never a `push` per chunk, which would replace the dataset with
-each chunk. A commit with no parts, like a push of no data, leaves the dataset empty.
+until the commit. Each `add` holds its part until the part is written: the `.get()` above holds one chunk at a time, and
+a reader that only waits for the previous `add` before reading the next holds two. For a dataset, the parts together are
+the dataset: it is replaced when the push commits, so a file read a chunk at a time goes through one `begin_push`, never
+a `push` per chunk, which would replace the dataset with each chunk. A commit with no parts, like a push of no data,
+leaves the dataset empty.
 
 ### Loading
 
@@ -378,10 +380,11 @@ the load; `name`, `settings` and `problems` on the caller's thread.
 - Errors from the database and from a kind's conversions arrive through the future of the call. `verify` fails with
   `TablesDiffer`; a push to a file layer with `std::logic_error`; a wrong argument (a grid that is none, a chunk of zero
   rows) with `std::invalid_argument`; GDAL and libosmium errors as `std::runtime_error` with the library's message.
-- Stream callbacks run on the pool's threads (on the load's own thread for a file layer), one call at a time. A `push`, a
-  `begin_push`, and each `add` and the `commit` of a push in parts, run on a thread started for the call, which makes the
-  rows: the call returns at once, and its future waits for that thread if it is dropped before it is done. A push begins
-  its transaction before it makes its rows.
+- Stream callbacks run on the pool's threads (on the load's own thread for a file layer), one call at a time. A `push`
+  and a `begin_push` run on a thread started for the call: the call returns at once, and its future waits for that
+  thread if it is dropped before it is done. A push in parts then has one thread of its own, on which every part is made
+  into rows and written, in the order the parts were added; an `add` need not be waited for before the next, and
+  dropping the push waits for the parts added to be written. A push begins its transaction before it makes its rows.
 - The constructor opens the pool and waits; `create_table` and `drop_tables` wait; `osm::road_file` reads its file when
   it is called.
 - A push holds one of the pool's connections for its transaction; with a pool of one connection nothing else runs
