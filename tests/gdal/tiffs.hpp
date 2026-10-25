@@ -14,14 +14,17 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <numbers>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "miniverse/gdal/raster.hpp"
+#include "miniverse/geo/concepts/raster.hpp"
 #include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/raster.hpp"
 #include "miniverse/layer/raster_layer.hpp"
@@ -38,15 +41,35 @@ constexpr miniverse::geo::Grid<std::int16_t> GRID{.pixels_per_degree = 4, .tile_
 struct Elevation : miniverse::RasterLayer<std::int16_t> {};
 
 /** @brief Where a GeoTIFF lies and what it holds. */
+template <miniverse::geo::Pixel pixel_t = std::int16_t>
 struct Tiff {
-  int                       epsg = 4326;
-  double                    west = 0;
-  double                    north = 0;
-  double                    pixel = 0.25;  ///< A pixel's size each way, in the units of `epsg`.
-  int                       width = 0;
-  int                       height = 0;
-  std::vector<std::int16_t> pixels;  ///< In rows from the north-west, `width * height` of them.
+  int                   epsg = 4326;
+  double                west = 0;
+  double                north = 0;
+  double                pixel = 0.25;  ///< A pixel's size each way, in the units of `epsg`.
+  int                   width = 0;
+  int                   height = 0;
+  std::vector<pixel_t>  pixels;                ///< Band 1, in rows from the north-west, `width * height` of them.
+  std::vector<pixel_t>  second_band;           ///< Band 2, as many pixels; none for a file of one band.
+  std::optional<double> nodata = FILE_NODATA;  ///< Of each band; none for a file that names no nodata.
+  bool                  turned = false;        ///< Turned a quarter clockwise: its columns run south and its rows west, from (west, north) on.
 };
+
+/** @return The GDAL type that is `pixel_t`. */
+template <miniverse::geo::Pixel pixel_t>
+[[nodiscard]] constexpr GDALDataType type_of() {
+  if constexpr ( std::same_as<pixel_t, std::int8_t> ) {
+    return GDT_Int8;
+
+  } else if constexpr ( std::same_as<pixel_t, std::int16_t> ) {
+    return GDT_Int16;
+
+  } else {
+    static_assert(std::same_as<pixel_t, float>, "a test of a new pixel type needs its GDAL type here");
+
+    return GDT_Float32;
+  }
+}
 
 /** @return The pixel `column * 100 + row` for each of `width` by `height`. */
 [[nodiscard]] inline std::vector<std::int16_t> numbered(int width, int height) {
@@ -76,14 +99,19 @@ struct Tiff {
   return pixels;
 }
 
-/** @brief Writes `tiff` as a GeoTIFF of one 16-bit band at `path`, with FILE_NODATA as its nodata value. An `epsg` of 0 names no system. */
-inline void write_tiff(const std::string& path, Tiff tiff) {
+/** @brief Writes `tiff` as a GeoTIFF at `path`, of one band or two. An `epsg` of 0 names no system. */
+template <miniverse::geo::Pixel pixel_t = std::int16_t>
+inline void write_tiff(const std::string& path, Tiff<pixel_t> tiff) {
   GDALAllRegister();
 
-  GDALDatasetH made = GDALCreate(GDALGetDriverByName("GTiff"), path.c_str(), tiff.width, tiff.height, 1, GDT_Int16, nullptr);
+  const int    bands = tiff.second_band.empty() ? 1 : 2;
+  GDALDatasetH made = GDALCreate(GDALGetDriverByName("GTiff"), path.c_str(), tiff.width, tiff.height, bands, type_of<pixel_t>(), nullptr);
   REQUIRE(made != nullptr);
 
   std::array<double, 6> position{tiff.west, tiff.pixel, 0, tiff.north, 0, -tiff.pixel};
+  if ( tiff.turned ) {
+    position = {tiff.west + (tiff.height * tiff.pixel), 0, -tiff.pixel, tiff.north, -tiff.pixel, 0};  // from its north-east corner
+  }
   REQUIRE(GDALSetGeoTransform(made, position.data()) == CE_None);
 
   if ( tiff.epsg != 0 ) {
@@ -95,9 +123,14 @@ inline void write_tiff(const std::string& path, Tiff tiff) {
     CPLFree(text);
   }
 
-  GDALRasterBandH band = GDALGetRasterBand(made, 1);
-  REQUIRE(GDALSetRasterNoDataValue(band, FILE_NODATA) == CE_None);
-  REQUIRE(GDALRasterIO(band, GF_Write, 0, 0, tiff.width, tiff.height, tiff.pixels.data(), tiff.width, tiff.height, GDT_Int16, 0, 0) == CE_None);
+  for ( int number = 1; number <= bands; ++number ) {
+    std::vector<pixel_t>& pixels = number == 1 ? tiff.pixels : tiff.second_band;
+    GDALRasterBandH       band = GDALGetRasterBand(made, number);
+    if ( tiff.nodata ) {
+      REQUIRE(GDALSetRasterNoDataValue(band, *tiff.nodata) == CE_None);
+    }
+    REQUIRE(GDALRasterIO(band, GF_Write, 0, 0, tiff.width, tiff.height, pixels.data(), tiff.width, tiff.height, type_of<pixel_t>(), 0, 0) == CE_None);
+  }
   GDALClose(made);
 }
 

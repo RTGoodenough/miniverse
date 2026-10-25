@@ -1,6 +1,6 @@
 #pragma once
 
-// GeoJSON written as text for the vector tests, a GeoPackage GDAL makes from one, and the feature kinds they are read as.
+// GeoJSON and CSV written as text for the vector tests, a GeoPackage GDAL makes from one, and the feature kinds they are read as.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -43,6 +43,17 @@ constexpr std::string_view SHOPS = R"({"type": "FeatureCollection", "features": 
 
 // A table with a geometry, as OGR reads a CSV with a WKT column, and no word on its coordinate system.
 constexpr std::string_view NO_SYSTEM = "WKT,name\n\"POINT (1 2)\",somewhere\n";
+
+// Curves, which GeoJSON has no way to write, in tables of WKT that a .prj of WGS_84_PRJ beside them puts in WGS 84: an arc
+// of the circle of radius 1 around (1, 0), from (0, 0) over (1, 1) to (2, 0), alone and after a straight line from (-1, 0);
+// and the whole circle as an area.
+constexpr std::string_view CURVED_LINES =
+    "WKT,name\n"
+    "\"CIRCULARSTRING (0 0,1 1,2 0)\",arc\n"
+    "\"COMPOUNDCURVE ((-1 0,0 0),CIRCULARSTRING (0 0,1 1,2 0))\",road\n";
+constexpr std::string_view CURVED_AREAS = "WKT,name\n\"CURVEPOLYGON (CIRCULARSTRING (0 0,1 1,2 0,1 -1,0 0))\",disc\n";
+constexpr std::string_view WGS_84_PRJ =
+    R"(GEOGCS["GCS_WGS_1984",DATUM["D_WGS_1984",SPHEROID["WGS_1984",6378137.0,298.257223563]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]])";
 
 // A line in Web Mercator (EPSG:3857), in metres: from (0, 0) to what is longitude 1, latitude 1.
 constexpr std::string_view MERCATOR_PATH = R"({"type": "FeatureCollection",

@@ -13,13 +13,16 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "gdal/common.hpp"
 #include "gdal/raster/source.hpp"
 #include "miniverse/gdal/raster.hpp"
 #include "miniverse/geo/concepts/raster.hpp"
+#include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/raster.hpp"
+#include "miniverse/geo/types.hpp"
 
 /**
  * @file
@@ -44,10 +47,30 @@ namespace miniverse::gdal::detail {
   return "near";
 }
 
-/** @brief Fills `window`'s pixels from `dataset`: warped onto the window's own pixels, the grid's nodata where it has no data. */
+/**
+ * @return The transformer option that names `extent`, within the world, as the area the file's coordinates are transformed
+ * in. GDAL works it out from the file's pixel size alone, which is nothing for a file turned a quarter (its geotransform all
+ * rotation), and PROJ finds no transformation for an area of nothing.
+ */
+[[nodiscard]] inline std::string area_of_interest(const geo::Box& extent) {
+  const double world_east = geo::GRID_WEST + static_cast<double>(geo::DEGREES_ACROSS);
+  const double world_south = geo::GRID_NORTH - static_cast<double>(geo::DEGREES_DOWN);
+
+  return std::format(
+      "AREA_OF_INTEREST={},{},{},{}", std::clamp(extent.min_corner().x(), geo::GRID_WEST, world_east),
+      std::clamp(extent.min_corner().y(), world_south, geo::GRID_NORTH), std::clamp(extent.max_corner().x(), geo::GRID_WEST, world_east),
+      std::clamp(extent.max_corner().y(), world_south, geo::GRID_NORTH)
+  );
+}
+
+/**
+ * @brief Fills `window`'s pixels from `dataset`, whose extent in WGS 84 is `extent`: warped onto the window's own pixels, the
+ * grid's nodata where it has no data.
+ */
 template <geo::Pixel pixel_t>
 void warp_into(
-    geo::Raster<pixel_t>& window, GDALDataset& dataset, const RasterSource& source, const std::int64_t pixels_per_degree, const Scale& scale
+    geo::Raster<pixel_t>& window, GDALDataset& dataset, const RasterSource& source, const geo::Box& extent, const std::int64_t pixels_per_degree,
+    const Scale& scale
 ) {
   CPLErrorReset();  // from here, GDAL's last error is this window's own
 
@@ -84,7 +107,19 @@ void warp_into(
       std::format("XSCALE={}", scale.across),  // one scale for the whole file (`Scale`), for the same reason
       "-wo",
       std::format("YSCALE={}", scale.down),
+      "-to",
+      area_of_interest(extent),
   };
+
+  // A band of reals that names no nodata may still hold "not a number". Named as its nodata, it is left out of the pixels
+  // made from it; otherwise every pixel it touches is "not a number" too, which a grid of whole numbers has no way to hold.
+  GDALRasterBand* band = dataset.GetRasterBand(source.band);
+  int             names_nodata = 0;
+  std::ignore = band->GetNoDataValue(&names_nodata);
+  if ( GDALDataTypeIsFloating(band->GetRasterDataType()) != 0 && names_nodata == 0 ) {
+    words.insert(words.end(), {"-srcnodata", "nan"});
+  }
+
   std::vector<char*> arguments;
   arguments.reserve(words.size() + 1);
   for ( std::string& word : words ) {
@@ -113,7 +148,7 @@ void warp_into(
     fail("the pixels of '" + source.path + "' can't be read");
   }
 
-  // A file of reals may hold "not a number" without naming it as its nodata.
+  // A file of reals that names a number as its nodata may hold "not a number" too.
   if constexpr ( std::floating_point<pixel_t> ) {
     std::ranges::replace_if(window.pixels, [](pixel_t pixel) { return std::isnan(pixel); }, window.nodata);
   }

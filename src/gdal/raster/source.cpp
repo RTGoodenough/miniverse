@@ -16,6 +16,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 
 #include "gdal/common.hpp"
 #include "miniverse/gdal/raster.hpp"
@@ -123,11 +124,24 @@ geo::Box extent_of(GDALDataset& dataset, const RasterSource& source) {
 }
 
 Scale scale_of(GDALDataset& dataset, const geo::Box& extent, std::int64_t pixels_per_degree) {
-  const auto ppd = static_cast<double>(pixels_per_degree);
+  std::array<double, GEOTRANSFORM_VALUES> position{};  // extent_of has read it already
+  std::ignore = dataset.GetGeoTransform(position.data());
+
+  const double column_x = position.at(1);
+  const double row_x = position.at(2);
+  const double column_y = position.at(4);
+  const double row_y = position.back();
+  const auto   width = static_cast<double>(dataset.GetRasterXSize());
+  const auto   height = static_cast<double>(dataset.GetRasterYSize());
+
+  // Degrees of the extent to one unit of the file's own system, each way, over the whole file.
+  const double degrees_x = (extent.max_corner().x() - extent.min_corner().x()) / ((width * std::abs(column_x)) + (height * std::abs(row_x)));
+  const double degrees_y = (extent.max_corner().y() - extent.min_corner().y()) / ((width * std::abs(column_y)) + (height * std::abs(row_y)));
+  const auto   ppd = static_cast<double>(pixels_per_degree);
 
   return {
-      .across = ((extent.max_corner().x() - extent.min_corner().x()) * ppd) / static_cast<double>(dataset.GetRasterXSize()),
-      .down = ((extent.max_corner().y() - extent.min_corner().y()) * ppd) / static_cast<double>(dataset.GetRasterYSize()),
+      .across = ppd * std::hypot(column_x * degrees_x, column_y * degrees_y),
+      .down = ppd * std::hypot(row_x * degrees_x, row_y * degrees_y),
   };
 }
 

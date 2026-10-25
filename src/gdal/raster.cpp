@@ -83,7 +83,7 @@ RasterRead read_raster(
            .end_row = std::min(row + step, tiles.end_row)},
           grid
       );
-      warp_into(window, *dataset, source, grid.pixels_per_degree, scale);
+      warp_into(window, *dataset, source, extent, grid.pixels_per_degree, scale);
 
       if ( has_no_data(window) ) {
         ++read.without_data;
@@ -146,7 +146,7 @@ void read_tiles_in(
 
       geo::Raster<pixel_t> window =
           window_of<pixel_t>({.first_column = reached.front(), .end_column = reached.back() + 1, .first_row = row, .end_row = row + 1}, grid);
-      warp_into(window, *dataset, source, grid.pixels_per_degree, scale);
+      warp_into(window, *dataset, source, extent, grid.pixels_per_degree, scale);
 
       for ( const std::int64_t column : reached ) {
         geo::Raster<pixel_t> tile = tile_of(window, column, reached.front(), grid);

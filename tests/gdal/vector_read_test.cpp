@@ -1,5 +1,6 @@
-// Vector files read with GDAL's OGR: features in WGS 84 with ids and tags, single geometries promoted to multi ones, and a
-// read by location. The files are GeoJSON written as text, and a GeoPackage GDAL makes from one (gdal/geojsons.hpp).
+// Vector files read with GDAL's OGR: features in WGS 84 with ids and tags, single geometries promoted to multi ones, curves
+// made lines, and a read by location. The files are GeoJSON and CSV written as text, and a GeoPackage GDAL makes from one
+// (gdal/geojsons.hpp).
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
@@ -9,9 +10,11 @@
 #include <boost/geometry/io/wkt/write.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -36,6 +39,8 @@ using test::AREAS;
 using test::AREAS_AND_A_POINT;
 using test::BUILDINGS;
 using test::BY_THE_PARALLEL;
+using test::CURVED_AREAS;
+using test::CURVED_LINES;
 using test::Files;
 using test::ids;
 using test::MERCATOR_PATH;
@@ -44,6 +49,7 @@ using test::ONE_PART;
 using test::polygon;
 using test::SHOPS;
 using test::to_geopackage;
+using test::WGS_84_PRJ;
 
 TEST_CASE("gdal: a polygon is promoted where multipolygons are asked for, and a feature without geometry is left out", "[gdal]") {
   const Files       files;
@@ -122,6 +128,40 @@ TEST_CASE("gdal: a line is promoted where multilinestrings are asked for", "[gda
   REQUIRE(paths.size() == 1);
   REQUIRE(paths.front().geometry.size() == 1);
   CHECK(paths.front().geometry.front().size() == 2);
+}
+
+TEST_CASE("gdal: curves become lines, every point of them on the curve", "[gdal]") {
+  const Files       files;
+  const std::string lines = files.write("lines.csv", CURVED_LINES);
+  const std::string areas = files.write("areas.csv", CURVED_AREAS);
+  std::ignore = files.write("lines.prj", WGS_84_PRJ);
+  std::ignore = files.write("areas.prj", WGS_84_PRJ);
+  const auto on_the_circle = [](const geo::Point& point) { return std::abs(std::hypot(point.x() - 1, point.y()) - 1) < 1e-9; };
+
+  const auto arcs = gdal::read_features<geo::LineString>({.path = lines, .layer = {}, .id_field = {}});
+  REQUIRE(arcs.size() == 2);
+  const geo::LineString& arc = arcs.at(0).geometry;
+  REQUIRE(arc.size() > 3);
+  CHECK(bg::to_wkt(arc.front()) == "POINT(0 0)");
+  CHECK(bg::to_wkt(arc.back()) == "POINT(2 0)");
+  CHECK(std::ranges::all_of(arc, on_the_circle));
+  CHECK(std::ranges::all_of(arc, [](const geo::Point& point) { return point.y() >= -1e-9; }));  // the arc over the top, not under
+
+  const geo::LineString& road = arcs.at(1).geometry;
+  REQUIRE(road.size() == arc.size() + 1);
+  CHECK(bg::to_wkt(road.front()) == "POINT(-1 0)");
+  CHECK(std::ranges::equal(road | std::views::drop(1), arc, [](const geo::Point& one, const geo::Point& other) {
+    return one.x() == other.x() && one.y() == other.y();
+  }));
+
+  const auto discs = gdal::read_features<geo::Polygon>({.path = areas, .layer = {}, .id_field = {}});
+  REQUIRE(discs.size() == 1);
+  const geo::Polygon& disc = discs.front().geometry;
+  REQUIRE(disc.outer().size() > 5);
+  CHECK(bg::to_wkt(disc.outer().front()) == bg::to_wkt(disc.outer().back()));
+  CHECK(std::ranges::all_of(disc.outer(), on_the_circle));
+  CHECK(disc.inners().empty());
+  CHECK(gdal::read_features<geo::MultiPolygon>({.path = areas, .layer = {}, .id_field = {}}).front().geometry.size() == 1);
 }
 
 TEST_CASE("gdal: an id field must be there and be a whole number", "[gdal]") {

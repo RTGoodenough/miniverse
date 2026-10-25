@@ -26,15 +26,18 @@
  * @endcode
  *
  * - **The grid** is the table's: its pixel size, its tiles, its nodata. The file is warped onto it from its own coordinate
- *   system and pixel size, each grid pixel made from the file's by `resampling`, with one scale for the whole file, so a pixel
- *   comes out the same whichever window it is read in. A file that names no coordinate system, crosses the antimeridian, or
- *   reaches more than a degree past the world (longitudes of 0 to 360) is refused; within that degree it is read to the edge.
+ *   system, pixel size and turn (a geotransform with rotation), each grid pixel made from the file's by `resampling`, with
+ *   one scale for the whole file, so a pixel comes out the same whichever window it is read in. A file that names no
+ *   coordinate system, crosses the antimeridian, or reaches more than a degree past the world (longitudes of 0 to 360) is
+ *   refused; within that degree it is read to the edge.
  * - **Windows** are whole tiles of the grid, `window_tiles` by `window_tiles` (the last of a row or column, what is left),
  *   over the file's extent, from the north west, row by row: each tile is written by one window. At the world's far edge,
  *   where the grid's tiles need not divide it, a window is cut short.
- * - **No data**: a grid pixel whose centre the file does not cover, or where it has its own nodata value (or, in a file of
- *   reals, "not a number"), is the grid's nodata. A window with no data at all is left out and counted. A pixel whose data is
- *   the grid's nodata value is lost: choose a nodata the data does not use.
+ * - **No data**: a grid pixel whose centre the file does not cover, or where it has its own nodata value, is the grid's
+ *   nodata. In a file of reals that names no nodata value, "not a number" is its nodata. One that names a number and holds
+ *   "not a number" as well makes the grid's nodata of every pixel made from a "not a number" on a grid of reals, but a value
+ *   of no meaning on a grid of whole numbers (0 for most types). A window with no data at all is left out and counted. A
+ *   pixel whose data is the grid's nodata value is lost: choose a nodata the data does not use.
  * - **Memory**: a window is held twice while it is made. A file near a pole spans every longitude in WGS 84, however small.
  *
  * A file can also be read in place of a table (`raster_file`, raster_file.hpp).

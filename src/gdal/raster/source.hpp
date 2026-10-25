@@ -14,9 +14,10 @@
 namespace miniverse::gdal::detail {
 
 /**
- * @brief How many of a grid's pixels there are to one of the file's, across and down, over the whole file: GDAL's `XSCALE` and
- * `YSCALE`, given to every warp of the file. Left to GDAL, the scale is worked out per window, and where the file's pixels are
- * not all of one size in degrees it differs a little from window to window, so a pixel depends on the window it is read in.
+ * @brief How many of a grid's pixels one step of the file's is, along its rows and down its columns (which run east and
+ * south unless the file is turned), over the whole file: GDAL's `XSCALE` and `YSCALE`, given to every warp of the file.
+ * Left to GDAL, the scale is worked out per window, and where the file's pixels are not all of one size in degrees it
+ * differs a little from window to window, so a pixel depends on the window it is read in.
  */
 struct Scale {
   double across = 1;
