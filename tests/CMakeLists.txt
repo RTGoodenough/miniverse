@@ -69,6 +69,22 @@ if(TARGET miniverse_gdal)
 endif()
 
 # ==============================================================================
+# The command-line tool, if it was built with both file components: its commands, called as the command line calls them,
+# and the program itself, run as a user runs it
+# ==============================================================================
+if(TARGET miniverse_tool_commands AND TARGET miniverse_gdal AND TARGET miniverse_osm)
+  add_executable(miniverse_tool_tests tool/commands_test.cpp tool/command_line_test.cpp)
+  target_include_directories(miniverse_tool_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(
+    miniverse_tool_tests PRIVATE MINIVERSE_EXAMPLE_DATA="${PROJECT_SOURCE_DIR}/examples/data" MINIVERSE_TOOL="$<TARGET_FILE:miniverse_tool>"
+  )
+  add_dependencies(miniverse_tool_tests miniverse_tool)
+  target_link_libraries(miniverse_tool_tests PRIVATE miniverse_tool_commands GDAL::GDAL Catch2::Catch2WithMain)
+  miniverse_checks(miniverse_tool_tests)
+  catch_discover_tests(miniverse_tool_tests PROPERTIES RESOURCE_LOCK miniverse_test_db)
+endif()
+
+# ==============================================================================
 # miniverse::osm, if it was built: its own executable too
 # ==============================================================================
 if(TARGET miniverse_osm)
@@ -128,7 +144,7 @@ miniverse_compile_fail(CREATE_TABLES_NEED_SETTINGS "call create_table<Kind>\\(se
 find_program(MINIVERSE_CLANG_FORMAT NAMES clang-format-18 clang-format DOC "clang-format, for the test `format`")
 if(MINIVERSE_CLANG_FORMAT)
   set(MINIVERSE_FORMATTED_FILES)
-  foreach(directory include src tests examples)
+  foreach(directory include src tests examples tools)
     file(GLOB_RECURSE MINIVERSE_FORMATTED_IN CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/${directory}/*.hpp ${PROJECT_SOURCE_DIR}/${directory}/*.cpp)
     list(APPEND MINIVERSE_FORMATTED_FILES ${MINIVERSE_FORMATTED_IN})
   endforeach()

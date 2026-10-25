@@ -409,7 +409,7 @@ TEST_CASE("integration: a way two datasets both carry is one row, of the dataset
   CHECK(everywhere.at(2).node_ids == std::vector<std::int64_t>{81, 82});
 
   // Removing the neighbour takes High Street with it.
-  world.remove<TestRoads>(neighbour).get();
+  CHECK(world.remove<TestRoads>(neighbour).get() == 2);
   CHECK(ids(world.load<TestRoads>(EVERYWHERE).get()) == std::vector<std::int64_t>{1});
 }
 

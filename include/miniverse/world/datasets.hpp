@@ -49,17 +49,16 @@ template <HasDatasets kind_t>
   };
 }
 
-/** @return A future that completes once every row of `dataset` is deleted from `table`, or holds the error. See `Miniverse::remove`. */
+/** @return A future for how many rows of `dataset` were deleted from `table`, or the error. See `Miniverse::remove`. */
 template <HasDatasets kind_t>
-[[nodiscard]] std::future<void> remove(
+[[nodiscard]] std::future<std::uint64_t> remove(
     schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table, const Dataset& dataset
 ) {
-  return schemacht::util::future_from<void>([&](const schemacht::util::Settler<void>& done) {
+  return schemacht::util::future_from<std::uint64_t>([&](const schemacht::util::Settler<std::uint64_t>& done) {
     guarded(done, [&] {
-      database.execute(
-          kind_t::remove_statement_type::bind(dataset.name).on(table),
-          [done](std::uint64_t /*removed*/, const std::exception_ptr& error) { done(error); }
-      );
+      database.execute(kind_t::remove_statement_type::bind(dataset.name).on(table), [done](std::uint64_t removed, const std::exception_ptr& error) {
+        done(removed, error);
+      });
     });
   });
 }

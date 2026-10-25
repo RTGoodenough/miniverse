@@ -203,10 +203,10 @@ TEST_CASE("integration: two datasets of one layer are pushed, replaced and remov
   world.push<Shops>(SURVEY, {feature<geo::Point>(1, "POINT(1.5 1.5)", "{}")}).get();  // the survey's far shop goes; the other dataset stays
   CHECK(wkts(world.load<Shops>(EVERYWHERE).get()) == std::vector<std::string>{"POINT(3 3)", "POINT(1.5 1.5)"});
 
-  world.remove<Shops>(OTHER).get();
+  CHECK(world.remove<Shops>(OTHER).get() == 1);
   CHECK(wkts(world.load<Shops>(EVERYWHERE).get()) == std::vector<std::string>{"POINT(1.5 1.5)"});
 
-  world.remove<Shops>(miniverse::Dataset{"never pushed"}).get();  // nothing to remove is not an error
+  CHECK(world.remove<Shops>(miniverse::Dataset{"never pushed"}).get() == 0);  // nothing to remove is not an error
   CHECK(wkts(world.load<Shops>(EVERYWHERE).get()) == std::vector<std::string>{"POINT(1.5 1.5)"});
 }
 

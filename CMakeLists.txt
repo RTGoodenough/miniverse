@@ -13,6 +13,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
 option(MINIVERSE_INSTALL "Generate the install rules: the library, its headers and a CMake package (find_package(miniverse))" ${PROJECT_IS_TOP_LEVEL})
 option(MINIVERSE_BUILD_TESTS "Build the tests" ${PROJECT_IS_TOP_LEVEL})
 option(MINIVERSE_BUILD_EXAMPLES "Build the examples" ${PROJECT_IS_TOP_LEVEL})
+option(MINIVERSE_BUILD_TOOLS "Build the command-line tool `miniverse`, which makes, fills and checks tables" ${PROJECT_IS_TOP_LEVEL})
 set(MINIVERSE_BUILD_GDAL "AUTO" CACHE STRING "Build miniverse::gdal, which reads files with GDAL: AUTO (if GDAL is found), ON or OFF")
 set_property(CACHE MINIVERSE_BUILD_GDAL PROPERTY STRINGS AUTO ON OFF)
 set(MINIVERSE_BUILD_OSM "AUTO" CACHE STRING "Build miniverse::osm, which reads OpenStreetMap files with libosmium: AUTO (if it is found), ON or OFF")
@@ -216,9 +217,13 @@ endif()
 message(STATUS "miniverse_docs target (MINIVERSE_BUILD_DOCS=${MINIVERSE_BUILD_DOCS}): ${DOXYGEN_FOUND}")
 
 # ==============================================================================
-# Examples and tests
+# Tools, examples and tests
 # ==============================================================================
-# The examples first: the tests run each one that was built.
+if(MINIVERSE_BUILD_TOOLS)
+  add_subdirectory(tools)
+endif()
+
+# The examples and the tool before the tests: the tests run each one that was built.
 if(MINIVERSE_BUILD_EXAMPLES)
   add_subdirectory(examples)
 endif()
@@ -269,4 +274,5 @@ if(MINIVERSE_INSTALL)
   )
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/miniverse-config.cmake ${CMAKE_CURRENT_BINARY_DIR}/miniverse-config-version.cmake
           DESTINATION ${MINIVERSE_INSTALL_CMAKEDIR})
+  install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DOCDIR})
 endif()

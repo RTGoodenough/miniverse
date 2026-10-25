@@ -77,7 +77,7 @@ transaction holds one of the pool's connections until it ends.
 
 Feature and road layers are pushed as datasets. A `Dataset` is a name for an export: the file a producer made of a
 region, under whatever name the pusher gives it. The first push of a name writes the dataset; every later push of the
-same name replaces it, all at once: what the new export lacks is gone, what it has is there. `remove` deletes a dataset.
+same name replaces it, all at once: what the new export lacks is gone, what it has is there. `remove` deletes a dataset and gives how many rows it deleted: 0 for a name no push wrote.
 A worker never sees dataset names: a load gives the layer as one whole, with ids the database gave the rows, not the
 export's ids. So refresh a region by pushing its export again under the name it was first pushed under, and keep a name
 to the same ground over time. Two pushes of one dataset at once take turns; pushes of different datasets run side by
@@ -374,6 +374,52 @@ miniverse::Miniverse world(miniverse::Layer<Shops>(std::make_shared<FixedPoints<
 
 Every member is `const` and may be called from several threads at once. `load` and `stream` run on a thread started for
 the load; `name`, `settings` and `problems` on the caller's thread.
+
+## The command-line tool
+
+`miniverse` does what an uploader does for the built-in kinds, without a program: it makes a table, imports files into
+it, removes a dataset, checks a table, and shows a raster table's grid. Each command acts on one table, named with its
+kind:
+
+```sh
+miniverse <command> [--db <connection string>] --kind <kind> <table> ...
+```
+
+- `--db` is a libpq connection string, of keywords or a URI. Without it, libpq's defaults and the `PG*` variables say
+  where.
+- The table is `table`, in the connection's search path, or `schema.table`.
+- `--kind` is `features:<geometry>` (`point`, `linestring`, `polygon`, `multilinestring` or `multipolygon`), `roads`,
+  or `raster:<pixel>` (`int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `float32` or `float64`).
+- It exits with 0 when the command is done, 1 when it failed, and 2 for arguments it can't take, before it connects; the
+  reason is on standard error. An option for another kind of table than the one named is one of those.
+
+The database and its extensions are made beforehand, as for the library (`createdb`, then `CREATE EXTENSION postgis`
+and `postgis_raster`).
+
+| Command | Does |
+|---|---|
+| `create <table>` | Makes the table, as `create_table`. A raster table takes its grid: `--pixels-per-degree N` or `--metres M` (made the nearest pixels per degree), `--tile-pixels N` and `--nodata V`. |
+| `import <table> <file>...` | Checks the table, as `verify`, then pushes the files into it a part at a time, each file all of it or none. |
+| `remove <table> <dataset>` | Removes a dataset from a table of features or roads. A name no import wrote is an error. |
+| `verify <table>` | Checks the table is as its kind says; the differences are the error. |
+| `settings <table>` | Shows the grid of a raster table. |
+
+What `import` reads depends on the kind:
+
+- **Features:** one vector file of any format GDAL opens, as `gdal::read_features`. It replaces the dataset `--dataset`,
+  which is the file's name unless given (a directory's, for a path ending in `/`): two files of one name in different
+  directories are one dataset unless each is named. `--layer` names the layer of a file with several. The table numbers
+  the features itself; a file's own ids are not kept.
+- **Roads:** one OpenStreetMap file, as `osm::read_ways`, replacing its dataset in the same way. `--keys` names the tags
+  a way must have one of, separated by commas or spaces: `highway` unless given.
+- `--chunk` is how many features or ways make a part (10000).
+- **Rasters:** any number of raster files, each warped onto the table's grid (as `gdal::read_raster`) and pushed in
+  turn: where two overlap, the later one's data is what the table has. A file that fails is not written, nor the files
+  after it; the files before it stay. `--band` (1) and `--resampling` (`nearest`, `bilinear`, `cubic` or `average`;
+  `bilinear`) say how it is read, and `--window-tiles` the side of a part in tiles (2). A raster table has no datasets.
+
+Vector and raster files need the tool built with `miniverse::gdal`, and OpenStreetMap files with `miniverse::osm`; a
+tool built without one says so.
 
 ## Errors and threads
 

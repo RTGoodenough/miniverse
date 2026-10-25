@@ -2,6 +2,7 @@
 
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <future>
 #include <memory>
@@ -249,17 +250,18 @@ class Miniverse {
   }
 
   /**
-   * @return A future that completes once every row of `dataset` is deleted from the layer `kind_t`'s table, or holds the
-   * error. A name no push wrote is not an error. A layer with a reader is only read: the future holds a `std::logic_error`.
+   * @return A future for how many rows of `dataset` were deleted from the layer `kind_t`'s table, or the error: 0 for a
+   * name no push wrote, which is not an error here, for the program to judge. A layer with a reader is only read: the
+   * future holds a `std::logic_error`.
    */
   template <LayerKind kind_t>
-  [[nodiscard]] std::future<void> remove(const Dataset& dataset) {
+  [[nodiscard]] std::future<std::uint64_t> remove(const Dataset& dataset) {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
     static_assert(HasDatasets<kind_t>, "this kind has no datasets to remove");
 
     if constexpr ( HasDatasets<kind_t> ) {
       if ( ! layer<kind_t>().is_table() ) {
-        return only_read<kind_t, void>();
+        return only_read<kind_t, std::uint64_t>();
       }
 
       return detail::remove<kind_t>(database(), layer<kind_t>().table(), dataset);

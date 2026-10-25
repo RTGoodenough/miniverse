@@ -26,6 +26,8 @@ It is built on schemacht, a sibling library, which describes tables as C++ types
 - **Importing files into tables:** `gdal::read_features`, `gdal::read_raster` (warped onto the table's grid) and
   `osm::read_ways`, each a chunk at a time.
 - **Checks:** `verify` compares every table with its kind before a program starts work.
+- **A command-line tool:** `miniverse` makes tables of the built-in kinds, imports files into them, removes datasets and
+  checks tables, with no program to write.
 - **GDAL datasets:** a loaded raster as a GDAL dataset in memory (`gdal::dataset_of`), for GDAL's own tools or to write
   as a GeoTIFF.
 
@@ -40,7 +42,8 @@ It is built on schemacht, a sibling library, which describes tables as C++ types
 - Optional, for `miniverse::osm`: libosmium and protozero headers, zlib, expat, bzip2, threads.
 
 Components are built when their dependencies are found (`MINIVERSE_BUILD_GDAL` and `MINIVERSE_BUILD_OSM`: `AUTO`,
-`ON` or `OFF`).
+`ON` or `OFF`). The command-line tool is built with `MINIVERSE_BUILD_TOOLS`, on when miniverse is built on its own; its
+parser, CLI11, is in the repository (`third_party/CLI11`).
 
 ## Building, testing and installing
 
@@ -103,6 +106,22 @@ World tables(conninfo, miniverse::Layer<Roads>("miniverse_example_local_roads"),
 World files(miniverse::osm::road_file<Roads>(streets), miniverse::gdal::raster_file<Elevation>(heights, grid));
 ```
 
+## The command-line tool
+
+`miniverse` makes, fills and checks tables of the built-in kinds, for data that is uploaded before workers run:
+
+```sh
+miniverse create --db "host=localhost dbname=gis" --kind features:multipolygon buildings
+miniverse import --db "host=localhost dbname=gis" --kind features:multipolygon buildings buildings.gpkg
+miniverse create --db "host=localhost dbname=gis" --kind raster:int16 elevation --metres 30 --tile-pixels 512 --nodata -32768
+miniverse import --db "host=localhost dbname=gis" --kind raster:int16 elevation heights/*.tif
+miniverse verify --db "host=localhost dbname=gis" --kind roads roads
+```
+
+The commands are `create`, `import`, `remove` (a dataset), `verify` and `settings` (a raster table's grid). The guide's
+[command-line tool](docs/guide.md#the-command-line-tool) section has every option. It is installed with the library,
+into `bin/`. A program with kinds of its own uses the library instead.
+
 ## Examples
 
 Each example is a program under [examples/](examples/), run with a connection string as its argument (`make_database`
@@ -121,6 +140,12 @@ shares, and leave it.
 | `import_osm` | an OpenStreetMap extract pushed into a road layer | database, osm |
 | `local_files` | one worker run on files and on tables | database, gdal, osm |
 | `make_database` | a new database filled from an extract and a directory of GeoTIFFs, and kept | database, gdal, osm |
+
+## License
+
+miniverse is under the MIT license ([LICENSE](LICENSE)). The command-line tool includes CLI11
+([third_party/CLI11](third_party/CLI11)), under its own BSD 3-Clause license; installing the tool installs that license
+beside miniverse's, in `share/doc/miniverse/`.
 
 ## Documentation
 

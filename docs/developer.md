@@ -35,10 +35,16 @@ tests/
   unit/                  no database
   integration/           need MINIVERSE_TEST_DB
   gdal/, osm/            the components' tests, including the file-versus-table comparisons
+  tool/                  the command-line tool: its commands against tables loaded with the library, and the program run
   support/               a hand-written test kind (Places), the scratch database and a fresh world on it (Fresh),
                          temporary files, WKT polygons, small rasters, ids and rows for checks
 examples/                nine programs; eight run as tests (make_database needs files outside the repository)
+tools/                   the command-line tool `miniverse`: kinds.hpp (the kinds it knows, by name), layer_of.hpp (a table's
+                         name as a layer), commands.hpp and a file per command (a library of their own, which the tests
+                         call), main.cpp (the command line, CLI11)
 cmake/                   the installed package's config, and checks.cmake: the warnings and lint of the project's own targets
+third_party/             code of others kept in the repository as its authors publish it, each with its license and a README
+                         of where it is from: CLI11 (the tool's command-line parser)
 ```
 
 Concepts live in `concepts/` directories beside the headers that use them. Each component is a static library of its own
@@ -229,8 +235,9 @@ a 16 GB machine; it has been built with `-j6`.
 
 ## Testing
 
-The suite is three test executables, `miniverse_tests` (compile, unit and integration tests), `miniverse_gdal_tests`
-and `miniverse_osm_tests`; the example programs, each run as a test of its own; the compile-fail cases, each a build of
+The suite is four test executables, `miniverse_tests` (compile, unit and integration tests), `miniverse_gdal_tests`,
+`miniverse_osm_tests` and `miniverse_tool_tests` (built when the tool and both components are); the example programs,
+each run as a test of its own; the compile-fail cases, each a build of
 `tests/compile_fail/cases.cpp` with one case defined that passes when the build fails with the expected message; and
 `format`, clang-format over the tree, when it is found.
 
