@@ -12,7 +12,6 @@ namespace test {
 
 constexpr std::int16_t NODATA = -32768;
 
-// Four pixels to a degree, in tiles of one degree.
 constexpr miniverse::geo::Grid<std::int16_t> GRID{.pixels_per_degree = 4, .tile_pixels = 4, .nodata = NODATA};
 
 /** @return `width` by `height` pixels of the grid from (`west`, `north`), each `column * 100 + row`. */

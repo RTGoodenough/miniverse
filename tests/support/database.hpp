@@ -25,7 +25,7 @@ namespace test {
 /**
  * @brief A world whose tables are made fresh and dropped afterwards: the world is made with `args` (what a `Miniverse`
  * constructor takes), its tables are dropped, and `fill` runs on it (to make the tables, and push what the test loads); when
- * this ends, the tables are dropped again. Returned from a factory as a prvalue: it is never moved.
+ * this ends, the tables are dropped again. Returned from a factory as a prvalue, so it need not be movable.
  */
 template <typename world_t>
   requires requires(world_t& world) { world.drop_tables(); }

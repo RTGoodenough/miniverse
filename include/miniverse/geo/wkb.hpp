@@ -15,8 +15,7 @@
  * geometry's SRID after its type.
  *
  * - **Written** as EWKB, little-endian, with SRID 4326: what a `geometry` column, or a `$n::geometry` argument in hex, accepts.
- * - **Read** from EWKB in either byte order, and only with SRID 4326. A geometry in another system, or with no SRID at all,
- *   is an error rather than coordinates silently read in the wrong system.
+ * - **Read** from EWKB in either byte order, and only with SRID 4326: a geometry in another system, or with no SRID, is an error.
  * - **Two-dimensional only.** A geometry with Z or M values is refused, in EWKB's flags and ISO WKB's type numbers alike.
  * - **A multi-geometry's members** are written without an SRID of their own, as PostGIS writes them: they have the whole's.
  *   One that names an SRID all the same is read only if it is 4326.

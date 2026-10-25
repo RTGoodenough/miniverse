@@ -44,7 +44,7 @@ struct Survey {
 
 /** @return What `world` holds in `area`. The worker's part: nothing here knows whether a layer is a table or a file. */
 [[nodiscard]] Survey survey(World& world, const geo::Polygon& area) {
-  world.verify().get();  // the tables are the kinds' own, and the raster file can be read (the road file was, when its layer was made)
+  world.verify().get();  // the tables are the kinds' own, and the raster file opens
 
   std::future<miniverse::Ways> roads_loading = world.load<Roads>(area);
   std::future<Heights>         heights_loading = world.load<Elevation>(area);

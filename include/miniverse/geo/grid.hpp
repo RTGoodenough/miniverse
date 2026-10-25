@@ -15,10 +15,16 @@
  */
 namespace miniverse::geo {
 
-/** @brief Where every grid starts, its north-west corner, and how many degrees the world spans from there: see `Grid`. */
-inline constexpr double       GRID_WEST = -180;
-inline constexpr double       GRID_NORTH = 90;
+/** @brief The longitude every grid starts at: its north-west corner's. */
+inline constexpr double GRID_WEST = -180;
+
+/** @brief The latitude every grid starts at: its north-west corner's. */
+inline constexpr double GRID_NORTH = 90;
+
+/** @brief How many degrees of longitude the world spans from `GRID_WEST`. */
 inline constexpr std::int64_t DEGREES_ACROSS = 360;
+
+/** @brief How many degrees of latitude the world spans from `GRID_NORTH`. */
 inline constexpr std::int64_t DEGREES_DOWN = 180;
 
 /** @brief The finest grid there is, in pixels per degree (0.1 arc seconds, about 3.1 m): `raster_columns` can't tell finer grids apart. */
@@ -38,13 +44,12 @@ inline constexpr double METRES_PER_DEGREE = 111'319.490793;
  * world.create_table<Elevation>({.pixels_per_degree = geo::pixels_per_degree_of_metres(30), .tile_pixels = 256, .nodata = -32768});
  * @endcode
  *
- * A pixel is that many metres from north to south everywhere, and from east to west at the equator: towards the poles it is
- * narrower on the ground, by the cosine of the latitude (21 m at 45 degrees, for 30), as on every grid of longitude and
- * latitude. A source that is in arc seconds keeps its own pixels only on its own grid: give 3600 pixels per degree for one
- * arc second, not 30 m.
- * @throws std::invalid_argument unless `metres_per_pixel` is a number above zero that comes to 1 to `MAX_PIXELS_PER_DEGREE`
- * pixels per degree: about 3.1 m at the finest, and a pixel to a degree, about 111 km, at the coarsest. Near that coarse
- * end the nearest grid is far from what was asked: 80 km is a pixel to a degree too.
+ * A pixel is that many metres from north to south everywhere, and from east to west at the equator; towards the poles it is
+ * narrower on the ground by the cosine of the latitude. A source in arc seconds keeps its own pixels only on its own grid:
+ * give 3600 pixels per degree for one arc second, not 30 m.
+  * @throws std::invalid_argument unless `metres_per_pixel` is above zero, at most `METRES_PER_DEGREE`, and comes to at most
+ * `MAX_PIXELS_PER_DEGREE` pixels per degree: about 3.1 m at the finest, a degree (about 111 km) at the coarsest. Near the
+ * coarse end the nearest grid is far from what was asked: 80 km is a pixel to a degree too.
  */
 [[nodiscard]] inline std::int32_t pixels_per_degree_of_metres(double metres_per_pixel) {
   const double pixels = std::round(METRES_PER_DEGREE / metres_per_pixel);
@@ -63,10 +68,8 @@ inline constexpr double METRES_PER_DEGREE = 111'319.490793;
  * the corner at longitude -180, latitude 90, in square tiles of `tile_pixels` pixels a side. Every source is warped onto it.
  *
  * Pixels per degree is a whole number, so where each tile and pixel lies is exact arithmetic on integers. 3600 is one arc
- * second, SRTM's finest. A resolution in metres is made into the nearest such grid by `pixels_per_degree_of_metres`.
- *
- * Tiles of 512 pixels suit loads of some kilometres to a hundred, at 30 m to a pixel: measured, a 100 km load is some 15%
- * faster than with tiles of 256, and a 10 km load as fast; with tiles of 1024 the small load is two to three times slower.
+ * second, SRTM's finest; a resolution in metres is made into the nearest such grid by `pixels_per_degree_of_metres`. Tiles
+ * of 512 pixels suit loads of some kilometres to a hundred; larger tiles slow small loads.
  */
 template <Pixel pixel_t>
 struct Grid {

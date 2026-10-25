@@ -32,7 +32,7 @@ std::vector<std::vector<typename FeatureLayer<geometry_t>::insert_row_type>> Fea
   for ( Feature<geometry_t>& each : features ) {
     const std::size_t more = boost::geometry::num_points(each.geometry);
     if ( batches.empty() || batches.back().size() == FEATURES_PER_STATEMENT || points + more > POINTS_PER_STATEMENT ) {
-      batches.emplace_back();  // never left empty: this feature goes in it, however many points it has
+      batches.emplace_back();  // the new batch takes this feature whatever its size, so it is never empty
       points = 0;
     }
 

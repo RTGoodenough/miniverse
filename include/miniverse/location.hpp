@@ -7,18 +7,16 @@
 
 /**
  * @file
- * What a location must be: what a reader's load holds a polygon to, which is what a table's load would refuse, so that a
- * worker tried on files does not fail on tables.
+ * What a location must be: the check a reader's load makes of its polygon, refusing before it reads what PostGIS would fail a
+ * table's load on.
  */
 namespace miniverse {
 
 /**
- * @brief Throws unless `location` is a polygon every table's load takes: each of its rings closed (its last point its first
- * again), and of four points or more. PostGIS can't test an unclosed ring against a line, an area or a raster's tile, and
- * fails the load when it comes to one (against points it has a test of its own, which does not mind); a miniverse refuses
- * such a location for every layer with a reader, before the reader is asked, so that a worker tried on files does not fail
- * on tables. A polygon of no points at all is taken: nothing is in it.
- * @throws std::invalid_argument for such a ring.
+ * @brief Throws unless every ring of `location` is closed (its last point its first again) and has four points or more: what
+ * PostGIS requires of a polygon tested against lines, areas and raster tiles (points it tests regardless). A reader's load
+ * checks this so that a worker tried on files behaves as on tables. A polygon of no points passes: nothing is in it.
+ * @throws std::invalid_argument for a ring that is not so.
  */
 inline void check_location(const geo::Polygon& location) {
   const auto check = [](const auto& ring) {

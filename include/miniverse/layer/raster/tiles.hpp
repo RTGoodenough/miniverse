@@ -20,9 +20,8 @@ namespace miniverse::raster {
 template <geo::Pixel pixel_t>
 struct Tile {
   /**
-   * Which tile of the grid: `tile_row * tiles_across + tile_column`, tiles counted east from longitude -180 (`tile_column`)
-   * and south from latitude 90 (`tile_row`), and `tiles_across` how many tiles span the world's 360 degrees
-   * (`geo::Grid::tiles_across`). A raster table's key (`raster::TileId`).
+   * @brief Which tile of the grid: `tile_row * tiles_across + tile_column`, tiles counted east from longitude -180 and south
+   * from latitude 90, `tiles_across` being `geo::Grid::tiles_across`. A raster table's key (`raster::TileId`).
    */
   std::int64_t         id = 0;
   geo::Raster<pixel_t> pixels;
@@ -40,11 +39,11 @@ template <geo::Pixel pixel_t>
 [[nodiscard]] std::vector<Tile<pixel_t>> cut(const geo::Raster<pixel_t>& raster, const geo::Grid<pixel_t>& grid);
 
 /**
- * @return The pixels of `tiles`, rasters of one grid, in the bounding box of `location`, widened to whole pixels of that
- * grid. Pixels no tile covers are the tiles' nodata. With no tiles at all, there is no grid to place pixels on: the result
- * is empty (0 by 0). What a load is, whether its tiles come from a table or from a reader of a file. It takes the tiles
- * it is given: which tiles a location has is `Reach`'s to say.
- * @throws std::invalid_argument if the tiles don't share a grid (pixel size, alignment) and a nodata value.
+  * @return The pixels of `tiles`, rasters of one grid, in the bounding box of `location` widened to whole pixels. Pixels no tile
+ * covers are nodata. With no tiles, or a location of no points, the result is empty (0 by 0). It takes the tiles it is given;
+ * which tiles a location has is `Reach`'s to say.
+ * @throws std::invalid_argument if the tiles don't share a pixel size, an alignment and a nodata value, or a coordinate of
+ * `location` is not a finite number.
  */
 template <geo::Pixel pixel_t>
 [[nodiscard]] geo::Raster<pixel_t> window(std::span<const geo::Raster<pixel_t>> tiles, const geo::Polygon& location);

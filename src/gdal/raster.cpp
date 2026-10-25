@@ -69,8 +69,7 @@ RasterRead read_raster(
   const Tiles    tiles = tiles_of(extent, tiling_of(grid));
   const Scale    scale = scale_of(*dataset, extent, grid.pixels_per_degree);
 
-  // At most what fits the loop's whole numbers, whatever was asked for: a whole file as one window asks for the most there
-  // is. A window is never wider than the world, so its pixels fit GDAL's int.
+  // Capped so that a window's pixels fit GDAL's int: a whole file as one window asks for the most there is.
   const auto step =
       static_cast<std::int64_t>(std::min<std::size_t>(window_tiles, static_cast<std::size_t>(std::numeric_limits<int>::max() / grid.tile_pixels)));
 
@@ -92,7 +91,7 @@ RasterRead read_raster(
       }
 
       on_window(std::move(window));
-      CPLErrorReset();  // GDAL's last error is this read's own from here on, not one `on_window` left
+      CPLErrorReset();  // drop any error `on_window`'s own GDAL calls left
       ++read.windows;
     }
   }
@@ -132,9 +131,8 @@ void read_tiles_in(
 
   const raster::Reach reach(location);
 
-  // Warped a run of tiles of one row at a time, then cut into its tiles: as many as a chunk holds, but no wider a run than
-  // some thousands of pixels, however large a chunk was asked for. Of a run, only from the first tile the location reaches
-  // into to the last, and of those only the ones it does reach into: the others are not read.
+  // A run of one row's tiles is warped at once, from the first tile the location reaches into to the last, then cut into tiles;
+  // the tiles between that it does not reach are dropped. A run holds as many tiles as a chunk, up to `RUN_PIXELS` wide.
   constexpr std::int64_t            RUN_PIXELS = 4096;
   const std::int64_t                widest = std::max<std::int64_t>(1, RUN_PIXELS / grid.tile_pixels);
   const auto                        run = static_cast<std::int64_t>(std::min<std::size_t>(chunk_tiles, static_cast<std::size_t>(widest)));
@@ -162,7 +160,7 @@ void read_tiles_in(
             return;
           }
 
-          CPLErrorReset();  // GDAL's last error is this read's own from here on, not one `on_chunk` left
+          CPLErrorReset();  // drop any error `on_chunk`'s own GDAL calls left
         }
       }
     }

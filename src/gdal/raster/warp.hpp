@@ -77,11 +77,11 @@ void warp_into(
       "-b",
       std::to_string(source.band),
       "-et",
-      "0",  // exact, not approximated a scanline at a time: else a pixel depends on the window it is read in
+      "0",  // the exact transformer; the approximate one is fitted per window, and a pixel then depends on the window
       "-ovr",
-      "NONE",  // the file's own pixels, not its overviews
+      "NONE",  // the file's own pixels; GDAL's default picks an overview to suit the window
       "-wo",
-      std::format("XSCALE={}", scale.across),  // the file's, not each window's own: for the same reason
+      std::format("XSCALE={}", scale.across),  // one scale for the whole file (`Scale`), for the same reason
       "-wo",
       std::format("YSCALE={}", scale.down),
   };
@@ -113,7 +113,7 @@ void warp_into(
     fail("the pixels of '" + source.path + "' can't be read");
   }
 
-  // A file of reals may hold "not a number" without naming it as its nodata: no data, all the same.
+  // A file of reals may hold "not a number" without naming it as its nodata.
   if constexpr ( std::floating_point<pixel_t> ) {
     std::ranges::replace_if(window.pixels, [](pixel_t pixel) { return std::isnan(pixel); }, window.nodata);
   }

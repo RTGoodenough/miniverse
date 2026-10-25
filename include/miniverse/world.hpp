@@ -32,8 +32,8 @@
 
 /**
  * @file
- * A miniverse: the layers of the world a worker reads, each a kind of data in its own PostGIS table, loaded by polygon.
- * This header holds the `Miniverse` alone; miniverse.hpp adds the built-in kinds (`FeatureLayer`, `RoadLayer`, `RasterLayer`).
+ * A miniverse: the layers of the world a worker reads, each a kind of data in a PostGIS table or behind a reader, loaded by
+ * polygon. This header holds `Miniverse` alone; miniverse.hpp adds the built-in kinds.
  *
  * @code
  * struct Roads : miniverse::RoadLayer {};  // layer/road_layer.hpp
@@ -45,22 +45,14 @@
  * for ( const miniverse::Way& way : roads.get() ) { ... }
  * @endcode
  *
- * The kinds of layer are the template's arguments: asking for one the miniverse does not hold does not compile. Each layer
- * names its table when the miniverse is made, so one program serves whichever tables configuration names. The miniverse
- * owns one pool of connections (a schemacht `postgres::Database`) that every layer shares, and every call returns a
- * `std::future`, so a worker can start loading several layers at once and wait for them together. A `load` gives the whole
- * result; a `stream` hands it to a callback a chunk at a time, for a worker that builds a structure of its own from it. A
- * `verify` when the program starts checks that the tables are the layers' kinds'.
- * Errors, including one from a kind's own conversions, arrive through the future, never as a throw from the call itself. The
- * miniverse must outlive the futures it hands out: wait on them before it is destroyed.
+ * The kinds of layer are the template's arguments, so asking for a layer the miniverse does not hold does not compile. Each layer names its table
+ * when the miniverse is made. One pool of connections (a schemacht `postgres::Database`) serves every layer. The calls that read and write data
+ * return a `std::future`, and their errors arrive through it, not from the call; the constructor, `create_table` and `drop_tables` wait and throw.
+ * The miniverse must outlive the futures it hands out. A layer made from a `Reader` (reader.hpp) is read from a file, or from data of the program's
+ * own, by the same calls; a miniverse of readers alone is made without a connection string.
  *
- * A layer need not be a table: one made from a `Reader` (reader.hpp) is read from a file, or from data of the program's own,
- * by the same `load` and `stream`. A miniverse whose layers all have readers needs no database, and is made without a
- * connection string: for a test, or a user with files alone.
- *
- * The `Miniverse` is a front: it holds the layers and the pool, and for each call tells a layer that is a table from one with
- * a reader. What a call then does is in world/, one idea each: load.hpp, push.hpp (with push_in_parts.hpp and
- * datasets.hpp), verify.hpp, tables.hpp, settings.hpp, and async.hpp for how a call becomes a future.
+ * `Miniverse` is a front: it holds the layers and the pool, and tells a table from a reader. What a call does is in world/,
+ * one idea per header.
  */
 namespace miniverse {
 
@@ -72,7 +64,8 @@ class Miniverse {
    * @brief Opens the pool of connections to the database at `conninfo` (a libpq connection string or URL), for `layers`.
    * @throws std::invalid_argument if two layers name the same table, before anything is opened. Names are compared as written:
    * `gis.roads` and `roads` count as different even when the search path makes them the same table.
-   * @throws std::runtime_error if a connection can't be made.
+   * @throws std::invalid_argument if `options` asks for no connections, no workers or an empty chunk (schemacht's `Database`).
+   * @throws std::runtime_error if a connection can't be made, or the session settings can't be applied.
    */
   Miniverse(const std::string& conninfo, const schemacht::postgres::Database::Options& options, Layer<kind_ts>... layers)
       : _layers(distinct_tables(std::move(layers)...)), _database(std::in_place, conninfo, options) {}
@@ -101,8 +94,7 @@ class Miniverse {
    * @return A future for what the layer `kind_t` holds in `location`, a polygon in WGS 84 longitude and latitude (what that
    * is, the kind says: for a `RoadLayer`, the ways that intersect it). It holds the error instead if the load failed.
    *
-   * A layer with a reader is read on a thread started for the load, so several loads run at once as those of tables do; the
-   * future of such a load waits for it when it is dropped.
+   * A layer with a reader is read on a thread started for the load; the future waits for that thread if it is dropped.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<typename kind_t::result_type> load(const geo::Polygon& location) {
@@ -117,21 +109,16 @@ class Miniverse {
 
   /**
    * @return A future that completes once what the layer `kind_t` holds in `location` has been handed to `on_chunk`, a chunk at a
-   * time, or `on_chunk` stopped it; or holds the error. Nothing holds the whole result, so a worker can build its own structure
-   * from a large area as the rows arrive.
+   * time, or `on_chunk` stopped it; or holds the error. Nothing holds the whole result.
    *
-   * A chunk is what a load would give, of `read.chunk_rows` rows (the last of what is left), as `ChunkOf` says:
-   * - for a feature or road layer, that many features, in the load's order (by id);
-   * - for a raster layer, that many tiles, in no particular order, each whole: the tiles `location` reaches into, not cut
-   *   to it. A tile is megabytes, and about `chunk_rows` times `max_buffered_chunks` + 2 of them are held at once, so ask for a
-   *   few at a time.
+   * A chunk is `read.chunk_rows` rows of what a load would give (the last chunk holds what is left), as `ChunkOf` says: for a
+   * feature or road layer that many features, in the load's order; for a raster layer that many whole tiles, in no particular
+   * order. A tile is megabytes, so ask for a few at a time.
    *
-   * `on_chunk` is called with one chunk at a time, never from two threads at once, on a thread of the pool's, not the
-   * caller's. It returns `void`, or a `bool` where `false` stops the load, which is then cancelled. What it throws is the load's
-   * error; chunks it was handed before an error stay handed. It must not wait on another of this miniverse's futures.
-   *
-   * A layer with a reader hands over chunks of `read.chunk_rows` too, on a thread started for the load, in the order its
-   * reader says (a file's own, for the readers of files); the future of such a load waits for it when it is dropped.
+   * `on_chunk` runs on a thread of the pool's, one call at a time. It returns `void`, or a `bool` where `false` stops the load.
+   * What it throws is the load's error; chunks handed over before an error stay handed over. It must not wait on another of
+   * this miniverse's futures. For a layer with a reader, the chunks come in the reader's order (a file's own), on a thread
+   * started for the load, which the future waits for if it is dropped.
    */
   template <LayerKind kind_t, ChunkCallback<kind_t> callback_t>
   [[nodiscard]] std::future<void> stream(const geo::Polygon& location, callback_t on_chunk, const schemacht::postgres::ReadOptions& read) {
@@ -145,9 +132,8 @@ class Miniverse {
   }
 
   /**
-   * @brief As above, with chunks of the size the miniverse's pool reads by default (`Database::Options::read`): 1000 rows,
-   * also in a miniverse with no database, unless the pool was made with another. That suits features, and is far too many
-   * for a raster's tiles.
+   * @brief As above, with the pool's default chunk size (`Database::Options::read`, 1000 rows unless set otherwise): right for
+   * features, far too many for a raster's tiles.
    */
   template <LayerKind kind_t, ChunkCallback<kind_t> callback_t>
   [[nodiscard]] std::future<void> stream(const geo::Polygon& location, callback_t on_chunk) {
@@ -155,9 +141,9 @@ class Miniverse {
   }
 
   /**
-   * @return A future for the settings the layer `kind_t`'s table was made with (an elevation's grid), read from the database:
-   * for a writer to warp its source onto before pushing. It holds the error instead if the table does not exist, or has no
-   * settings (it was not made by `create_table`). For a layer with a reader, they are the reader's.
+   * @return A future for the settings the layer `kind_t`'s table was made with (a raster's grid), for a writer to warp its
+   * source onto. It holds the error instead if the table does not exist or has no settings (it was not made by
+   * `create_table`). For a layer with a reader, they are the reader's.
    */
   template <HasSettings kind_t>
   [[nodiscard]] std::future<typename kind_t::settings_type> table_settings() {
@@ -172,21 +158,20 @@ class Miniverse {
 
   /**
    * @return A future that completes once `data` is written to the layer `kind_t`'s table, or holds the error (nothing is then
-   * written). `data` is taken by value and moved into the rows: pass it with `std::move` unless it is still needed.
+   * written). `data` is moved into the rows: pass it with `std::move` unless it is still needed.
    *
-   * The push runs on a thread started for it, so the call returns at once; the future waits for that thread if it is dropped
-   * before it is done. There the rows are made by the kind (for a kind with settings, with the table's, read first: a raster
-   * is cut into the tiles of the table's grid), and written in the kind's batches, one statement each, all in one
-   * transaction: so a push holds all of `data`'s rows but one statement's text at a time, and writes all of `data` or none.
-   * The transaction is begun before the rows are made, so data the kind refuses costs a transaction that is rolled back. It
-   * holds one of the pool's connections until it ends (with one connection, nothing else runs during a push). For data too
-   * large to hold at once, `begin_push` takes it in parts.
+   * The push runs on a thread started for it; the future waits for that thread if it is dropped. There the kind makes the rows
+   * (with the table's settings, read first, for a kind that has them) and writes them in its batches, one statement each, in
+   * one transaction: the push holds every row of `data`, and one statement's text at a time, and writes all of `data` or none. The transaction is
+   * begun
+   * before the rows are made, and holds one of the pool's connections until it ends. For data too large to hold at once,
+   * `begin_push` takes it in parts.
    *
-   * The kind's `write_statement` says what happens to a row already there: a `RasterLayer`'s tile is merged with it (new
-   * pixels win, and where the new tile has no data the old pixel stays). Pushes that overlap are merged in the order they
-   * commit: where both have data, the last to commit wins. A kind with datasets is pushed with one: `push(dataset, data)`.
+   * The kind's `write_statement` says what happens to a row already there: a `RasterLayer`'s tile is merged onto it (new pixels
+   * win, nodata keeps the old pixel), and overlapping pushes merge in the order they commit, the later winning where both have
+   * data. A kind with datasets is pushed with one: `push(dataset, data)`.
    *
-   * A layer with a reader is only read: a push to it fails with a `std::logic_error`.
+   * A layer with a reader is only read: the future holds a `std::logic_error`.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<void> push(kind_t::result_type data) {
@@ -201,11 +186,10 @@ class Miniverse {
   }
 
   /**
-   * @return A future for a push of the layer `kind_t` that takes its data in parts, all of them written or none (see
-   * `PushInParts`): for data too large to hold at once. On a thread started for the call, for a kind with settings the
-   * table's are read first, once, and every part's rows are made with them; then the transaction is begun. It holds the error
-   * instead if they can't be read, or no transaction begun, or the layer has a reader (a `std::logic_error`: it is only read).
-   * Commit or drop the push before the miniverse ends: its transaction is the pool's.
+   * @return A future for a push of the layer `kind_t` that takes its data in parts, all written or none (`PushInParts`). On a
+   * thread started for the call, the table's settings are read if the kind has any, and the transaction is begun. It holds
+   * the error instead if either fails, or the layer has a reader (`std::logic_error`). Commit or drop the push before the
+   * miniverse ends.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<PushInParts<kind_t>> begin_push() {
@@ -221,18 +205,13 @@ class Miniverse {
 
   /**
    * @return A future that completes once `data` has replaced `dataset` in the layer `kind_t`'s table, or holds the error
-   * (nothing is then changed). For a kind with datasets (`HasDatasets`: a `FeatureLayer`, a `RoadLayer`): on a thread started
-   * for the push, the rows are made by the kind, written in its batches, and the dataset's rows that this push did not write
-   * are deleted, all in one transaction. So the first push of a name writes the dataset, and every later push of it replaces it: what
-   * the new data lacks is gone, what it has is there, and a row the kind can tell is the same as one already there (a
-   * `RoadLayer`'s way, by its nodes) keeps its id. A dataset is an export of a region, named by the pusher: see `Dataset`.
-   * Two pushes of one dataset at once take turns (a lock on the name, held for the transaction); pushes of different datasets
-   * run side by side.
+   * (nothing is then changed). On a thread started for the push, in one transaction: the dataset is locked, the rows are
+   * written, and the dataset's rows this push did not write are deleted. The first push of a name writes the dataset; every
+   * later push replaces it, and a row the kind can tell is the same (a `RoadLayer`'s way, by its nodes) keeps its id. Two
+   * pushes of one dataset take turns; pushes of different datasets run side by side. What a dataset is, and what it asks of
+   * the data, is in `Dataset` and the kind's own doc.
    *
-   * The ids a load gives are the database's own, never the data's. A push of a `RoadLayer` dataset may also take over a
-   * row of another dataset: a way of the same nodes, such as a way both of two neighbouring exports carry whole.
-   *
-   * A layer with a reader is only read: a push to it fails with a `std::logic_error`.
+   * A layer with a reader is only read: the future holds a `std::logic_error`.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<void> push(const Dataset& dataset, kind_t::result_type data) {
@@ -249,11 +228,10 @@ class Miniverse {
   }
 
   /**
-   * @return A future for a push of `dataset` into the layer `kind_t` that takes its data in parts (see `PushInParts`): for an
-   * export too large to hold at once. The dataset is replaced when the push commits, as `push(dataset, data)` replaces it;
-   * until then nothing of it has changed, and a commit with no parts leaves it empty, as a push of no data does. On a thread
+   * @return A future for a push of `dataset` into the layer `kind_t` that takes its data in parts (`PushInParts`). The dataset is
+   * replaced when the push commits, as `push(dataset, data)` replaces it; a commit with no parts leaves it empty. On a thread
    * started for the call, the transaction is begun and the dataset locked. It holds the error instead if either fails, or
-   * the layer has a reader (a `std::logic_error`: it is only read). Commit or drop the push before the miniverse ends.
+   * the layer has a reader (`std::logic_error`). Commit or drop the push before the miniverse ends.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<PushInParts<kind_t>> begin_push(const Dataset& dataset) {
@@ -271,8 +249,7 @@ class Miniverse {
 
   /**
    * @return A future that completes once every row of `dataset` is deleted from the layer `kind_t`'s table, or holds the
-   * error. A name that no push wrote is nothing to delete, not an error. A layer with a reader is only read: it fails with
-   * a `std::logic_error`.
+   * error. A name no push wrote is not an error. A layer with a reader is only read: the future holds a `std::logic_error`.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<void> remove(const Dataset& dataset) {
@@ -289,20 +266,14 @@ class Miniverse {
   }
 
   /**
-   * @return A future that completes if every layer's table is in the database and is as its kind says, by what schemacht's
-   * `table_differences_statement` compares: its columns, their types, which may be NULL, and its primary key, and that it has
-   * no other column an insert would have to fill. For a kind with settings, a table that is so must also have settings to
-   * read (a raster's grid). For a program to call when it starts: a table that is missing, or is another kind's, then fails
-   * here, and not at the first load or push.
+   * @return A future that completes if every layer's table is in the database and matches its kind's schema, as schemacht's
+   * `table_differences_statement` compares them (columns, types, nullability, primary key, and no other column an insert
+   * would have to fill); for a kind with settings the table must also hold settings to read. It holds a `TablesDiffer` naming
+   * every difference of every layer instead, or the error of a check that could not run (a PostgreSQL older than 17: a
+   * `QueryError`). Every layer is checked at once. For a program to call when it starts.
    *
-   * It holds a `TablesDiffer` instead if any table is not so, which names every difference of every layer; or the error of a
-   * check that could not be run (on a PostgreSQL older than 17, a `QueryError`). Every layer is checked, at the same time.
-   *
-   * Not checked: a table's indexes (the spatial index a load is fast by), its other constraints, the function a raster push
-   * merges with (`raster::MergeRaster`), and what the connection's role may do.
-   *
-   * A layer with a reader is checked by its reader (`Reader::problems`: a file that is missing, or does not hold what the
-   * kind needs), on the calling thread; what it finds is in the `TablesDiffer` too, said of the reader's name.
+   * Not checked: indexes, other constraints, the raster merge function (`raster::MergeRaster`), and the role's privileges. A
+   * layer with a reader is checked by `Reader::problems`, on the calling thread; what it finds is in the `TablesDiffer` too.
    */
   [[nodiscard]] std::future<void> verify() {
     return schemacht::util::future_from<void>([&](const schemacht::util::Settler<void>& done) {
@@ -315,25 +286,21 @@ class Miniverse {
   }
 
   /**
-   * @brief Makes the layer `kind_t`'s table and runs its kind's setup (a spatial index, say), and waits for them: for tests and
-   * a first start. For a kind with settings (an elevation's grid), the table is made with `settings`, and keeps them: every
-   * push reads them back, and `table_settings` gives them to a writer. PostGIS must already be enabled in the database
-   * (`CREATE EXTENSION postgis`, and `postgis_raster` for a raster).
-   *
-   * The table and its setup are one transaction: if any of it fails, nothing is left behind, and the error is that statement's own.
-   * For a layer with a reader there is no table to make: nothing is done, here and in `drop_tables`, so that one setup serves
-   * a miniverse of tables and one of files. Its `settings` are then neither checked nor kept: the reader has its own.
-   * @throws schemacht::postgres::QueryError if the table exists already, or can't be made, or its setup fails.
-   * @throws std::invalid_argument if the kind refuses `settings`, before anything is sent.
+   * @brief Makes the layer `kind_t`'s table and runs its kind's setup, in one transaction, and waits. For a kind with settings
+   * (a raster's grid) the table is made with `settings` and keeps them: pushes read them back, and `table_settings` gives
+   * them to a writer. PostGIS must be enabled in the database (`CREATE EXTENSION postgis`, and `postgis_raster` for a
+   * raster). For a layer with a reader nothing is done, here and in `drop_tables`, so one setup serves a miniverse of tables
+   * and one of files.
+   * @throws schemacht::postgres::QueryError if the table exists already, or a statement fails: nothing is then left behind.
+   * @throws std::invalid_argument if the kind refuses `settings`, before anything is sent; for a layer with a reader they are
+   * not looked at.
    */
   template <HasSettings kind_t>
   void create_table(const typename kind_t::settings_type& settings) {
     static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
 
     if ( layer<kind_t>().is_table() ) {
-      detail::make_table<kind_t>(
-          database(), layer<kind_t>().table(), kind_t::setup_sql(table_name<kind_t>(), settings)
-      );  // checks the settings first
+      detail::make_table<kind_t>(database(), layer<kind_t>().table(), kind_t::setup_sql(table_name<kind_t>(), settings));
     }
   }
 
@@ -353,7 +320,10 @@ class Miniverse {
   /** @brief Makes every layer's table, as `create_table`: for a miniverse of kinds without settings. */
   void create_tables() { (create_table<kind_ts>(), ...); }
 
-  /** @brief Drops every layer's table, those that exist, and waits for it. */
+  /**
+   * @brief Drops every layer's table, those that exist, and waits for it.
+   * @throws schemacht::postgres::QueryError if a drop fails.
+   */
   void drop_tables() { (drop_table<kind_ts>(), ...); }
 
   /**
@@ -369,7 +339,7 @@ class Miniverse {
   }
 
  private:
-  std::tuple<Layer<kind_ts>...>                _layers;    // before the pool: checked before any connection is opened
+  std::tuple<Layer<kind_ts>...>                _layers;    // initialised before the pool, so `distinct_tables` throws before a connection is opened
   std::optional<schemacht::postgres::Database> _database;  // none, in a miniverse of readers alone
 
   template <LayerKind kind_t>
@@ -414,7 +384,7 @@ class Miniverse {
     try {
       throw std::logic_error("the layer read from " + layer<kind_t>().name() + " is only read: a push or a remove needs a layer that is a table");
     } catch ( ... ) {
-      failed.set_exception(std::current_exception());  // or why the message could not be made: still through the future
+      failed.set_exception(std::current_exception());  // also if the message itself could not be made
     }
 
     return failed.get_future();

@@ -54,7 +54,9 @@ std::unique_ptr<OGRGeometry> as_type(std::unique_ptr<OGRGeometry> geometry, OGRw
   }
 
   if ( (type == wkbPolygon && wanted == wkbMultiPolygon) || (type == wkbLineString && wanted == wkbMultiLineString) ) {
-    return std::unique_ptr<OGRGeometry>(OGRGeometryFactory::forceTo(geometry.release(), wanted));  // only ever wraps it, here
+    return std::unique_ptr<OGRGeometry>(
+        OGRGeometryFactory::forceTo(geometry.release(), wanted)
+    );  // single to multi: forceTo wraps it in a collection of one
   }
 
   if ( (type == wkbMultiPolygon && wanted == wkbPolygon) || (type == wkbMultiLineString && wanted == wkbLineString) ||

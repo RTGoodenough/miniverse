@@ -347,7 +347,7 @@ TEST_CASE("integration: a push of a dataset again replaces it, and a way of the 
   REQUIRE(everywhere.size() == 4);
   CHECK(std::vector<std::int64_t>(all.begin(), all.begin() + 3) == std::vector<std::int64_t>{1, 2, 3});  // kept: the same nodes
   CHECK(everywhere.at(2).tags.text() == R"({"highway": "footway"})");
-  CHECK(everywhere.at(3).id > 4);  // new, numbered on (the database counts every row a push tries, matched or not: no gaps are promised)
+  CHECK(everywhere.at(3).id > 4);  // new, numbered on: ids have gaps, since the database counts every row a push tries
   CHECK(everywhere.at(3).node_ids == std::vector<std::int64_t>{51, 52});
 }
 

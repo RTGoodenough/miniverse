@@ -16,19 +16,13 @@
 
 /**
  * @file
- * Pushes to a layer's table, each on a thread started for it: all of a push's data in one transaction of its own, or the
- * beginning of one that takes its data in parts. For a kind with settings, the table's are read first and the rows are made
- * with them; for a kind with datasets, the dataset is locked, the rows are stamped, and the dataset's rows the push did not
- * write are swept away before the commit (datasets.hpp), so that the push replaces the dataset. What `Miniverse::push` and
- * `begin_push` do for a layer that is a table. Each keeps `database` and `table` for its thread: both must outlive the
- * future, as the miniverse's do.
+ * Pushes to a layer's table, each on a thread started for it: a whole push in a transaction of its own, or the beginning of
+ * one that takes its data in parts (push_in_parts.hpp). What `Miniverse::push` and `begin_push` do for a layer that is a
+ * table. `database` and `table` are used from the thread: both must outlive the future, as the miniverse's do.
  */
 namespace miniverse::detail {
 
-/**
- * @return A push of `table` begun on `database`, waited for: its transaction, and its rows made as the kind makes them, with
- * the table's settings, read first, for a kind with them.
- */
+/** @return A push of `table` begun on `database`, waited for: the table's settings read first, for a kind with them. */
 template <LayerKind kind_t>
 [[nodiscard]] std::shared_ptr<Push<kind_t>> begun(
     schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table
@@ -46,8 +40,8 @@ template <LayerKind kind_t>
 }
 
 /**
- * @return A push of `dataset` into `table` begun on `database`, waited for: its transaction, with the dataset locked in it, its
- * rows made of the dataset and a stamp of their own, and the dataset's sweep to run before it commits.
+ * @return A push of `dataset` into `table` begun on `database`, waited for: the dataset locked, a stamp drawn, the sweep set to run before the
+ * commit.
  */
 template <HasDatasets kind_t>
 [[nodiscard]] std::shared_ptr<Push<kind_t>> begun(
@@ -66,7 +60,10 @@ template <HasDatasets kind_t>
   return running;
 }
 
-/** @return A future that completes once `data` is written to `table`, in a transaction of its own on a thread started for it, or holds the error. See `Miniverse::push`. */
+/**
+ * @return A future that completes once `data` is written to `table`, in a transaction of its own on a thread started for it, or holds the error. See
+ * `Miniverse::push`.
+ */
 template <LayerKind kind_t>
 [[nodiscard]] std::future<void> push(
     schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table, typename kind_t::result_type data
@@ -78,7 +75,10 @@ template <LayerKind kind_t>
   });
 }
 
-/** @return A future that completes once `data` replaces `dataset` in `table`, in a transaction of its own on a thread started for it, or holds the error. See `Miniverse::push`. */
+/**
+ * @return A future that completes once `data` replaces `dataset` in `table`, in a transaction of its own on a thread started for it, or holds the
+ * error. See `Miniverse::push`.
+ */
 template <HasDatasets kind_t>
 [[nodiscard]] std::future<void> push(
     schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table, const Dataset& dataset,
@@ -99,7 +99,9 @@ template <LayerKind kind_t>
   return on_a_thread([&database, &table] { return PushInParts<kind_t>(begun<kind_t>(database, table)); });
 }
 
-/** @return A future for a push of `dataset` into `table` that takes its data in parts, begun on a thread started for it. See `Miniverse::begin_push`. */
+/**
+ * @return A future for a push of `dataset` into `table` that takes its data in parts, begun on a thread started for it. See `Miniverse::begin_push`.
+ */
 template <HasDatasets kind_t>
 [[nodiscard]] std::future<PushInParts<kind_t>> begin_push(
     schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table, const Dataset& dataset

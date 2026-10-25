@@ -44,7 +44,7 @@ struct Push {
     step([&] {
       RowBatches<kind_t> batches = to_rows(std::move(data));
       for ( RowsOf<kind_t>& batch : batches ) {
-        const RowsOf<kind_t> rows = std::move(batch);  // the statement copies it as text, so it ends with this turn
+        const RowsOf<kind_t> rows = std::move(batch);
 
         std::ignore = transaction.execute(kind_t::write_statement(rows).on(*table)).get();
       }
@@ -108,23 +108,20 @@ struct Push {
  * buildings.commit().get();  // now it is all there, for everyone at once
  * @endcode
  *
- * It is one transaction. The parts added are seen by no one else until `commit`, and one dropped without a commit writes
- * nothing. It holds one of the pool's connections from `begin_push` until it ends. A part that fails, for whatever reason,
- * ends the push: it is rolled back, so nothing of it is written, and every later `add`, and the `commit`, fails with that
- * part's error.
+ * It is one transaction: the parts are seen by no one else until `commit`, and one dropped without a commit writes nothing.
+ * It holds one of the pool's connections from `begin_push` until it ends. A part that fails ends the push: it is rolled
+ * back, and every later `add`, and the `commit`, fails with that part's error.
  *
- * Each `add` and the `commit` run on a thread started for the call, where the part's rows are made (for a kind with settings,
- * with the table's, read when the push began) and written in the kind's batches, one statement each; the future waits for
- * that thread if it is dropped before it is done. One call at a time: wait for an `add`'s future before the next `add` or the
- * `commit`. Wait for every `add`, and commit or drop the push, before the miniverse ends: its transaction is the pool's. One
- * that was moved from fails every call. For a kind with datasets, the push is of one dataset, which it replaces when it
- * commits: the dataset's rows that no part wrote are deleted then, so a commit with no parts leaves the dataset empty, as a
- * push of no data does (see `Miniverse::begin_push`).
+ * Each `add` and the `commit` run on a thread started for the call, which makes the part's rows and writes them in the kind's
+ * batches; the future waits for that thread if it is dropped. One call at a time: wait for an `add` before the next `add` or
+ * the `commit`. Wait for every `add`, and commit or drop the push, before the miniverse ends. One that was moved from fails
+ * every call. For a kind with datasets the push replaces its dataset when it commits, so a commit with no parts leaves the
+ * dataset empty.
  */
 template <LayerKind kind_t>
 class PushInParts {
  public:
-  /** @brief The push that is `push`, begun by `Miniverse::begin_push`: a program has no call to make one. */
+  /** @brief The handle of `push`, a push that has begun. */
   explicit PushInParts(std::shared_ptr<detail::Push<kind_t>> push) : _push(std::move(push)) {}
 
   /** @return A future that completes once `data`, a part, is written into the push, or holds the error, which ends the push. */
@@ -140,10 +137,7 @@ class PushInParts {
  private:
   std::shared_ptr<detail::Push<kind_t>> _push;  // null once moved from
 
-  /**
-   * @return A future for `step`, run on a thread started for it. If no thread can be started, the step is lost, so the push
-   * ends with that error (a part can't be left out of the whole), and the future holds it.
-   */
+  /** @return A future for `step`, run on a thread started for it. If no thread can be started the step is lost, so the push ends with that error. */
   template <std::invocable step_t>
   [[nodiscard]] std::future<void> started(step_t step) {
     try {
@@ -175,7 +169,7 @@ class PushInParts {
   PushInParts(PushInParts&&) noexcept = default;
   PushInParts& operator=(const PushInParts&) = delete;
   PushInParts& operator=(PushInParts&&) noexcept = default;
-  ~PushInParts() = default;  // not committed: rolled back
+  ~PushInParts() = default;
 };
 
 }  // namespace miniverse

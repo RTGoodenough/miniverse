@@ -274,9 +274,28 @@ Conventions the code follows:
 - A class with a constructor declares all five special members (copy, move, destructor), defaulted or deleted, at the
   end of the class.
 - A discarded result is `std::ignore = expr;`, never a cast to void.
-- Steps of a function are separated by blank lines; comments say why, in prose; public declarations carry Doxygen
-  comments (`@brief`, `@return`, `@throws`, with `@code` examples where a call is not obvious).
+- Steps of a function are separated by blank lines. Public declarations carry Doxygen comments (`@brief`, `@return`,
+  `@throws`, with `@code` examples where a call is not obvious); what goes in a comment is under Comments below.
 - No hand-rolled parsers or formats where a library does it (Boost.JSON for JSON, GDAL and libosmium for files).
 
-The API reference is built from those comments: `cmake --build build --target miniverse_docs` writes `build/docs/html/` when
-Doxygen is installed (`MINIVERSE_BUILD_DOCS`). README.md is its front page and the files in `docs/` are further pages.
+### Comments
+
+A comment carries context the code cannot: why this and not the obvious thing, a fact from outside the code (what PostGIS,
+GDAL, libosmium or PostgreSQL does), a consequence a reader would not see, a guarantee a caller relies on (threads,
+lifetimes, ordering). The rules:
+
+1. A comment says what the code cannot. One that restates the line below it goes.
+2. Describe the code as it is. No history and no "so that we don't X": state the positive fact. A real trap that is not
+   visible gets one clause naming it. A sentence that exists only because the code once did something else is deleted.
+3. Measurements stay out of the API docs. Timings and benchmark results go to the developer notes; a header keeps the
+   decision in one clause. Arithmetic that explains a constant's value stays.
+4. One place per fact. The `@file` says what the file is, in a phrase and at most a short paragraph. A class doc gives the
+   contract and the rules a user must follow. A function doc gives inputs, outputs, throws and what the caller must
+   guarantee. A fact that is in the guide or here is pointed to, not repeated.
+5. Inline comments are rare, one clause, and never a label. Keep a non-obvious reason for a line and every NOLINT's reason.
+6. Plain sentences: one idea each, no chains of colons, no flourish. Bullets for lists of facts.
+7. Length follows content: the test is rule 1 applied line by line, not a line count.
+
+The API reference is built from the header comments: `cmake --build build --target miniverse_docs` writes
+`build/docs/html/` when Doxygen is installed (`MINIVERSE_BUILD_DOCS`). README.md is its front page and the files in `docs/`
+are further pages.

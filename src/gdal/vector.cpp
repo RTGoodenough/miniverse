@@ -79,7 +79,7 @@ VectorRead read_matching(
 
   layer.ResetReading();
   for ( ;; ) {
-    // From here, GDAL's last error is this feature's own: not one that opening, an earlier feature or `on_chunk` left.
+    // Drop errors earlier GDAL calls left: the loop's end is told from the last error.
     CPLErrorReset();
     const OGRFeatureUniquePtr feature{layer.GetNextFeature()};
     if ( ! feature ) {
@@ -89,7 +89,7 @@ VectorRead read_matching(
     std::unique_ptr<OGRGeometry> stolen(feature->StealGeometry());
     if ( ! stolen || stolen->IsEmpty() ) {
       if ( location == nullptr ) {
-        ++read.without_geometry;  // with a location, one that is nowhere is merely not in it
+        ++read.without_geometry;  // with a location, a feature that is nowhere is merely not in it
       }
 
       continue;
@@ -154,8 +154,8 @@ std::vector<std::string> problems_of(const VectorSource& source) {
     std::ignore = to_wgs84_from(layer, source);
     need_geos();
 
-    // A layer that says what its geometries are: of the type asked for, or one that reads as it (a single one as a multi
-    // one, a multi one of one part as its part, a curve as lines). One that does not say may hold any.
+    // A layer that declares its geometry type must declare the type asked for, or one that reads as it (a single type as the
+    // multi one, a multi one as the single one, a curve as lines). A layer that declares none may hold any.
     const OGRwkbGeometryType found = wkbFlatten(OGR_GT_GetLinear(layer.GetGeomType()));
     const OGRwkbGeometryType wanted = ogr_type<geometry_t>();
     if ( found != wkbUnknown && found != wanted && OGR_GT_GetCollection(found) != wanted && OGR_GT_GetCollection(wanted) != found ) {

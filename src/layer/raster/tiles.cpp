@@ -21,7 +21,6 @@ namespace miniverse::raster {
 
 namespace {
 
-// The world's size in degrees.
 using geo::DEGREES_ACROSS;
 using geo::DEGREES_DOWN;
 
@@ -87,10 +86,9 @@ std::size_t paste(const geo::Raster<pixel_t>& source, PixelAt source_at, geo::Ra
 
 template <geo::Pixel pixel_t>
 std::vector<Tile<pixel_t>> cut(const geo::Raster<pixel_t>& raster, const geo::Grid<pixel_t>& grid) {
-  geo::check_grid(grid);  // the table's grid, as read back: cheap to check again
+  geo::check_grid(grid);
   raster.check_pixel_count();
 
-  // A pixel equal to the grid's nodata would be written as having no data, so it would be lost.
   if ( raster.nodata != grid.nodata && std::ranges::find(raster.pixels, grid.nodata) != raster.pixels.end() ) {
     throw std::invalid_argument(
         "a pixel of the raster has the value " + std::format("{}", static_cast<double>(grid.nodata)) +
@@ -124,8 +122,7 @@ std::vector<Tile<pixel_t>> cut(const geo::Raster<pixel_t>& raster, const geo::Gr
   const std::int64_t         tiles_across = grid.tiles_across();
   std::vector<Tile<pixel_t>> tiles;
 
-  // In ascending tile_id order: two pushes that overlap then lock their tiles in the same order within their transactions
-  // (in practice: a statement writes its array of rows in order), so they wait for each other and can't deadlock.
+  // By ascending tile id: two overlapping pushes then lock their tiles in the same order, so neither can deadlock the other.
   for ( std::int64_t tile_row = raster_at.row / tile; tile_row * tile < raster_at.row + height; ++tile_row ) {
     for ( std::int64_t tile_column = raster_at.column / tile; tile_column * tile < raster_at.column + width; ++tile_column ) {
       geo::Raster<pixel_t> pixels{
@@ -140,7 +137,7 @@ std::vector<Tile<pixel_t>> cut(const geo::Raster<pixel_t>& raster, const geo::Gr
       };
 
       if ( paste(raster, raster_at, pixels, PixelAt{.column = tile_column * tile, .row = tile_row * tile}) == 0 ) {
-        continue;  // no data to write
+        continue;
       }
 
       tiles.push_back(Tile<pixel_t>{.id = (tile_row * tiles_across) + tile_column, .pixels = std::move(pixels)});

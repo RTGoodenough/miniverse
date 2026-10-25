@@ -32,19 +32,14 @@ constexpr double EXTENT_MARGIN = 1e-9;
 // How far 1 / pixel size may be from a whole number of pixels per degree. raster_columns gives the size rounded to 10 places.
 constexpr double PIXELS_PER_DEGREE_TOLERANCE = 0.25;
 
-// Taken first by every setup, and held until its transaction ends: PostgreSQL lets no two transactions make one schema, or
-// replace one function, at the same time (the second fails), so setups take turns. The key is the schema's name, hashed.
+// Held until the transaction ends; why: `RasterLayer::setup_sql`.
 constexpr std::string_view SETUP_LOCK = "DO $$ BEGIN PERFORM pg_advisory_xact_lock(hashtext('miniverse_functions')); END $$";
 
-// How a tile's bytes are compressed where they are stored. pglz, which a server uses unless its `default_toast_compression`
-// says otherwise, makes 16-bit heights a little smaller than lz4 does, but they then load some 75% slower than uncompressed,
-// where lz4 costs some 10% for half the size (measured 2026-10-04 on USGS 30 m tiles). Set before any tile is written: it
-// applies to values stored from then on.
+// The tiles' TOAST compression, set before any tile is written since it applies from then on. pglz, PostgreSQL's default,
+// makes whole-number tiles load far slower than lz4.
 constexpr std::string_view TILE_COMPRESSION = "lz4";
 
-// The tile `incoming` merged onto `current`, two tiles of one grid position: a pixel with data in `incoming` wins, and one with
-// no data there keeps `current`'s. ST_Union's LAST runs in C: about 4 times as fast as an ST_MapAlgebra expression on a tile
-// of 1200 by 1200 pixels.
+// The body of `raster::MergeRaster`. ST_Union's LAST runs in C, where an ST_MapAlgebra expression does not.
 constexpr std::string_view MERGE_FUNCTION_DEFINITION =
     "(current raster, incoming raster) RETURNS raster LANGUAGE sql IMMUTABLE PARALLEL SAFE "
     "AS $$ SELECT ST_Union(tile, 'LAST' ORDER BY n) FROM unnest(ARRAY[current, incoming]) WITH ORDINALITY AS tiles (tile, n) $$";
@@ -105,12 +100,12 @@ std::vector<std::string> RasterLayer<pixel_t>::setup_sql(const schemacht::schema
 
 template <geo::Pixel pixel_t>
 std::vector<std::vector<typename RasterLayer<pixel_t>::row_type>> RasterLayer<pixel_t>::to_rows(result_type raster, const settings_type& grid) {
-  std::vector<raster::Tile<pixel_t>> tiles = raster::cut(raster, grid);  // checks the grid first
+  std::vector<raster::Tile<pixel_t>> tiles = raster::cut(raster, grid);
 
   const std::size_t tile_bytes = static_cast<std::size_t>(grid.tile_pixels) * static_cast<std::size_t>(grid.tile_pixels) * sizeof(pixel_t);
   const std::size_t tiles_per_batch = std::max<std::size_t>(1, PIXEL_BYTES_PER_STATEMENT / tile_bytes);
 
-  // In ascending tile_id order, across batches too, as `cut` gives them.
+  // By ascending tile id across the batches, as `cut` gives them: see there.
   std::vector<std::vector<row_type>> batches;
   for ( raster::Tile<pixel_t>& tile : tiles ) {
     if ( batches.empty() || batches.back().size() == tiles_per_batch ) {

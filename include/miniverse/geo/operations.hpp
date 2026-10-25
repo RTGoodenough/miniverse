@@ -22,12 +22,9 @@ struct Intersects {
 };
 
 /**
- * @brief `ST_Intersects(ST_ConvexHull("column"), $n::geometry(Polygon,4326))`: a raster's outline shares any point with a
- * polygon, whatever its pixels hold. A GiST index on `ST_ConvexHull(rast)` narrows the tiles to those whose boxes meet the
- * polygon's first, as it does for `&&`.
- *
- * PostGIS has `ST_Intersects(raster, geometry)` too, which tests the same outline, but through a function in PL/pgSQL for
- * every tile the index finds: twice the time of this one, as measured.
+ * @brief `ST_Intersects(ST_ConvexHull("column"), $n::geometry(Polygon,4326))`: a raster's outline shares a point with a
+ * polygon. A GiST index on `ST_ConvexHull(rast)` answers it. PostGIS's own `ST_Intersects(raster, geometry)` tests the same
+ * outline through PL/pgSQL for every candidate tile, and is slower.
  */
 struct OutlineIntersects {
   static constexpr std::string_view FUNCTION = "ST_Intersects";

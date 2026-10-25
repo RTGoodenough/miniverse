@@ -25,9 +25,8 @@ namespace miniverse {
  * miniverse::Miniverse world(conninfo, miniverse::Layer<Roads>("osm_roads"), miniverse::Layer<Elevation>("srtm"));
  * @endcode
  *
- * The table's name, or the reader, is all a layer holds. What else a kind's table is made with (an elevation's grid) is given
- * once, to `Miniverse::create_table`, and the table keeps it: a push reads it back, and `Miniverse::table_settings` gives it to a
- * writer. A layer with a reader is only read, and its reader says what its settings are.
+ * The table's name, or the reader, is all a layer holds; a kind's settings (a raster's grid) belong to the table, see
+ * `Miniverse::create_table`. A layer with a reader is only read.
  */
 template <LayerKind kind_t>
 class Layer {
@@ -39,7 +38,10 @@ class Layer {
    */
   explicit Layer(std::string_view table) : _table(std::in_place, table) {}
 
-  /** @brief The layer stored in the table `table` of the PostgreSQL schema `schema_name`. */
+  /**
+   * @brief The layer stored in the table `table` of the PostgreSQL schema `schema_name`.
+   * @throws std::invalid_argument if either is not a valid name, as above.
+   */
   Layer(std::string_view schema_name, std::string_view table) : _table(std::in_place, schema_name, table) {}
 
   /**
@@ -87,7 +89,7 @@ class Layer {
   [[nodiscard]] const std::shared_ptr<const Reader<kind_t>>& reader() const noexcept { return _reader; }
 
  private:
-  std::optional<schemacht::schema::Table<typename kind_t::schema_type>> _table;  // or
+  std::optional<schemacht::schema::Table<typename kind_t::schema_type>> _table;
   std::shared_ptr<const Reader<kind_t>>                                 _reader;
 
  public:

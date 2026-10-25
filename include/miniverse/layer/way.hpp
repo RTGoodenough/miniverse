@@ -14,7 +14,7 @@ namespace miniverse {
 
 /** @brief A road: an OpenStreetMap way, as a line through its nodes. */
 struct Way {
-  std::int64_t              id = 0;
+  std::int64_t              id = 0;       ///< The table's, from a load; a file's own, from a reader of files.
   std::vector<std::int64_t> node_ids;     ///< The way's nodes, in order: one per point of `coordinates`.
   geo::LineString           coordinates;  ///< Where the nodes are.
   schemacht::json::Json     tags{"{}"};   ///< The way's tags, as one JSON object (`{"highway": "primary", ...}`): empty unless given.

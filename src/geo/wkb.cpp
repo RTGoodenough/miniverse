@@ -25,7 +25,7 @@ enum class Kind : std::uint8_t {
   MultiPolygon = 6,
 };
 
-// Where a geometry is: on its own, or a member of a multi-geometry. A member need name no SRID of its own: it has the whole's.
+// Where a geometry is: on its own, or a member of a multi-geometry (see `read_header`).
 enum class Place : std::uint8_t {
   Whole,
   Member,
@@ -67,8 +67,6 @@ template <Geometry geometry_t>
     return Kind::MultiPolygon;
   }
 }
-
-// ---- Reading --------------------------------------------------------------------------------------------------------
 
 /**
  * @brief Reads the geometry's header (byte order, type, SRID) and checks it is a 2D `geometry_t` in WGS 84. A whole geometry
@@ -163,8 +161,6 @@ template <Geometry geometry_t>
     return multi;
   }
 }
-
-// ---- Writing ------------------------------------------------------------------------------------------------------
 
 void put_point(Writer& out, const Point& position) {
   out.number(position.x());

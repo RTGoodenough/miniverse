@@ -35,7 +35,7 @@ class TablesDiffer : public std::runtime_error {
   /** @param differences Each as `<table, or what a reader reads>: <what differs>`, in the layers' order. */
   explicit TablesDiffer(std::vector<std::string> differences) : std::runtime_error(message_of(differences)), _differences(std::move(differences)) {}
 
-  /** @return Each difference, as `<table>: <what differs>`, in the layers' order. */
+  /** @return The differences given, in the layers' order. */
   [[nodiscard]] const std::vector<std::string>& differences() const noexcept { return _differences; }
 
  private:
@@ -84,7 +84,7 @@ class Checks {
       }
     }
 
-    settle();  // by the one thread that brought the count to nothing: no other touches the checks any more
+    settle();  // outside the lock: this was the last check, and nothing else touches the checks now
   }
 
  private:
@@ -115,7 +115,7 @@ class Checks {
         _done.fail(std::make_exception_ptr(TablesDiffer(std::move(differences))));
       }
     } catch ( ... ) {
-      _done.fail(std::current_exception());  // no memory to say what differs: that, then
+      _done.fail(std::current_exception());  // when the message itself can't be made
     }
   }
 
@@ -140,7 +140,7 @@ void check_settings(
         return;
       }
 
-      // One `finish` per layer, whatever happens: a throw that escaped would leave the checks waiting for this one.
+      // Exactly one `finish` per layer: a throw out of this callback would leave the checks waiting for it.
       std::vector<std::string> problems;
       std::exception_ptr       failed;
       try {
@@ -160,7 +160,7 @@ void check_settings(
 
 /**
  * @brief Checks `table` against its kind's schema, then its settings if the kind has any, and tells `checks`. `database` and
- * `table` are kept for the steps that run after it returns: both must outlive the check, as the miniverse's do.
+ * `table` are used after it returns: both must outlive the check, as the miniverse's do.
  */
 template <LayerKind kind_t>
 void check_table(
@@ -177,9 +177,8 @@ void check_table(
             return;
           }
 
-          // A table whose columns are the kind's may still lack what the kind keeps in it beside them: a raster's grid.
-          // Only such a table is asked for it: of one that differs, the differences say enough, and the question may not
-          // even be one the database can answer (no raster type, so no `raster_columns` to ask).
+          // Only a table whose columns match is asked for its settings: for one that differs, the differences say enough, and
+          // the question may not even be answerable (no raster type, so no `raster_columns`).
           if constexpr ( HasSettings<kind_t> ) {
             if ( differences.empty() ) {
               check_settings<kind_t>(database, table, checks, layer_number);
@@ -195,7 +194,7 @@ void check_table(
               problems.push_back(schemacht::postgres::describe(difference));
             }
           } catch ( ... ) {
-            failed = std::current_exception();  // no memory to say what differs: that, then
+            failed = std::current_exception();  // when the message itself can't be made
           }
 
           checks->finish(layer_number, std::move(problems), failed);

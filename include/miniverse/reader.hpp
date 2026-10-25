@@ -11,9 +11,8 @@
 /**
  * @file
  * A reader: where a layer that is not a table is read from. A `Layer<Kind>` is made from a table's name or from a reader, and
- * a miniverse loads and streams it the same way either way, so a worker's code does not know which it has: a table in
- * production, a file in a test (`miniverse::gdal` and `miniverse::osm` have readers of files), or a reader of your own that
- * hands out fixed data.
+ * a miniverse loads and streams it the same way either way: a table in production, a file in a test (`miniverse::gdal` and
+ * `miniverse::osm` have readers of files), or a reader of your own that hands out fixed data.
  *
  * @code
  * struct Roads : miniverse::RoadLayer {};
@@ -24,15 +23,13 @@
  * miniverse::Ways roads = world.load<Roads>(area).get();
  * @endcode
  *
- * What a reader gives is meant to be what a table of the same data gives, and the readers of files are tested against one.
- * Three things are a reader's own all the same: the ids (a file's, where a table's are the database's own), the order (a
- * file's, where a table's is by id), and the spelling of tags (a file's JSON as its reader writes it, where a table's is as
- * PostgreSQL's `jsonb` prints it: the same document, another text).
+   * A reader gives what a table of the same data gives, and the readers of files are tested against one, but for three things:
+ * the ids (a file's own, where a table's are the database's), the order (a file's, where a table's is by id), and the
+ * spelling of tags (as the reader writes the JSON, where a table's is as `jsonb` prints it).
  *
- * A layer with a reader is only read: a push to it fails. Its reader is shared by the layer's copies and by the loads that
- * run, and loads run at the same time, each on a thread of its own: every member is `const`, and must be safe to call from
- * several threads at once. `load` and `stream` run on a thread started for the load; `name`, `settings` and `problems` on
- * the thread that asks the miniverse, before its call returns, so they should not take long.
+ * A layer with a reader is only read. The reader is shared by the layer's copies and by the loads that run, each on a thread
+ * of its own: every member is `const` and must be safe to call from several threads at once. `load` and `stream` run on a
+ * thread started for the load; `name`, `settings` and `problems` on the caller's thread, so they should not take long.
  */
 namespace miniverse {
 
@@ -50,6 +47,7 @@ class ReaderSettings {
   virtual ~ReaderSettings() = default;
 };
 
+/** @brief The part of a `Reader` of a kind with settings: the settings the layer is read with. */
 template <HasSettings kind_t>
 class ReaderSettings<kind_t> {
  public:
@@ -74,7 +72,7 @@ class Reader : public ReaderSettings<kind_t> {
   /** @brief What a streamed load hands each chunk to: it returns whether it wants more. */
   using OnChunk = std::function<bool(ChunkOf<kind_t>)>;
 
-  /** @return What the reader reads, for a message: a file's path, say. It is what tells this layer from the others in one. */
+  /** @return What the reader reads, for a message: a file's path, say. It is what tells this layer from the others in a message. */
   [[nodiscard]] virtual std::string name() const = 0;
 
   /**

@@ -21,7 +21,7 @@
 namespace geo = miniverse::geo;
 using schemacht::json::Json;
 
-// A kind of layer is a type, used as a name: two datasets of points would be two of these.
+// A kind of layer is a type, used as a name: two layers of points would be two of these.
 struct Cafes : miniverse::FeatureLayer<geo::Point> {};
 struct Parks : miniverse::FeatureLayer<geo::Polygon> {};
 
@@ -32,11 +32,11 @@ int main(int argc, char** argv) {
     );
 
     world.drop_tables();
-    world.create_tables();  // each with its spatial index
+    world.create_tables();
 
-    // Started together, then waited for: the two layers are written at once, on the miniverse's pool of connections.
-    // Positions are longitude, then latitude. Each push is of a dataset, the export the features came from: the ids given
-    // here are not kept (the database numbers the rows), and a later push of the same dataset replaces it.
+    // Started together, then waited for: the two layers are written at once, on the miniverse's pool of connections. Positions
+    // are longitude, then latitude. Each push is of a dataset, the export the features came from. The ids given here are not
+    // kept, since the database numbers the rows, and a later push of the same dataset replaces it.
     const miniverse::Dataset survey{"town-survey"};
 
     std::future<void> cafes_written = world.push<Cafes>(
@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
     cafes_written.get();
     parks_written.get();
 
-    // What each layer holds in an area: the features that intersect it, by id. Loaded at once, too.
+    // What each layer holds in an area: the features that intersect it, in id order. Loaded at once, too.
     const geo::Polygon neighbourhood = example::box(9.990, 49.990, 10.020, 50.010);
 
     std::future<miniverse::Features<geo::Point>>   cafes_loading = world.load<Cafes>(neighbourhood);
@@ -81,8 +81,8 @@ int main(int argc, char** argv) {
       std::cout << '\n';
     }
 
-    // A second push of the dataset replaces it, all at once: the survey now has two cafes, one of them new, and the others
-    // are gone. A different dataset would be added beside it instead.
+    // A second push of the dataset replaces it, all at once: the survey now has two cafes, both with new ids (The Bandstand
+    // again, and one that was not there before), and the others are gone. A different dataset would be added beside it instead.
     world
         .push<Cafes>(
             survey, {{.geometry = geo::Point(10.004, 50.003), .tags = Json(R"({"name": "The Bandstand"})")}, {.geometry = geo::Point(10.006, 50.001)}}

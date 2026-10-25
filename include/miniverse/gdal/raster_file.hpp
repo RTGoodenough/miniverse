@@ -18,17 +18,16 @@
 
 /**
  * @file
- * A raster file as a layer: read in place of a table of the same grid, by `read_tiles_in` (raster.hpp), for a test or a
- * user with files alone.
+ * A raster file as a layer, read in place of a table of the same grid by `read_tiles_in` (raster.hpp).
  */
 namespace miniverse::gdal {
 
 namespace detail {
 
 /**
- * @brief The reader of a raster file as a layer of `kind_t`: what `raster_file` makes a layer with. A load gives the pixels in
- * the box of the location on the layer's grid, as a table that the file was pushed into gives them; each load opens the file
- * for itself, so loads run side by side.
+ * @brief The reader of a raster file as a layer of `kind_t`, behind `raster_file`. A load gives the pixels in the location's box
+ * on the layer's grid, as a table the file was pushed into gives them. Each load opens the file for itself, so loads run side
+ * by side.
  */
 template <RasterKind kind_t>
 class RasterFile : public Reader<kind_t> {
@@ -40,7 +39,7 @@ class RasterFile : public Reader<kind_t> {
   [[nodiscard]] geo::Grid<PixelOf<kind_t>> settings() const override { return _grid; }
 
   [[nodiscard]] typename kind_t::result_type load(const geo::Polygon& location) const override {
-    // The tiles a stream hands over, cut to the box as a table's are: a load and a stream can't then disagree.
+    // From the tiles a stream hands over, so a load and a stream agree.
     std::vector<geo::Raster<PixelOf<kind_t>>> tiles;
     read_tiles_in<PixelOf<kind_t>>(_source, _grid, location, TILES_AT_A_TIME, [&tiles](std::vector<geo::Raster<PixelOf<kind_t>>> chunk) {
       tiles.insert(tiles.end(), std::make_move_iterator(chunk.begin()), std::make_move_iterator(chunk.end()));
@@ -81,9 +80,8 @@ class RasterFile : public Reader<kind_t> {
  * world.load<Elevation>(area).get();  // the file's heights in the area's box, on the grid
  * @endcode
  *
- * The grid is what a table's would be: given here as it is given to `Miniverse::create_table`, and what
- * `Miniverse::table_settings` then gives. The file is not opened until a load, or `Miniverse::verify`, which says what is
- * wrong with it.
+ * The grid is given as it is given to `Miniverse::create_table`, and is what `Miniverse::table_settings` gives. The file is
+ * first opened by a load, or by `Miniverse::verify`, which says what is wrong with it.
  */
 template <RasterKind kind_t>
 [[nodiscard]] Layer<kind_t> raster_file(RasterSource source, const geo::Grid<PixelOf<kind_t>>& grid) {

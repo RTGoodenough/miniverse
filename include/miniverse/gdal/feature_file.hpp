@@ -16,18 +16,16 @@
 
 /**
  * @file
- * A vector file as a layer: read in place of a table, by `read_features_in` (vector.hpp), for a test or a user with files
- * alone.
+ * A vector file as a layer, read in place of a table by `read_features_in` (vector.hpp).
  */
 namespace miniverse::gdal {
 
 namespace detail {
 
 /**
- * @brief The reader of a vector file as a layer of `kind_t`: what `feature_file` makes a layer with. A load gives the file's
- * features that intersect the location, in the file's order (a table's are by id), their tags as `read_features` writes them
- * (a table's are as `jsonb` prints them: the same document, another text); each load opens the file for itself, so loads
- * run side by side.
+ * @brief The reader of a vector file as a layer of `kind_t`, behind `feature_file`. A load gives the file's features that
+ * intersect the location, in the file's order, with their tags as `read_features` writes them. Each load opens the file for
+ * itself, so loads run side by side.
  */
 template <FeatureKind kind_t>
 class FeatureFile : public Reader<kind_t> {
@@ -76,7 +74,7 @@ class FeatureFile : public Reader<kind_t> {
  * world.load<Buildings>(area).get();  // the file's buildings that intersect the area
  * @endcode
  *
- * The file is not opened until a load, or `Miniverse::verify`, which says what is wrong with it.
+ * The file is first opened by a load, or by `Miniverse::verify`, which says what is wrong with it.
  */
 template <FeatureKind kind_t>
 [[nodiscard]] Layer<kind_t> feature_file(VectorSource source) {

@@ -20,19 +20,16 @@
  * GDALClose(GetGDALDriverManager()->GetDriverByName("GTiff")->CreateCopy("heights.tif", dataset.get(), FALSE, nullptr, nullptr, nullptr));
  * @endcode
  *
- * Part of the optional component `miniverse::gdal`, and its one header that includes GDAL's: a program that only reads files
- * into layers (raster.hpp, vector.hpp) needs none of them.
+  * Part of the optional component `miniverse::gdal`, and the one header of miniverse that includes GDAL's headers.
  */
 namespace miniverse::gdal {
 
 /**
- * @return `raster` as a GDAL dataset held in memory (GDAL's `MEM` driver): one band of `pixel_t` with the raster's pixels and
- * its nodata value, placed where the raster lies (north up, its pixel size in degrees), in WGS 84 with the longitude first.
- *
- * The pixels are copied: the dataset is its own, and outlives the raster. A dataset is GDAL's, with GDAL's rules: one
- * thread at a time.
- * @throws std::invalid_argument if the raster has no pixels, as a load where there are no tiles gives (GDAL has no dataset
- * of none), or its pixels are not `width * height`.
+ * @return `raster` as a GDAL dataset in memory (the `MEM` driver): one band of `pixel_t` with the raster's pixels and nodata,
+ * placed where the raster lies, in WGS 84 with longitude first. The pixels are copied, so the dataset outlives the raster. A
+ * dataset is GDAL's, with GDAL's rules: one thread at a time.
+  * @throws std::invalid_argument if the raster has no pixels (GDAL has no dataset of none) or more than GDAL counts (an `int` a
+ * side), or its pixels are not `width * height`.
  * @throws std::runtime_error with GDAL's message if GDAL can't make it.
  */
 template <geo::Pixel pixel_t>

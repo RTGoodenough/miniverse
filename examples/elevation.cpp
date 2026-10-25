@@ -61,9 +61,7 @@ constexpr std::int16_t NODATA = -32768;
 }
 
 /** @return A height in words. */
-[[nodiscard]] std::string in_words(std::optional<std::int16_t> height) {
-  return height ? std::to_string(*height) + " m" : "no height";
-}
+[[nodiscard]] std::string in_words(std::optional<std::int16_t> height) { return height ? std::to_string(*height) + " m" : "no height"; }
 
 int main(int argc, char** argv) {
   try {
@@ -98,9 +96,9 @@ int main(int argc, char** argv) {
     std::cout << "  east of the lake:  " << in_words(heights.value_at({7.9, 46.6})) << " (the first survey's)\n";
     std::cout << "  north of the load: " << in_words(heights.value_at({7.6, 47.5})) << '\n';
 
-    // A stream gives the tiles as they are stored, here two at a time: a worker with a large area holds a few tiles, not the
-    // area. The callback runs on a thread of the miniverse's, one call at a time, while this thread only waits for the future:
-    // so what it fills needs no lock.
+    // A stream gives the tiles as they are stored, here two at a time, so a worker with a large area holds a few tiles at a
+    // time. The callback runs on a thread of the miniverse's, one call at a time, and this thread only waits for the future, so
+    // what it fills needs no lock.
     std::size_t  tiles = 0;
     std::int16_t highest = NODATA;
 

@@ -2,7 +2,7 @@
 //
 // miniverse hands a worker the roads of an area; what they are loaded into is the worker's own. Here that is a graph to find
 // routes in: the nodes of the roads, each with the nodes a road leads to from it and how far they are. The roads are
-// streamed, so the worker holds its graph and a few chunks of roads at a time, never all the roads.
+// streamed, so the worker holds its graph and one chunk of roads at a time.
 //
 // Run with a libpq connection string to a database with PostGIS, on PostgreSQL 17 or newer (which `verify` needs):
 //   miniverse_example_road_network "host=localhost dbname=gis user=gis"
@@ -31,9 +31,7 @@ using schemacht::json::Json;
 
 struct Roads : miniverse::RoadLayer {};
 
-// ==============================================================================
-// The worker's own structure
-// ==============================================================================
+// The worker's own structure.
 
 /** @brief A stretch of road from one node to the next. */
 struct Stretch {
@@ -100,9 +98,7 @@ void add_road(RoadNetwork& network, const miniverse::Way& road) {
   return std::numeric_limits<double>::infinity();
 }
 
-// ==============================================================================
-// The roads an uploader puts in the database
-// ==============================================================================
+// The roads an uploader puts in the database.
 
 /**
  * @return A village's roads, as OpenStreetMap has them: each a way that names its nodes in order, with a position for each.
@@ -141,14 +137,12 @@ int main(int argc, char** argv) {
     world.push<Roads>(miniverse::Dataset{"village"}, village()).get();
 
     // The worker's part. When it starts: is the table there, and is it a road table? One that is not fails here, with a
-    // `miniverse::TablesDiffer` that says how each table differs, and not at the first load.
+    // `miniverse::TablesDiffer` that says how each table differs.
     world.verify().get();
 
     // The roads of the area, handed over a chunk at a time, in the order of their ids. The chunks are small here to show
-    // several: left out, a chunk is 1000 roads. A callback that returns `false` stops the load.
-    //
-    // The callback runs on a thread of the miniverse's, one call at a time, while this thread only waits for the future: so
-    // what it fills needs no lock.
+    // several. The callback runs on a thread of the miniverse's, one call at a time, and this thread only waits for the future,
+    // so what it fills needs no lock.
     const geo::Polygon area = example::box(9.99, 49.99, 10.02, 50.02);
     RoadNetwork        network;
     std::size_t        roads = 0;

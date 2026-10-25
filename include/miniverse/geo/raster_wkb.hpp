@@ -19,10 +19,14 @@
  */
 namespace miniverse::geo::wkb {
 
+/**
+ * @return `raster` as raster WKB, as above.
+ * @throws std::invalid_argument if its pixels are not `width * height`, or a side is more than 65535 pixels.
+ */
 template <Pixel pixel_t>
 [[nodiscard]] std::vector<std::byte> write(const Raster<pixel_t>& raster);
 
-/** @throws std::invalid_argument if `bytes` are not a raster as above, or have bytes left over. */
+/** @return The raster `bytes` hold. @throws std::invalid_argument if `bytes` are not a raster as above, or have bytes left over. */
 template <Pixel pixel_t>
 [[nodiscard]] Raster<pixel_t> read_raster(std::span<const std::byte> bytes);
 

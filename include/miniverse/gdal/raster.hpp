@@ -21,31 +21,27 @@
  *
  * const auto grid = world.table_settings<Elevation>().get();  // the grid the table was made with
  * miniverse::gdal::read_raster<std::int16_t>({.path = "srtm.tif"}, grid, 4, [&](auto window) {
- *   world.push<Elevation>(std::move(window)).get();  // 4 by 4 tiles at a time: the file is never held whole
+ *   world.push<Elevation>(std::move(window)).get();  // 4 by 4 tiles at a time, so the file is not held whole
  * });
  * @endcode
  *
  * - **The grid** is the table's: its pixel size, its tiles, its nodata. The file is warped onto it from its own coordinate
- *   system and pixel size (it may be rotated), each grid pixel made from the file's own pixels by `resampling`, exactly, and
- *   with one scale for the whole file: a pixel of whole numbers is the same whichever window it is read in (one of reals,
- *   made by weights, to its last digits). A file that names no coordinate system, crosses the antimeridian, or
- *   reaches more than a degree past the world (longitudes of 0 to 360) is refused; within that degree it is read up to the
- *   world's edge.
- * - **Windows** are whole tiles of the grid, `window_tiles` by `window_tiles` of them (the last of a row or column what is
- *   left), over the file's extent in WGS 84, from the north west, row by row. A tile is so never written by two windows, which
- *   a push would have to merge. Only at the world's far edge, where a grid's tiles need not divide it, is a window cut short.
+ *   system and pixel size, each grid pixel made from the file's by `resampling`, with one scale for the whole file, so a pixel
+ *   comes out the same whichever window it is read in. A file that names no coordinate system, crosses the antimeridian, or
+ *   reaches more than a degree past the world (longitudes of 0 to 360) is refused; within that degree it is read to the edge.
+ * - **Windows** are whole tiles of the grid, `window_tiles` by `window_tiles` (the last of a row or column, what is left),
+ *   over the file's extent, from the north west, row by row: each tile is written by one window. At the world's far edge,
+ *   where the grid's tiles need not divide it, a window is cut short.
  * - **No data**: a grid pixel whose centre the file does not cover, or where it has its own nodata value (or, in a file of
- *   reals, "not a number"), is the grid's nodata. A window with no data at all is left out and counted. A file's pixel that
- *   has the grid's nodata value as its data is lost: choose a nodata for the table that its data does not use.
- * - **Memory**: a window is held twice while it is made, so `window_tiles` squared tiles, twice. A file near a pole spans
- *   every longitude once in WGS 84, however small it is.
+ *   reals, "not a number"), is the grid's nodata. A window with no data at all is left out and counted. A pixel whose data is
+ *   the grid's nodata value is lost: choose a nodata the data does not use.
+ * - **Memory**: a window is held twice while it is made. A file near a pole spans every longitude in WGS 84, however small.
  *
- * A file can also be a layer itself, read in place of a table (`raster_file`, raster_file.hpp): for a test, or a user with
- * files alone.
+ * A file can also be read in place of a table (`raster_file`, raster_file.hpp).
  *
- * Part of the optional component `miniverse::gdal` (gdal.hpp includes all of it). Errors are `std::runtime_error` with GDAL's own message.
- * While a read runs, GDAL's errors on the calling thread are kept for those messages, not printed: also the ones GDAL calls
- * made inside `on_window` raise.
+ * Part of the optional component `miniverse::gdal` (gdal.hpp includes all of it). Errors are `std::runtime_error` with GDAL's
+ * own message; GDAL's errors on the calling thread are kept quiet while a read runs, including from GDAL calls made inside
+ * `on_window`.
  */
 namespace miniverse::gdal {
 
@@ -73,29 +69,26 @@ struct RasterRead {
 /**
  * @brief Reads `source` onto `grid` and hands it to `on_window`, `window_tiles` by `window_tiles` tiles at a time, on the
  * calling thread.
- * @throws std::invalid_argument if `window_tiles` is 0, or `grid` has no pixels per degree or no tile size.
+ * @throws std::invalid_argument if `window_tiles` is 0, or `grid` is not a grid.
  * @throws std::runtime_error if the file can't be opened or warped, has no such band, or names no coordinate system or
- * position. Windows handed over before an error stay handed over. What `on_window` throws is passed on.
+ * position. Windows handed over before the error stay handed over. What `on_window` throws is passed on.
  */
 template <geo::Pixel pixel_t>
 RasterRead read_raster(
     const RasterSource& source, const geo::Grid<pixel_t>& grid, std::size_t window_tiles, const std::function<void(geo::Raster<pixel_t>)>& on_window
 );
 
-/**
- * @return All of `source` on `grid`, as one window: for a file whose extent in WGS 84, rounded out to whole tiles, is small
- * enough to hold twice. 0 by 0 pixels if it has no data.
- */
+/** @return All of `source` on `grid` as one window, for a file small enough to hold twice; 0 by 0 pixels if it has no data. */
 template <geo::Pixel pixel_t>
 [[nodiscard]] geo::Raster<pixel_t> read_raster(const RasterSource& source, const geo::Grid<pixel_t>& grid);
 
 /**
- * @brief Hands the tiles of `grid` that `location`, a polygon in WGS 84, reaches into (`raster::Reach`: not those it only
- * touches, nor those of its box that it does not reach, which are not read) to `on_chunk`, each whole and as `read_raster`
- * makes its pixels from `source`, `chunk_tiles` at a time (the last of what is left), from the north west, row by row, on
- * the calling thread, until it returns `false`. A tile with no data at all is left out, as a table has none for it: what
- * a table that the file was pushed into has for the location.
- * @throws std::invalid_argument if `chunk_tiles` is 0, and as `read_raster`; std::runtime_error as `read_raster`.
+ * @brief Hands the tiles of `grid` that `location`, a polygon in WGS 84, reaches into (`raster::Reach`) to `on_chunk`,
+ * `chunk_tiles` at a time, from the north west row by row, on the calling thread, until it returns `false`. Each tile is whole,
+ * its pixels as `read_raster` makes them. Tiles the location does not reach are not handed over, and a tile with no data is
+ * left out, as a table has no row for it: the result is what a table the file was pushed into holds for the location.
+ * @throws std::invalid_argument if `chunk_tiles` is 0, a coordinate of `location` is not a finite number, or as `read_raster`;
+ * std::runtime_error as `read_raster`.
  */
 template <geo::Pixel pixel_t>
 void read_tiles_in(
@@ -104,8 +97,8 @@ void read_tiles_in(
 );
 
 /**
- * @return What keeps `source` from being read onto `grid`, each in words: a file that can't be opened, a band it lacks, no
- * coordinate system or position, a grid that is none. Nothing, if it can be.
+ * @return What keeps `source` from being read onto `grid`, each in words: a file that can't be opened, a band it lacks, no coordinate system or
+ * position, a grid that is none.
  */
 template <geo::Pixel pixel_t>
 [[nodiscard]] std::vector<std::string> problems_of(const RasterSource& source, const geo::Grid<pixel_t>& grid);

@@ -1,8 +1,8 @@
 // An OpenStreetMap file into a road layer: all of it, or none of it.
 //
 // The uploader's side of examples/road_network.cpp. The file's ways are read a chunk at a time and written as one push in
-// parts, so they are never all held at once, and workers see none of them until the commit: a file that fails halfway leaves
-// nothing. (What is held is the position of every node of the file, 16 bytes each: read an extract of the area wanted.)
+// parts: one chunk is held at a time, workers see none of them until the commit, and a file that fails halfway leaves nothing.
+// What is held throughout is the position of every node of the file, so read an extract of the area wanted.
 // This needs the optional component miniverse::osm, built when libosmium is found.
 //
 // Run with a libpq connection string to a database with PostGIS: miniverse_example_import_osm "host=localhost dbname=gis user=gis"
@@ -27,10 +27,10 @@ int main(int argc, char** argv) {
     world.drop_tables();
     world.create_tables();
 
-    // One transaction for the whole file. Each chunk is waited for before the next is read.
+    // A push in parts takes one call at a time: each chunk is waited for before the next is read.
     miniverse::PushInParts<Roads> roads = world.begin_push<Roads>(miniverse::Dataset{"town.osm.pbf"}).get();
 
-    // The ways with a `highway` tag, which are OpenStreetMap's roads and paths, 10000 at a time.
+    // The ways with a `highway` tag, which are OpenStreetMap's roads and paths.
     const miniverse::osm::WayRead read =
         miniverse::osm::read_ways({.path = MINIVERSE_EXAMPLE_DATA "/streets.osm", .keys = {"highway"}}, 10'000, [&roads](miniverse::Ways chunk) {
           roads.add(std::move(chunk)).get();

@@ -35,8 +35,7 @@ struct Town {
 struct Towns {
   using result_type = std::vector<Town>;
 
-  // The table's layout, each column NOT NULL: `town_id bigint PRIMARY KEY, name text, population integer, centre
-  // geometry(Point,4326)`. The schema's own name is only a placeholder: the layer names its table.
+  // Each column is NOT NULL. The schema's name, `towns`, is only a placeholder: the layer names its table.
   using schema_type = schema::Schema<
       "towns", schema::Field<std::int64_t, "town_id", schema::KeyRole::Primary>, schema::Field<std::string, "name">,
       schema::Field<std::int32_t, "population">, schema::Field<geo::Point, "centre">>;

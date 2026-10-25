@@ -24,23 +24,21 @@
  */
 namespace miniverse::detail {
 
-/** @return A stamp for one push of a dataset: 64 random bits, so that no two pushes of a dataset share one. */
+/** @return A stamp for one push of a dataset: 64 random bits, all but surely unlike any other push's. */
 [[nodiscard]] std::int64_t stamp();
 
 /**
- * @brief Takes the lock on `dataset` in `transaction`, a push's, and waits for it. Two pushes of one dataset then run one after
- * the other, whatever their tables: at once, each would sweep only what the other had committed before it began, and both
- * exports would be left in the table. The lock is an advisory lock on the name's hash, held until the transaction ends; pushes
- * of different datasets run side by side (two names of one hash wait for each other, which costs nothing but the wait).
+ * @brief Takes an advisory lock on `dataset`'s name in `transaction`, held until it ends, and waits for it: two pushes of one
+ * dataset then run one after the other. Run at the same time, each would sweep only what the other had committed before it
+ * began, and both exports would stay in the table. Pushes of different datasets run side by side.
  */
 inline void lock_dataset(schemacht::postgres::Transaction& transaction, const Dataset& dataset) {
   std::ignore = transaction.execute(schemacht::postgres::unchecked_sql("SELECT pg_advisory_xact_lock(hashtext($1))", dataset.name)).get();
 }
 
 /**
- * @return What a push of `dataset` runs before it commits: the kind's sweep, which deletes the dataset's rows in `table` that
- * the push, whose rows carry `stamp`, did not write, and waits for it. So the push replaces the dataset: a row of an older
- * push of it goes, and a row written again (for a `RoadLayer`, a way of the same nodes) stays, with its id.
+ * @return What a push of `dataset` runs before it commits: the kind's sweep, which deletes the dataset's rows in `table` whose
+ * stamp is not `stamp`, this push's. A row the push wrote again (a `RoadLayer`'s way of the same nodes) keeps its id.
  */
 template <HasDatasets kind_t>
 [[nodiscard]] std::function<void(schemacht::postgres::Transaction&)> sweep_of(

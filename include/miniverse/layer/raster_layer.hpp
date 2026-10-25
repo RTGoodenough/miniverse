@@ -29,29 +29,25 @@
  */
 namespace miniverse {
 
-/**
- * @brief What a raster layer is made of: its tiles and which of them a location has (raster/), and here its table's columns,
- * the same in every `RasterLayer` but for the pixel type, and its merge function.
- */
+/** @brief A raster table's columns and its merge function. Its tiles, and which a location has, are in raster/. */
 namespace raster {
 
 /**
- * Which tile of the grid a row is: the `raster::Tile::id` of the tile. One integer key, as `raster2pgsql`'s `rid`: GDAL tells
- * tiles apart by the primary key, and reads the wrong pixels when it is a composite one.
+ * @brief Which tile of the grid a row is (`raster::Tile::id`). One integer key, as `raster2pgsql`'s `rid`: GDAL reads the wrong
+ * pixels when the key is composite.
  */
 using TileId = schemacht::schema::Field<std::int64_t, "tile_id", schemacht::schema::KeyRole::Primary>;
 
+/** @brief The tile's pixels, a PostGIS `raster` of one band. */
 template <geo::Pixel pixel_t>
 using Rast = schemacht::schema::Field<geo::Raster<pixel_t>, "rast">;
 
 /**
- * @brief How a push merges a tile onto the one already at its grid position: `miniverse_functions.merge_raster(current, incoming)`,
- * which the table's setup makes. A pixel with data in the new tile wins; one with no data there keeps the old pixel.
- *
- * The function is called by its full name, so a push finds it whatever its search path. It is one function in the schema
- * `miniverse_functions`, shared by every raster table in the database, whatever their schemas: it takes nothing from a
- * table. The schema is not named `miniverse`: a role of that name (`"$user"`, first on the default search path) would then
- * make every table it names without a schema in it, not in `public`.
+ * @brief How a push merges a tile onto the one at its grid position: `miniverse_functions.merge_raster(current, incoming)`,
+ * made by the table's setup and shared by every raster table in the database. A pixel with data in the new tile wins; one
+ * with no data keeps the old pixel. The function is called by its full name, so a push finds it whatever the search path. The
+ * schema is not named `miniverse`: a role of that name would then create its unqualified tables in it, not in `public`, since
+ * `"$user"` comes first on the default search path.
  */
 struct MergeRaster {
   static constexpr std::string_view SCHEMA = "miniverse_functions";
@@ -74,15 +70,12 @@ struct MergeRaster {
  * miniverse::geo::Raster<std::int16_t> heights = world.load<Elevation>(area).get();
  * @endcode
  *
- * The grid is chosen once, when the table is made, and the table keeps it in its raster constraints, which PostGIS's
- * `raster_columns` reads: GDAL and QGIS open the table as one raster, `Miniverse::table_settings` gives the grid to a writer to
- * warp its source onto, and every push reads it before cutting its raster into tiles. The constraints also refuse a tile of
- * another grid.
+  * The grid is chosen when the table is made and kept in its raster constraints, which `raster_columns` reads. So GDAL and QGIS
+ * open the table as one raster, `Miniverse::table_settings` gives a writer the grid, every push reads it before cutting its
+ * raster into tiles, and the constraints refuse a tile of another grid.
  *
- * The pixel type is the layer's to choose, and it decides the table's size more than anything: tiles are stored compressed
- * (lz4), which halves whole numbers and hardly touches reals. Measured on 30 m heights, 16-bit whole metres take a third to
- * a sixth of the space of 32-bit reals and load a third faster; 32-bit whole decimetres, where a metre is too coarse, take
- * about half the reals' space.
+ * The pixel type decides the table's size more than anything, since tiles are compressed (lz4) and whole numbers compress
+ * where reals hardly do: for heights, 16-bit whole metres.
  */
 template <geo::Pixel pixel_t>
 struct RasterLayer {
@@ -106,8 +99,8 @@ struct RasterLayer {
   using load_statement_type = schemacht::query::Prepared<LOAD>;
 
   /**
-   * @brief How many bytes of pixels a push writes in one statement, at most, in whole tiles (at least one): a tile of 1200 by
-   * 1200 `std::int16_t` is 2.9 MB, so 11 of them. As text, which is how it is sent, a statement is about twice this.
+   * @brief A statement's worth of pixels, in whole tiles (at least one): a tile of 1200 by 1200 `std::int16_t` is 2.9 MB, so 11
+   * of them. As text, which is how it is sent, a statement is about twice this.
    */
   static constexpr std::size_t PIXEL_BYTES_PER_STATEMENT = std::size_t{32} << 20U;
 
@@ -122,29 +115,23 @@ struct RasterLayer {
       schemacht::schema::Field<double, "nodata">>;
 
   /**
-   * @return A lock that setups take turns by; the schema `miniverse_functions` and the function in it a push merges a tile with
-   * (`raster::MergeRaster`), each made if missing; lz4 as the compression of the tiles where they are stored; the table's
-   * spatial index; and its raster constraints, which record `grid` for `raster_columns` (and so GDAL):
-   * SRID 4326, the pixel size, the tile size, alignment to the grid, one band of `pixel_t`, the nodata value, no out-db
-   * bands, and an extent of the whole world (and a hair more, for rounding), so it never needs widening.
-   *
-   * The function is replaced by every setup, and outlives a dropped table, as other raster tables share it. The first
-   * setup in a database makes the schema, which needs CREATE on the database; pushing needs USAGE on the schema
-   * `miniverse_functions`. Two setups at once take turns: PostgreSQL lets no two transactions make one schema or replace
-   * one function at the same time, so each first takes an advisory lock, held until its transaction ends (`create_table`
-   * runs them in one), and the second waits for the first. Run outside a transaction, each statement is one of its own, and
-   * the lock is let go at once: run them all in one.
-   *
-   * The compression needs PostgreSQL 14 or newer, built with lz4, as the usual packages and images are: on one that is not,
-   * that statement fails, and `create_table` then makes no table. Tiles of 16-bit heights come to about half their size, and
-   * load about a tenth slower than uncompressed (as measured); tiles of reals hardly compress at all.
+   * @return The statements that set the table up. They run in one transaction (`create_table` does so), and a failing one
+   * makes no table.
+   * - An advisory lock, held to the end of the transaction: PostgreSQL refuses a second transaction that creates the same
+   *   schema or replaces the same function at the same time, so two setups take turns.
+   * - The schema `miniverse_functions` and the merge function in it (`raster::MergeRaster`), replaced by each setup and shared
+   *   by every raster table. The first setup in a database needs CREATE on it; a push needs USAGE on the schema.
+   * - lz4 compression of the tiles, which needs PostgreSQL 14 or newer built with lz4.
+   * - The GiST index on `ST_ConvexHull(rast)`.
+   * - The raster constraints that record `grid` for `raster_columns`: SRID 4326, pixel and tile size, alignment, one band of
+   *   `pixel_t`, the nodata value, in-db bands, and the grid's whole span as extent.
    * @throws std::invalid_argument if `grid` is not a grid: see `geo::Grid`.
    */
   [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table, const settings_type& grid);
 
   /**
-   * @return `raster` cut into the tiles of `grid`, the table's, it covers (`raster::cut`), in batches of
-   * `PIXEL_BYTES_PER_STATEMENT`, by tile id.
+      * @return `raster` cut into the tiles of `grid`, the table's, it covers (`raster::cut`), in batches of
+   * `PIXEL_BYTES_PER_STATEMENT`, in tile-id order.
    * @throws std::invalid_argument as `raster::cut`: `grid` is not a grid, or `raster` is not on it, or reaches past the world,
    * or its pixels are not `width * height`, or a pixel with data has the grid's nodata value.
    */
@@ -159,13 +146,16 @@ struct RasterLayer {
   [[nodiscard]] static result_type from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location);
 
   /**
-   * @return The tiles of `rows` that `location` reaches into (`raster::Reach`), each as it is stored, in no particular order:
-   * whole tiles, not cut to the location. The rows may hold a tile more, which the location only touches: the database's
-   * test counts touching. A tile is megabytes, so stream them a few at a time (`Miniverse::stream`'s `read.chunk_rows`).
+   * @return The tiles of `rows` that `location` reaches into (`raster::Reach`), whole and in no particular order. The rows may
+   * hold a tile more, one the location only touches, since the database's test counts touching.
    */
   [[nodiscard]] static chunk_type chunk_from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location);
 
-  /** @throws std::runtime_error if the table has no grid in its constraints: it was not made by `create_table`. */
+  /**
+   * @return The grid the table's constraints record, read back by `settings_statement_type`.
+   * @throws std::runtime_error if the table has no grid in its constraints (it was not made by `create_table`), or its pixels
+   * are not 1/n degree for a whole number n, or its nodata value is not a `pixel_t`.
+   */
   [[nodiscard]] static settings_type settings_from_rows(std::vector<typename settings_statement_type::row_type> rows);
 };
 

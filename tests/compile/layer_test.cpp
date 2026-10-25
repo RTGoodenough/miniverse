@@ -25,7 +25,7 @@ using test::Places;
 
 struct Roads : miniverse::RoadLayer {};
 
-// A feature layer of each geometry type: each is one line.
+// A feature layer of each geometry type.
 struct Shops : miniverse::FeatureLayer<geo::Point> {};
 struct Paths : miniverse::FeatureLayer<geo::LineString> {};
 struct Parks : miniverse::FeatureLayer<geo::Polygon> {};

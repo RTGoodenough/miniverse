@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
     const geo::Grid<std::int16_t> grid = world.table_settings<Elevation>().get();
     std::cout << "the table's grid: " << grid.pixels_per_degree << " pixels to a degree, " << std::lround(grid.metres_per_pixel()) << " m each\n";
 
-    // One transaction for the whole file, in windows of 2 by 2 tiles. Each window is waited for before the next is read.
+    // Windows of 2 by 2 tiles. A push in parts takes one call at a time: each window is waited for before the next is read.
     miniverse::PushInParts<Elevation> heights = world.begin_push<Elevation>().get();
 
     const miniverse::gdal::RasterRead read = miniverse::gdal::read_raster<std::int16_t>(

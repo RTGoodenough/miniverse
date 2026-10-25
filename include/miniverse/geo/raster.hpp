@@ -32,10 +32,9 @@ struct PixelPosition {
  * Pixels are in rows from the north, each row from the west: the pixel `column` across and `row` down is `at(column, row)`.
  * A pixel equal to `nodata` has no data.
  *
- * A position, a longitude and latitude, has its pixel by `pixel_at`, and its value by `value_at`: the value of the pixel it
- * lies in, not one worked out between pixels. Since a raster is north up and in degrees, as every raster of a table is, a
- * position's pixel is a matter of two divisions, and exact: there is no projection in it. What is not the same everywhere
- * is a pixel's size on the ground: as tall in metres at every latitude, and narrower by the latitude's cosine.
+ * A position has its pixel by `pixel_at` and its value by `value_at`: the value of the pixel it lies in, not one worked out
+ * between pixels. A pixel's size on the ground is not the same everywhere: as tall at every latitude, and narrower by the
+ * latitude's cosine.
  */
 template <Pixel pixel_t>
 struct Raster {
@@ -61,10 +60,9 @@ struct Raster {
   }
 
   /**
-   * @return The pixel `position` lies in; nothing if it lies outside the raster, or is no number. A position on the line
-   * between two pixels is in the eastern or southern one, as nearly as a double tells: a longitude written in decimals is
-   * rarely on a line to its last digit. The raster's own four edges are its outer pixels', and a position a rounding beyond
-   * one (a billionth of a pixel) is on it: the corner of the area a raster was loaded for has a pixel.
+   * @return The pixel `position` lies in; nothing if it lies outside the raster, or is no number. A position on the line between
+   * two pixels is in the eastern or southern one. The raster's edges belong to its outer pixels, to a billionth of a pixel, so
+   * the corner of the area a raster was loaded for has a pixel.
    */
   [[nodiscard]] std::optional<PixelPosition> pixel_at(const Point& position) const {
     constexpr double ROUNDING = 1e-9;

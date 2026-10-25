@@ -38,8 +38,8 @@ namespace {
 /** @brief Where each node of the file is, by its id: filled as the nodes are read, and asked for each way's. */
 using Positions = osmium::index::map::FlexMem<osmium::unsigned_object_id_type, osmium::Location>;
 
-// Nodes, for their positions, and ways: not relations. libosmium's own `node | way` makes this same value, in a header where
-// the analyzer's complaint that 3 names no one kind of object can't be answered.
+// Nodes, for their positions, and ways: not relations. libosmium's own `node | way` is this value, made in its header, where
+// the analyzer's complaint can't be silenced.
 // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange) -- a set of bits, which the type is for
 constexpr auto NODES_AND_WAYS = static_cast<osmium::osm_entity_bits::type>(
     static_cast<unsigned char>(osmium::osm_entity_bits::node) | static_cast<unsigned char>(osmium::osm_entity_bits::way)
@@ -128,8 +128,8 @@ WayRead read_ways(const WaySource& source, std::size_t chunk_ways, const std::fu
     throw std::runtime_error("'" + source.path + "' holds a history, several versions of each way: only a file of the map as it is can be read");
   }
 
-  // Positions by id, those above zero and (as an editor numbers what it has not uploaded) those below. A way's nodes that
-  // the file lacks are left without a position, not an error.
+  // Positions by id, above zero and (as an editor numbers what it has not uploaded) below. `ignore_errors`: a node the file
+  // lacks stays without a position in its way, which `Gatherer::way` then leaves out.
   Positions                                                   positions;
   Positions                                                   negatives;
   osmium::handler::NodeLocationsForWays<Positions, Positions> positioner(positions, negatives);
@@ -139,7 +139,7 @@ WayRead read_ways(const WaySource& source, std::size_t chunk_ways, const std::fu
   try {
     osmium::apply(reader, positioner, gatherer);
     reader.close();
-  } catch ( const protozero::exception& error ) {  // a damaged PBF file: not one of libosmium's own errors, nor a std::runtime_error
+  } catch ( const protozero::exception& error ) {  // a damaged PBF file: protozero's error is not a std::runtime_error
     throw std::runtime_error("'" + source.path + "' is damaged: " + error.what());
   }
 

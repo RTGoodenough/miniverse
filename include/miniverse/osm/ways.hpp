@@ -10,35 +10,33 @@
 /**
  * @file
  * OpenStreetMap files as ways, read with libosmium: a `.osm.pbf` extract, or any other form libosmium opens (`.osm`,
- * `.osm.bz2`), as the `Ways` a `RoadLayer` is pushed, or read in its place (road_file.hpp): each way with its node ids, which
- * other formats of the same data drop.
+ * `.osm.bz2`), as the `Ways` a `RoadLayer` is pushed, or read in its place (road_file.hpp). Each way comes with its node ids,
+ * which other formats of the same data drop.
  *
  * @code
  * struct Roads : miniverse::RoadLayer {};
  *
+ * auto parts = world.begin_push<Roads>(miniverse::Dataset{"region.osm.pbf"}).get();
  * miniverse::osm::read_ways({.path = "region.osm.pbf", .keys = {"highway"}}, 10000, [&](miniverse::Ways roads) {
- *   world.push<Roads>(std::move(roads)).get();  // a chunk at a time: the ways are never held whole
+ *   parts.add(std::move(roads)).get();  // a chunk at a time, so the ways are not held whole
  * });
+ * parts.commit().get();
  * @endcode
  *
  * - **Which ways**: those with a tag of one of `keys` (`highway` for roads, `railway`, `waterway`), or every way if there are
- *   no keys; in the file's order, which is by id in a file that is sorted, as OSM's are. Relations are not read.
- * - **A way** has its id, the ids of its nodes in order, their positions as a line (longitude and latitude, as OSM has
- *   them), and its tags as one JSON object of text values, as the file has them (OSM's text is UTF-8; text that is not
- *   fails the push). A closed way, a roundabout or an area's outline, is a line whose last node is its first again.
- * - **Left out, and counted**: of the ways asked for, one with a node the file does not have (an extract cuts ways at its
- *   edge), and one of fewer than two nodes, which is not a line. A file with its ways before its nodes, which no OSM file
- *   is, has every way left out so.
+ *   no keys, in the file's order (by id in a sorted file, as OSM's are). Relations are not read.
+ * - **A way** has its id, its node ids in order, their positions as a line (longitude and latitude), and its tags as one JSON
+ *   object of text values (OSM's text is UTF-8; text that is not fails the push). A closed way is a line whose last node is
+ *   its first again.
+ * - **Left out, and counted**: a way with a node the file does not have (an extract cuts ways at its edge), and one of fewer
+ *   than two nodes.
  * - **Only the map as it is**: a history file (`.osh`), with several versions of each way, is refused.
- * - **Memory**: the position of every node of the file is held while it is read, 16 bytes each and for a while twice that,
- *   since a way names its nodes only by id: several gigabytes for a large country. Read an extract of the area wanted.
+  * - **Memory**: the position of every node of the file is held while it is read. Read an extract of the area wanted.
  *
- * A file can also be a layer itself, read in place of a table (`road_file`, road_file.hpp): for a test, or a user with
- * files alone.
+ * A file can also be read in place of a table (`road_file`, road_file.hpp).
  *
- * Part of the optional component `miniverse::osm` (CMake: `MINIVERSE_BUILD_OSM`; osm.hpp includes all of it); the rest of
- * miniverse does not need libosmium. Errors are `std::runtime_error`: libosmium's own for a file it can't read (a `std::system_error` for one that
- * can't be opened).
+ * Part of the optional component `miniverse::osm` (CMake: `MINIVERSE_BUILD_OSM`; osm.hpp includes all of it). Errors are
+ * `std::runtime_error`: libosmium's own for a file it can't read (a `std::system_error` for one that can't be opened).
  */
 namespace miniverse::osm {
 
@@ -55,11 +53,11 @@ struct WayRead {
 };
 
 /**
- * @brief Reads `source`'s ways and hands them to `on_chunk`, `chunk_ways` at a time (the last of what is left), on the
+ * @brief Reads `source`'s ways and hands them to `on_chunk`, `chunk_ways` at a time (the last chunk, what is left), on the
  * calling thread.
  * @throws std::invalid_argument if `chunk_ways` is 0.
  * @throws std::runtime_error if the file can't be opened or read, is damaged, or holds a history. Chunks handed over before
- * an error stay handed over. What `on_chunk` throws is passed on.
+ * the error stay handed over. What `on_chunk` throws is passed on.
  */
 WayRead read_ways(const WaySource& source, std::size_t chunk_ways, const std::function<void(Ways)>& on_chunk);
 

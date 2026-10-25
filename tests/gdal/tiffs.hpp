@@ -33,7 +33,6 @@ using Raster = miniverse::geo::Raster<std::int16_t>;
 constexpr std::int16_t GRID_NODATA = -32768;
 constexpr std::int16_t FILE_NODATA = -9999;
 
-// Four pixels to a degree, in tiles of one degree.
 constexpr miniverse::geo::Grid<std::int16_t> GRID{.pixels_per_degree = 4, .tile_pixels = 4, .nodata = GRID_NODATA};
 
 struct Elevation : miniverse::RasterLayer<std::int16_t> {};

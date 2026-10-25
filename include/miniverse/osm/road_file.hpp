@@ -15,16 +15,14 @@
 
 /**
  * @file
- * An OpenStreetMap file as a layer: its ways read once (ways.hpp) and held in memory (ways_in_memory.hpp), in place of a
- * table, for a test or a user with files alone.
+ * An OpenStreetMap file as a layer: its ways read once (ways.hpp) and held in memory (ways_in_memory.hpp), in place of a table.
  */
 namespace miniverse::osm {
 
 /**
- * @brief The reader of ways held in memory as a layer of `kind_t`: what `road_file` makes a layer with, from a file's. A load
- * gives the ways that intersect the location, in the order they were given (a table's are by id), their tags as they were
- * given (a table's are as `jsonb` prints them: the same document, another text). There is nothing left to go wrong once it
- * is made, so `Miniverse::verify` finds nothing to say of it.
+ * @brief The reader of ways held in memory as a layer of `kind_t`: what `road_file` makes from a file's ways, and a program can
+ * make from ways of its own. A load gives the ways that intersect the location, in the order they were given, with their tags
+ * as given. `Miniverse::verify` has nothing to check once it is made.
  */
 template <WayKind kind_t>
 class RoadFile : public Reader<kind_t> {
@@ -63,9 +61,9 @@ class RoadFile : public Reader<kind_t> {
  * world.load<Roads>(area).get();  // the file's roads that intersect the area
  * @endcode
  *
- * The whole file is read here, and its ways (those `source` asks for) held in memory for as long as the layer lives: fine for
- * a town or a state, where a country belongs in the database. Ways left out by `read_ways` are left out here.
- * @throws std::runtime_error as `read_ways`, if the file can't be read.
+ * The whole file is read here, and the ways `source` asks for are held in memory for as long as the layer lives: fine for a
+ * town or a state; a country belongs in the database. Ways `read_ways` leaves out are left out here.
+ * @throws std::runtime_error as `read_ways`.
  */
 template <WayKind kind_t>
 [[nodiscard]] Layer<kind_t> road_file(const WaySource& source) {

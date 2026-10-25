@@ -30,7 +30,7 @@ int main(int argc, char** argv) {
     world.drop_tables();
     world.create_tables();
 
-    // One transaction for the whole file. Each chunk is waited for before the next is read, so one chunk is held at a time.
+    // A push in parts takes one call at a time: each chunk is waited for before the next is read.
     miniverse::PushInParts<Buildings> buildings = world.begin_push<Buildings>(miniverse::Dataset{"buildings.geojson"}).get();
 
     const miniverse::gdal::VectorRead read = miniverse::gdal::read_features<geo::MultiPolygon>(

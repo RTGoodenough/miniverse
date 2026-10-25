@@ -65,7 +65,7 @@ std::string without_database(const std::string& conninfo) {
   // Each value in quotes, with the two characters that mean something inside them escaped. The array ends with a keyword of none.
   std::string result;
   for ( const PQconninfoOption* option = options.get(); option->keyword != nullptr;
-        ++option ) {  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+        ++option ) {  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- libpq ends the array with a null keyword
     if ( option->val == nullptr || std::string_view(option->keyword) == "dbname" ) {
       continue;
     }
@@ -129,7 +129,7 @@ void write_roads(World& world, const std::string& path) {
   std::cout << "roads: " << read.ways << " written, " << read.without_nodes << " left out, of " << path << '\n';
 }
 
-/** @return The GeoTIFFs of `directory`, by name. Checked before anything is made: a wrong path then costs nothing. */
+/** @return The GeoTIFFs of `directory`, by name. */
 std::vector<std::filesystem::path> geotiffs_of(const std::string& directory) {
   if ( ! std::filesystem::is_directory(directory) ) {
     throw std::runtime_error("'" + directory + "' is not a directory: the GeoTIFFs are read from one");
@@ -161,7 +161,7 @@ void write_heights(World& world, const std::vector<std::filesystem::path>& files
   for ( const std::filesystem::path& file : files ) {
     miniverse::PushInParts<Elevation> heights = world.begin_push<Elevation>().get();
 
-    // Windows of 2 by 2 tiles, 1024 pixels a side: each is held twice while it is made, and once more as it is sent.
+    // Windows of 2 by 2 tiles, 1024 pixels a side.
     const miniverse::gdal::RasterRead read = about("the GeoTIFF '" + file.string() + "'", [&] {
       return miniverse::gdal::read_raster<std::int16_t>({.path = file.string()}, grid, 2, [&heights](geo::Raster<std::int16_t> window) {
         heights.add(std::move(window)).get();
@@ -185,7 +185,7 @@ int main(int argc, char** argv) {
   }
 
   try {
-    // The inputs first, so that a wrong path makes no database.
+    // The inputs are checked first: a wrong path makes no database.
     const std::string roads_file = args[3];
     if ( ! std::filesystem::is_regular_file(roads_file) ) {
       throw std::runtime_error("'" + roads_file + "' is not a file: the OpenStreetMap extract is one");
@@ -201,14 +201,14 @@ int main(int argc, char** argv) {
     std::ignore = world.database().execute(postgres::unchecked_sql("CREATE EXTENSION IF NOT EXISTS postgis_raster")).get();
 
     // The elevation table's grid, chosen once: 3600 pixels to a degree, about 31 m, which is what a survey of one arc second
-    // has, so its pixels are the table's. Tiles of 512 pixels suit loads of up to 100 km.
+    // has, so its pixels are the table's. Tiles of 512 pixels, about 16 km a side.
     world.create_table<Roads>();
     world.create_table<Elevation>({.pixels_per_degree = 3600, .tile_pixels = 512, .nodata = -32768});
 
     write_roads(world, roads_file);
     write_heights(world, geotiffs);
 
-    // What the planner knows of the new tables, now and not when the server next gets to it.
+    // Statistics for the planner, now; autovacuum would gather them later.
     std::ignore = world.database().execute(postgres::unchecked_sql("ANALYZE")).get();
 
     std::cout << "the database " << args[2] << " is made, and stays\n";

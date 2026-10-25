@@ -15,49 +15,35 @@
 
 /**
  * @file
- * What a kind of layer is: a kind of data (roads, elevation, ...) and how it is stored. A kind is a type, used only as a name,
- * never made; `Miniverse<Roads, Elevation>` holds one layer of each, and each layer names its table when the miniverse is
- * made (`Layer<Roads>("osm_roads")`). Two layers of one kind are two types: `struct Roads : RoadLayer {};` and
- * `struct Tracks : RoadLayer {};`.
+ * What a kind of layer is: a kind of data (roads, elevation) and how it is stored. A kind is a type used only as a name;
+ * `Miniverse<Roads, Elevation>` holds one layer of each. Two layers of one kind are two types: `struct Roads : RoadLayer {};`
+ * and `struct Tracks : RoadLayer {};`.
  *
  * A kind says:
- * - `result_type`: what a load gives, decoded (`Ways`, say), for the worker to build what it wants from.
- * - `schema_type`: its table's layout, as a schemacht `Schema`. The schema's own name is only a placeholder.
- * - `load_statement_type`: the query that reads what lies in a location, a `schemacht::query::Prepared` written against
- *   `schema_type`, whose one argument is a polygon in WGS 84 (with `geo::Intersects`, say). It runs on the layer's table (`on`).
- * - `setup_sql(table, ...)`: statements that run once the table is made, such as its spatial index, written with the
- *   table's quoted name.
- * - `from_rows(rows, location)`: the load statement's rows made into a `result_type`, and `to_rows(result, ...)` the other
- *   way, for writing: in batches, each the rows of one statement. The kind sizes them, as it knows its rows: a batch should
- *   be some tens of megabytes at most as text, since a push holds one at a time (`FeatureLayer::POINTS_PER_STATEMENT`,
- *   `RasterLayer::PIXEL_BYTES_PER_STATEMENT`).
- * - `write_statement(rows)`: the statement that writes one batch, a schemacht insert (`insert_statement`: a row already there
- *   fails the push) or upsert (`upsert_statement`: it is merged), aimed at the layer's table (`on`). A push runs one per batch,
- *   all in one transaction.
+ * - `result_type`: what a load gives (`Ways`, say).
+ * - `schema_type`: its table's layout, a schemacht `Schema`. The schema's own name is a placeholder; the layer names the table.
+ * - `load_statement_type`: a `schemacht::query::Prepared` against `schema_type` whose one argument is a polygon in WGS 84
+ *   (with `geo::Intersects`, say), run on the layer's table with `on`.
+ * - `setup_sql(table, ...)`: statements run once the table is made, such as its spatial index, written with `table.quoted()`.
+ * - `from_rows(rows, location)`: the load's rows as a `result_type`; `to_rows(result, ...)`: the other way, in batches of one
+ *   statement each. The kind sizes the batches: some tens of megabytes of text at most, since a push holds one at a time.
+ * - `write_statement(rows)`: the schemacht insert or upsert that writes one batch, aimed at the layer's table with `on`.
  *
- * The `...` is what a kind's writes need beside the data, and a kind is one of three:
- * - A kind without settings (`HasNoSettings`, a kind of your own with plain inserts) makes its table the same way every time:
- *   `setup_sql(table)`, `to_rows(result)`.
- * - A kind with settings (`HasSettings`, a `RasterLayer`'s grid) has a `settings_type`. Its table is made with them,
- *   `setup_sql(table, settings)`, once, by `Miniverse::create_table<Kind>(settings)`, and the table keeps them. To write, the
- *   kind reads them back from the table: `settings_statement_type`, a statement whose one argument is the table's quoted
- *   name, and `settings_from_rows(rows)`, its rows made into a `settings_type`; a push does so before `to_rows(result,
- *   settings)`, and `Miniverse::table_settings` gives them to a writer, to warp its source onto. A worker that only loads
- *   never needs them.
- * - A kind with datasets (`HasDatasets`, a `FeatureLayer` or `RoadLayer`) writes its rows under a `Dataset`, the export they
- *   came from, and a push replaces the dataset: `to_rows(result, dataset, stamp)` marks each row with the dataset's name and
- *   the push's stamp (a number the push chooses), and once the rows are written, `sweep_statement_type`, bound to the name
- *   and the stamp, deletes the dataset's rows the push did not write, before the transaction commits. `remove_statement_type`,
- *   bound to the name, deletes a dataset outright (`Miniverse::remove`). Its ids are the database's own (a generated key):
- *   `to_rows` leaves them out, as `schema_type::insert_row_type` does, and `from_rows` reads them.
+ * The `...` is what a kind's writes need beside the data; a kind is exactly one of three:
+ * - Without settings (`HasNoSettings`): `setup_sql(table)`, `to_rows(result)`.
+ * - With settings (`HasSettings`, a `RasterLayer`'s grid): `settings_type`; `setup_sql(table, settings)`, run once by
+ *   `Miniverse::create_table<Kind>(settings)`; `settings_statement_type`, whose one argument is the table's quoted name, and
+ *   `settings_from_rows(rows)`, which read the settings back from the table before `to_rows(result, settings)`.
+ * - With datasets (`HasDatasets`, a `FeatureLayer` or `RoadLayer`): rows are written under a `Dataset` and a push replaces
+ *   it. `to_rows(result, dataset, stamp)` marks each row with the dataset's name and the push's stamp; `sweep_statement_type`,
+ *   bound to both and run before the commit, deletes the dataset's rows the push did not write; `remove_statement_type`,
+ *   bound to the name, deletes the dataset. Ids are the database's own: `to_rows` leaves them out (`schema_type::insert_row_type`).
  *
- * A streamed load (`Miniverse::stream`) hands its callback a chunk of what a load would give, made from some of the rows as
- * they arrive. For most kinds a chunk is a `result_type`, made by `from_rows`: some of the features. A kind whose `from_rows`
- * needs every row at once (a raster's window is stitched from all its tiles) says what a chunk is instead (`HasOwnChunks`):
- * `chunk_type`, and `chunk_from_rows(rows, location)`.
+ * A streamed load hands its callback chunks of what a load would give, made by `from_rows` from some of the rows. A kind whose
+ * `from_rows` needs every row at once (a raster's window is stitched from all its tiles) says what a chunk is instead
+ * (`HasOwnChunks`): `chunk_type` and `chunk_from_rows(rows, location)`.
  *
- * miniverse's own kinds (`FeatureLayer`, `RoadLayer`, `RasterLayer`) are built this way, and a kind of your own needs only to meet
- * `LayerKind` to be loaded and pushed like them.
+ * A kind of your own needs only to meet `LayerKind` to be loaded and pushed like the built-in ones.
  */
 namespace miniverse {
 
@@ -131,9 +117,9 @@ concept LayerKind =
       { kind_t::from_rows(std::move(rows), location) } -> std::same_as<typename kind_t::result_type>;
       { kind_t::write_statement(written).on(schema_table) } -> schemacht::postgres::CommandStatement;
     } &&
-    // One of the three, not two: a kind with settings and datasets would be written by `push(dataset, data)` without them.
+    // Exactly one of the three: no push has both settings and a dataset to give `to_rows`.
     (int{HasNoSettings<kind_t>} + int{HasSettings<kind_t>} + int{HasDatasets<kind_t>} == 1) &&
-    // A kind that names a `chunk_type` must make chunks of it: else its streams would fall back to `from_rows` unnoticed.
+    // A kind that names a `chunk_type` must make chunks of it, or its streams would silently fall back to `from_rows`.
     (! requires { typename kind_t::chunk_type; } || HasOwnChunks<kind_t>);
 
 /** @brief What a streamed load of `kind_t` hands its callback (`ChunkOf`): its `result_type`, or its own `chunk_type`. */

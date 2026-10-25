@@ -12,6 +12,7 @@
 #include "miniverse/geo/concepts/raster.hpp"
 
 /**
+ * @file
  * What the files of miniverse::gdal share: GDAL's drivers registered once, its errors made into exceptions, and its name for
  * each pixel type. Not installed.
  */

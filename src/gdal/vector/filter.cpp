@@ -45,11 +45,10 @@ namespace {
 }
 
 /**
- * @brief Has `layer` read only the features whose boxes meet the box of `location`, a polygon in WGS 84, as that box lies in
- * the layer's own coordinate system, and a little more: what its spatial index answers. The box's straight edges are curves
- * there, found by points along them, so the box is widened by a hundredth each way to hold what bulges between the points:
- * the test of each feature decides, and this only spares it features far off. If the box can't be placed there (the
- * location is partly outside what the system covers), every feature is read.
+ * @brief Has `layer` read only the features whose boxes meet the box of `location` in the layer's own coordinate system: the
+ * question its spatial index answers. The box's straight edges are curves there, found by points along them, so the box is
+ * widened a little to hold what bulges between the points; the test of each feature then decides. If the box can't be placed
+ * (the location is partly outside what the system covers), every feature is read.
  */
 void narrow_to(OGRLayer& layer, const OGRPolygon& location, OGRCoordinateTransformation& to_wgs84) {
   constexpr int    POINTS_ALONG_AN_EDGE = 21;

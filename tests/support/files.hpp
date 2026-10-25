@@ -1,7 +1,5 @@
 #pragma once
 
-// A directory of its own for a test's files, removed with everything in it afterwards.
-
 #include <filesystem>
 #include <fstream>
 #include <random>
