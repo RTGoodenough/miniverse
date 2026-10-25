@@ -20,7 +20,7 @@
 #include "miniverse/layer/way.hpp"
 #include "miniverse/osm/ways_in_memory.hpp"
 
-namespace miniverse::osm {
+namespace miniverse::osm::detail {
 
 namespace {
 
@@ -104,4 +104,4 @@ Ways WaysInMemory::in(const geo::Polygon& location) const {
   return all;
 }
 
-}  // namespace miniverse::osm
+}  // namespace miniverse::osm::detail

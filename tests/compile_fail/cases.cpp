@@ -39,6 +39,10 @@ void push_heights(miniverse::Miniverse<Elevation>& world) {
 void make(miniverse::Miniverse<Elevation>& world) { world.create_tables(); }
 #endif
 
+#if defined(CASE_NO_LAYERS)
+void open_nothing(const std::string& conninfo) { miniverse::Miniverse<> world(conninfo); }
+#endif
+
 #if defined(CASE_DUPLICATE_KIND)
 void open(const std::string& conninfo) {
   miniverse::Miniverse<Roads, Roads> world(conninfo, miniverse::Layer<Roads>("roads"), miniverse::Layer<Roads>("more_roads"));

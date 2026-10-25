@@ -63,13 +63,11 @@ template <miniverse::LayerKind... kind_ts>
 TEST_CASE("integration: a miniverse whose tables its own create_table made verifies", "[integration]") {
   test::Fresh<World> made = with_tables(test_db());
 
-  // Of one layer, and of none, too.
-  Miniverse   only_roads(test_db(), Layer<Roads>("miniverse_test_verify_roads"));
-  Miniverse<> of_nothing(test_db());
+  // Of one layer, too.
+  Miniverse only_roads(test_db(), Layer<Roads>("miniverse_test_verify_roads"));
 
   CHECK_NOTHROW(made.world().verify().get());
   CHECK_NOTHROW(only_roads.verify().get());
-  CHECK_NOTHROW(of_nothing.verify().get());
 }
 
 TEST_CASE("integration: a raster table in a schema of its own verifies, and is named with it when it does not", "[integration]") {

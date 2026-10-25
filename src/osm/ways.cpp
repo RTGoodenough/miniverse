@@ -98,11 +98,11 @@ class Gatherer : public osmium::handler::Handler {
   [[nodiscard]] const WayRead& read() const noexcept { return _read; }
 
  private:
-  const WaySource*                  _source;
-  std::size_t                       _chunk_ways;
-  const std::function<void(Ways)>*  _on_chunk;
-  Ways                              _chunk;
-  WayRead                           _read;
+  const WaySource*                 _source;
+  std::size_t                      _chunk_ways;
+  const std::function<void(Ways)>* _on_chunk;
+  Ways                             _chunk;
+  WayRead                          _read;
 
   [[nodiscard]] bool wanted(const osmium::Way& way) const {
     return _source->keys.empty() || std::ranges::any_of(_source->keys, [&](const std::string& key) { return way.tags().has_key(key.c_str()); });

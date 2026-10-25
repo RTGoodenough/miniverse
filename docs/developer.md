@@ -17,18 +17,17 @@ include/miniverse/
   location.hpp           check_location: what a reader's load holds a polygon to, as a table's would refuse
   miniverse.hpp          umbrella: world.hpp plus the built-in kinds and geo types
   concepts/              LayerKind, HasSettings, HasNoSettings, HasDatasets, HasOwnChunks, ChunkCallback
-  geo/                   one idea each: types.hpp (Boost.Geometry), grid.hpp, raster.hpp, wkb.hpp and raster_wkb.hpp
-                         (over wkb_bytes.hpp), column_types.hpp, operations.hpp (PostGIS tests); concepts/ under
-                         each area holds its concepts
+  geo/                   one idea each: types.hpp (Boost.Geometry), grid.hpp, raster.hpp, wkb.hpp and raster_wkb.hpp,
+                         column_types.hpp, operations.hpp (PostGIS tests); concepts/ under each area holds its concepts
   layer/                 feature.hpp and way.hpp (what a load gives), the kinds feature_layer.hpp, road_layer.hpp,
                          raster_layer.hpp; dataset_columns.hpp (what a kind with datasets keeps in its table, and its sweep
                          and remove); raster/reach.hpp (which tiles a location has), raster/tiles.hpp (cut, window)
   gdal/                  component miniverse::gdal: vector.hpp and raster.hpp (files read into layers), feature_file.hpp
                          and raster_file.hpp (files as layers), dataset.hpp; gdal.hpp is its umbrella
-  osm/                   component miniverse::osm: ways.hpp (files read), ways_in_memory.hpp, road_file.hpp (a file as a
-                         layer); osm.hpp is its umbrella
-src/                     the compiled parts: geo WKB, the kinds' statements and conversions, layer/raster/, gdal/ (with its
-                         private raster/ and vector/), osm/
+  osm/                   component miniverse::osm: ways.hpp (files read), road_file.hpp (a file as a layer, over
+                         ways_in_memory.hpp, a detail); osm.hpp is its umbrella
+src/                     the compiled parts: geo WKB (over its private geo/wkb_bytes.hpp), the kinds' statements and
+                         conversions, layer/raster/, gdal/ (with its private raster/ and vector/), osm/
 tests/
   compile/               static_asserts on the concepts and types
   compile_fail/          cases that must not compile, each checked for its message
@@ -71,7 +70,7 @@ of the rows (`HasOwnChunks`: a raster, stitched from all its tiles) says what a 
 and `chunk_from_rows`.
 
 The statements are built with schemacht's query builder and checked against the schema at compile time. PostGIS tests
-are small operation types in `geo/operations.hpp` (`Intersects`, `OutlineIntersects`, `BoxesIntersect`), applied to a
+are small operation types in `geo/operations.hpp` (`Intersects`, `OutlineIntersects`), applied to a
 column: `col<"geom">().apply<geo::Intersects>(arg<0>())`.
 
 ### A load, a stream, a push
@@ -175,7 +174,7 @@ and `settings_from_rows`; `RasterLayer` is the example. A kind with datasets put
 
 Derive from `Reader<Kind>` and implement `name`, `load`, `stream`, and `problems` if there is anything `verify` should
 check; `settings` for a kind with settings. Keep every member `const` and thread-safe. `tests/unit/reader_test.cpp` has
-two small readers and the tests a reader should pass; `gdal::FeatureFile`, `gdal::RasterFile` and `osm::RoadFile` are
+two small readers and the tests a reader should pass; the readers behind `gdal::feature_file`, `gdal::raster_file` and `osm::road_file` are
 the real ones.
 
 ### Add a file format
@@ -185,7 +184,7 @@ naming the file and options, a chunked `read_*` for importing into tables, a `re
 `problems_of` for `verify`; in a header of its own, the `*File<Kind>` reader and the `*_file<Kind>` function that makes
 the `Layer`. Constrain `Kind` with a concept in `concepts/` that says
 which kinds the format can feed (`gdal::FeatureKind`, `gdal::RasterKind`, `osm::WayKind`). Add a test that pushes a file
-into a table and compares loads and streams of the two, as `tests/gdal/raster_test.cpp` does with
+into a table and compares loads and streams of the two, as `tests/gdal/raster_equivalence_test.cpp` does with
 `check_loads_as_a_table`.
 
 ### Add a pixel type
@@ -245,7 +244,7 @@ database up, no test should be skipped.
 
 Parts of the suite:
 
-- `tests/gdal/raster_test.cpp` and `vector_test.cpp`, `tests/osm/ways_test.cpp`: each test file is pushed into a table
+- `tests/gdal/raster_equivalence_test.cpp` and `vector_equivalence_test.cpp`, `tests/osm/ways_test.cpp`: each test file is pushed into a table
   and the file layer's loads and streams are compared with the table's, for a list of locations including ones that
   touch tile edges. Use a grid of tenths of a degree and rough pixels for such tests: a dyadic grid and smooth data hide
   rounding differences.

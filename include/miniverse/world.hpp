@@ -84,9 +84,7 @@ class Miniverse {
    * @brief A miniverse with no database, for `layers` that each have a reader: nothing is connected to.
    * @throws std::invalid_argument if a layer is a table: that needs a connection string.
    */
-  explicit Miniverse(Layer<kind_ts>... layers)
-    requires(sizeof...(kind_ts) > 0)
-      : _layers(all_with_readers(std::move(layers)...)) {}
+  explicit Miniverse(Layer<kind_ts>... layers) : _layers(all_with_readers(std::move(layers)...)) {}
 
   /**
    * @return The name of the table the layer `kind_t` is stored in.
@@ -308,15 +306,11 @@ class Miniverse {
    */
   [[nodiscard]] std::future<void> verify() {
     return schemacht::util::future_from<void>([&](const schemacht::util::Settler<void>& done) {
-      if constexpr ( sizeof...(kind_ts) == 0 ) {
-        done(nullptr);
-      } else {
-        detail::guarded(done, [&] {
-          const auto  checks = std::make_shared<detail::Checks>(std::vector<std::string>{layer<kind_ts>().name()...}, done);
-          std::size_t layer_number = 0;
-          (check<kind_ts>(checks, layer_number++), ...);
-        });
-      }
+      detail::guarded(done, [&] {
+        const auto  checks = std::make_shared<detail::Checks>(std::vector<std::string>{layer<kind_ts>().name()...}, done);
+        std::size_t layer_number = 0;
+        (check<kind_ts>(checks, layer_number++), ...);
+      });
     });
   }
 
@@ -381,6 +375,7 @@ class Miniverse {
   template <LayerKind kind_t>
   static constexpr std::size_t COUNT_OF = (std::size_t{0} + ... + std::size_t{std::same_as<kind_t, kind_ts>});
 
+  static_assert(sizeof...(kind_ts) > 0, "a miniverse holds at least one layer: give Miniverse<...> its kinds");
   static_assert(((COUNT_OF<kind_ts> == 1) && ...), "a miniverse holds one layer of each kind: make another kind for a second layer of it");
 
   template <LayerKind kind_t>
@@ -415,15 +410,14 @@ class Miniverse {
   /** @return A future that holds why the layer `kind_t`, which has a reader, can't be written. */
   template <LayerKind kind_t, schemacht::util::FutureValue result_t>
   [[nodiscard]] std::future<result_t> only_read() const {
-    return schemacht::util::future_from<result_t>([&](const schemacht::util::Settler<result_t>& done) {
-      detail::guarded(done, [&] {
-        done.fail(
-            std::make_exception_ptr(
-                std::logic_error("the layer read from " + layer<kind_t>().name() + " is only read: a push or a remove needs a layer that is a table")
-            )
-        );
-      });
-    });
+    std::promise<result_t> failed;
+    try {
+      throw std::logic_error("the layer read from " + layer<kind_t>().name() + " is only read: a push or a remove needs a layer that is a table");
+    } catch ( ... ) {
+      failed.set_exception(std::current_exception());  // or why the message could not be made: still through the future
+    }
+
+    return failed.get_future();
   }
 
   /** @brief Checks the layer `kind_t` for `verify`: its table against its kind, or its reader asked for its problems. */

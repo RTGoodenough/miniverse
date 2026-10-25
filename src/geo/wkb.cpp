@@ -9,8 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include "geo/wkb_bytes.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/geo/wkb_bytes.hpp"
 
 namespace miniverse::geo::wkb {
 
@@ -241,9 +241,9 @@ template std::vector<std::byte> write<Polygon>(const Polygon& geometry);
 template std::vector<std::byte> write<MultiLineString>(const MultiLineString& geometry);
 template std::vector<std::byte> write<MultiPolygon>(const MultiPolygon& geometry);
 
-template Point      read<Point>(std::span<const std::byte> bytes);
-template LineString read<LineString>(std::span<const std::byte> bytes);
-template Polygon    read<Polygon>(std::span<const std::byte> bytes);
+template Point           read<Point>(std::span<const std::byte> bytes);
+template LineString      read<LineString>(std::span<const std::byte> bytes);
+template Polygon         read<Polygon>(std::span<const std::byte> bytes);
 template MultiLineString read<MultiLineString>(std::span<const std::byte> bytes);
 template MultiPolygon    read<MultiPolygon>(std::span<const std::byte> bytes);
 

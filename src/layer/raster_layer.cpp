@@ -25,10 +25,6 @@ namespace miniverse {
 
 namespace {
 
-// The grid's corner, and the world's size in degrees.
-constexpr double WEST = geo::GRID_WEST;
-constexpr double NORTH = geo::GRID_NORTH;
-
 // How far the extent constraint reaches past the grid's own edge, in degrees. A tile's far edge, computed in floating point as
 // its corner plus its width, can land a rounding step past the edge, and the constraint would then refuse it.
 constexpr double EXTENT_MARGIN = 1e-9;
@@ -65,10 +61,10 @@ std::vector<std::string> RasterLayer<pixel_t>::setup_sql(const schemacht::schema
   const std::int64_t ppd = grid.pixels_per_degree;
   const std::int64_t tile = grid.tile_pixels;
   const std::string  size = decimal(1.0 / static_cast<double>(ppd));
-  const double       west = WEST - EXTENT_MARGIN;
-  const double       north = NORTH + EXTENT_MARGIN;
-  const double       east = WEST + (static_cast<double>(grid.tiles_across() * tile) / static_cast<double>(ppd)) + EXTENT_MARGIN;
-  const double       south = NORTH - (static_cast<double>(grid.tiles_down() * tile) / static_cast<double>(ppd)) - EXTENT_MARGIN;
+  const double       west = geo::GRID_WEST - EXTENT_MARGIN;
+  const double       north = geo::GRID_NORTH + EXTENT_MARGIN;
+  const double       east = geo::GRID_WEST + (static_cast<double>(grid.tiles_across() * tile) / static_cast<double>(ppd)) + EXTENT_MARGIN;
+  const double       south = geo::GRID_NORTH - (static_cast<double>(grid.tiles_down() * tile) / static_cast<double>(ppd)) - EXTENT_MARGIN;
   const std::string  world =
       std::format("SRID=4326;POLYGON(({0} {1},{0} {2},{3} {2},{3} {1},{0} {1}))", decimal(west), decimal(south), decimal(north), decimal(east));
 

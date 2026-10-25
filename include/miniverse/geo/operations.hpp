@@ -36,14 +36,4 @@ struct OutlineIntersects {
   using argument_type = Polygon;
 };
 
-/**
- * @brief `"column" && $n::geometry(Polygon,4326)`: the column's bounding box and the polygon's intersect. On a `raster` column
- * the box is the tile's outline (`ST_ConvexHull`), so a GiST index on `ST_ConvexHull(rast)` answers it, as `raster2pgsql -I`
- * makes one. Every tile that touches the polygon's box matches, even one that only shares an edge.
- */
-struct BoxesIntersect {
-  static constexpr std::string_view OPERATOR = "&&";
-  using argument_type = Polygon;
-};
-
 }  // namespace miniverse::geo

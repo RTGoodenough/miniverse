@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -12,17 +13,20 @@
 #include <utility>
 #include <vector>
 
-#include "miniverse/geo/concepts/wkb_bytes.hpp"  // IWYU pragma: export
-
 /**
  * @file
  * The bytes of well-known binary, geometry's (geo/wkb.hpp) and raster's (geo/raster_wkb.hpp) alike: a `Reader` for either
- * byte order, as the data's own mark says, and a `Writer` that writes little-endian. For a WKB form of your own, such as
- * another PostGIS type read through `ST_AsBinary`.
+ * byte order, as the data's own mark says, and a `Writer` that writes little-endian. Not installed: what the two WKB forms
+ * share, and nothing else uses.
  *
  * Malformed input throws `std::invalid_argument`, its message starting `wkb: `.
  */
 namespace miniverse::geo::wkb {
+
+/** @brief A number WKB holds: an integer or a floating point number of 1, 2, 4 or 8 bytes. */
+template <typename number_t>
+concept Number = (std::integral<number_t> || std::floating_point<number_t>) && ! std::same_as<number_t, bool> &&
+                 std::has_single_bit(sizeof(number_t)) && sizeof(number_t) <= sizeof(std::uint64_t);
 
 /** @brief Throws `std::invalid_argument("wkb: " + what)`: for a reader of a WKB form to report what is wrong with it. */
 [[noreturn]] inline void malformed(const std::string& what) { throw std::invalid_argument("wkb: " + what); }

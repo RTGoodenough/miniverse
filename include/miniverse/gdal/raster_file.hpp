@@ -23,6 +23,8 @@
  */
 namespace miniverse::gdal {
 
+namespace detail {
+
 /**
  * @brief The reader of a raster file as a layer of `kind_t`: what `raster_file` makes a layer with. A load gives the pixels in
  * the box of the location on the layer's grid, as a table that the file was pushed into gives them; each load opens the file
@@ -69,6 +71,8 @@ class RasterFile : public Reader<kind_t> {
   ~RasterFile() override = default;
 };
 
+}  // namespace detail
+
 /**
  * @return The layer of `kind_t` that is `source`, a raster file, warped onto `grid` and read in place of a table:
  *
@@ -83,7 +87,7 @@ class RasterFile : public Reader<kind_t> {
  */
 template <RasterKind kind_t>
 [[nodiscard]] Layer<kind_t> raster_file(RasterSource source, const geo::Grid<PixelOf<kind_t>>& grid) {
-  return Layer<kind_t>(std::make_shared<RasterFile<kind_t>>(std::move(source), grid));
+  return Layer<kind_t>(std::make_shared<detail::RasterFile<kind_t>>(std::move(source), grid));
 }
 
 }  // namespace miniverse::gdal

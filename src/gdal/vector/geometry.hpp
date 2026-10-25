@@ -51,8 +51,8 @@ template <geo::wkb::Geometry geometry_t>
 [[nodiscard]] geo::Polygon polygon_of(const OGRPolygon& from);
 
 /**
- * @return `geometry` as the OGR type `wanted`, or null if it is not one: itself; a single geometry as a multi one of one part;
- * or the part of a multi one that has just one. Never OGR's own `forceTo` for the last: it makes a multipolygon of several
+ * @return `geometry`, already in WGS 84 and linear (`in_wgs84`), as the OGR type `wanted`, or null if it is not one: itself;
+ * a single geometry as a multi one of one part; or the part of a multi one that has just one. Never OGR's own `forceTo` for the last: it makes a multipolygon of several
  * parts into one polygon of all their rings, without a word.
  */
 [[nodiscard]] std::unique_ptr<OGRGeometry> as_type(std::unique_ptr<OGRGeometry> geometry, OGRwkbGeometryType wanted);

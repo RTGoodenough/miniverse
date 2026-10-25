@@ -40,6 +40,8 @@ using detail::tile_of;
 using detail::Tiles;
 using detail::tiles_meeting;
 using detail::tiles_of;
+using detail::Tiling;
+using detail::tiling_of;
 using detail::warp_into;
 using detail::window_of;
 
@@ -64,7 +66,7 @@ RasterRead read_raster(
   const GDALDatasetUniquePtr dataset = opened(source);
 
   const geo::Box extent = extent_of(*dataset, source);
-  const Tiles    tiles = tiles_of(extent, grid);
+  const Tiles    tiles = tiles_of(extent, tiling_of(grid));
   const Scale    scale = scale_of(*dataset, extent, grid.pixels_per_degree);
 
   // At most what fits the loop's whole numbers, whatever was asked for: a whole file as one window asks for the most there
@@ -124,7 +126,8 @@ void read_tiles_in(
   const GDALDatasetUniquePtr dataset = opened(source);
 
   const geo::Box extent = extent_of(*dataset, source);
-  const Tiles    tiles = in_both(tiles_meeting(location, grid), tiles_of(extent, grid));
+  const Tiling   tiling = tiling_of(grid);
+  const Tiles    tiles = in_both(tiles_meeting(location, tiling), tiles_of(extent, tiling));
   const Scale    scale = scale_of(*dataset, extent, grid.pixels_per_degree);
 
   const raster::Reach reach(location);
@@ -138,7 +141,7 @@ void read_tiles_in(
   std::vector<geo::Raster<pixel_t>> chunk;
   for ( std::int64_t row = tiles.first_row; row < tiles.end_row; ++row ) {
     for ( std::int64_t first = tiles.first_column; first < tiles.end_column; first += run ) {
-      const std::vector<std::int64_t> reached = reached_of(reach, {first, std::min(first + run, tiles.end_column), row, row + 1}, grid);
+      const std::vector<std::int64_t> reached = reached_of(reach, {first, std::min(first + run, tiles.end_column), row, row + 1}, tiling);
       if ( reached.empty() ) {
         continue;
       }

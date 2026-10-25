@@ -114,7 +114,6 @@ static_assert(
     std::same_as<
         decltype(miniverse::Miniverse(miniverse::Layer<Roads>("roads"), miniverse::Layer<Places>("places"))), miniverse::Miniverse<Roads, Places>>
 );
-static_assert(! std::default_initializable<miniverse::Miniverse<>>);
 
 static_assert(schemacht::query::sql::type_name<miniverse::geo::Point>() == "geometry(Point,4326)");
 static_assert(schemacht::query::sql::type_name<miniverse::geo::LineString>() == "geometry(LineString,4326)");

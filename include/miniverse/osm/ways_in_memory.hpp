@@ -9,9 +9,9 @@
 
 /**
  * @file
- * Ways held in memory and found by location: the index a road file is read into.
+ * Ways held in memory and found by location: the index a road file is read into. Not part of the API: `road_file` is.
  */
-namespace miniverse::osm {
+namespace miniverse::osm::detail {
 
 /**
  * @brief Ways held in memory and found by location: what a road file is read into, since an OpenStreetMap file has no index
@@ -47,4 +47,4 @@ class WaysInMemory {
   ~WaysInMemory();
 };
 
-}  // namespace miniverse::osm
+}  // namespace miniverse::osm::detail

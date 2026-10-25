@@ -23,6 +23,7 @@ add_executable(
   unit/wkb_test.cpp
   unit/column_type_test.cpp
   unit/layer_test.cpp
+  unit/road_layer_test.cpp
   unit/feature_layer_test.cpp
   unit/grid_test.cpp
   unit/raster_test.cpp
@@ -48,7 +49,16 @@ catch_discover_tests(miniverse_tests PROPERTIES RESOURCE_LOCK miniverse_test_db)
 # miniverse::gdal, if it was built: its own executable, so the tests above stay free of GDAL
 # ==============================================================================
 if(TARGET miniverse_gdal)
-  add_executable(miniverse_gdal_tests gdal/dataset_test.cpp gdal/raster_test.cpp gdal/vector_test.cpp)
+  add_executable(
+    miniverse_gdal_tests
+    gdal/dataset_test.cpp
+    gdal/raster_read_test.cpp
+    gdal/raster_file_test.cpp
+    gdal/raster_equivalence_test.cpp
+    gdal/vector_read_test.cpp
+    gdal/vector_file_test.cpp
+    gdal/vector_equivalence_test.cpp
+  )
   target_include_directories(miniverse_gdal_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   target_link_libraries(miniverse_gdal_tests PRIVATE miniverse::gdal GDAL::GDAL Catch2::Catch2WithMain)
   catch_discover_tests(miniverse_gdal_tests PROPERTIES RESOURCE_LOCK miniverse_test_db)
@@ -100,6 +110,7 @@ miniverse_compile_fail(LOAD_LAYER_NOT_HELD "this miniverse has no such layer")
 miniverse_compile_fail(STREAM_LAYER_NOT_HELD "this miniverse has no such layer")
 miniverse_compile_fail(PUSH_LAYER_NOT_HELD "this miniverse has no such layer")
 miniverse_compile_fail(DUPLICATE_KIND "a miniverse holds one layer of each kind")
+miniverse_compile_fail(NO_LAYERS "a miniverse holds at least one layer")
 miniverse_compile_fail(PUSH_NEEDS_DATASET "rows belong to a dataset")
 miniverse_compile_fail(PUSH_TAKES_NO_DATASET "this kind has no datasets")
 miniverse_compile_fail(CREATE_TABLES_NEED_SETTINGS "call create_table<Kind>\\(settings\\) for it")

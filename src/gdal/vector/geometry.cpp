@@ -48,10 +48,6 @@ geo::Polygon polygon_of(const OGRPolygon& from) {
 }
 
 std::unique_ptr<OGRGeometry> as_type(std::unique_ptr<OGRGeometry> geometry, OGRwkbGeometryType wanted) {
-  if ( geometry->hasCurveGeometry() ) {
-    geometry.reset(geometry->getLinearGeometry());  // arcs as lines
-  }
-
   const OGRwkbGeometryType type = wkbFlatten(geometry->getGeometryType());
   if ( type == wanted ) {
     return geometry;

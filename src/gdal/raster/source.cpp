@@ -26,9 +26,7 @@ namespace miniverse::gdal::detail {
 
 namespace {
 
-// The grid's corner, and the world's size in degrees.
-constexpr double WEST = geo::GRID_WEST;
-constexpr double NORTH = geo::GRID_NORTH;
+// The world's size in degrees.
 using geo::DEGREES_ACROSS;
 using geo::DEGREES_DOWN;
 
@@ -113,8 +111,8 @@ geo::Box extent_of(GDALDataset& dataset, const RasterSource& source) {
     throw std::runtime_error("'" + source.path + "' crosses the antimeridian: read it as two files, one each side");
   }
 
-  if ( west < WEST - PAST_WORLD_ALLOWED || east > WEST + static_cast<double>(DEGREES_ACROSS) + PAST_WORLD_ALLOWED ||
-       north > NORTH + PAST_WORLD_ALLOWED || south < NORTH - static_cast<double>(DEGREES_DOWN) - PAST_WORLD_ALLOWED ) {
+  if ( west < geo::GRID_WEST - PAST_WORLD_ALLOWED || east > geo::GRID_WEST + static_cast<double>(DEGREES_ACROSS) + PAST_WORLD_ALLOWED ||
+       north > geo::GRID_NORTH + PAST_WORLD_ALLOWED || south < geo::GRID_NORTH - static_cast<double>(DEGREES_DOWN) - PAST_WORLD_ALLOWED ) {
     throw std::runtime_error(
         "'" + source.path + "' reaches past the world (longitude " + std::format("{}", west) + " to " + std::format("{}", east) + ", latitude " +
         std::format("{}", south) + " to " + std::format("{}", north) + "): longitudes must be -180 to 180, so shift a file of 0 to 360 first"

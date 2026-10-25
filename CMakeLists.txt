@@ -61,6 +61,8 @@ target_include_directories(
   PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+  PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src  # its private headers, as "geo/..."
 )
 
 target_link_libraries(miniverse PUBLIC schemacht::schemacht Boost::headers)
@@ -106,6 +108,7 @@ if(GDAL_FOUND AND NOT MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "OFF")
     src/gdal/dataset.cpp
     src/gdal/raster.cpp
     src/gdal/raster/source.cpp
+    src/gdal/raster/tiles.cpp
     src/gdal/vector.cpp
     src/gdal/vector/fields.cpp
     src/gdal/vector/filter.cpp

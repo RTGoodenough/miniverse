@@ -11,7 +11,6 @@
 #include <optional>
 #include <span>
 #include <stdexcept>
-#include <string>
 #include <vector>
 
 #include "miniverse/geo/grid.hpp"
@@ -22,9 +21,7 @@ namespace miniverse::raster {
 
 namespace {
 
-// The grid's corner, and the world's size in degrees.
-constexpr double WEST = geo::GRID_WEST;
-constexpr double NORTH = geo::GRID_NORTH;
+// The world's size in degrees.
 using geo::DEGREES_ACROSS;
 using geo::DEGREES_DOWN;
 
@@ -55,9 +52,6 @@ struct PixelAt {
 [[nodiscard]] std::int64_t ceil_snapped(double value) { return whole(value).value_or(static_cast<std::int64_t>(std::ceil(value))); }
 
 [[nodiscard]] bool same_size(double size, double other) { return std::abs(size - other) <= SIZE_TOLERANCE * std::abs(other); }
-
-/** @return `value` as the shortest decimal that reads back as the same `double`. */
-[[nodiscard]] std::string decimal(double value) { return std::format("{}", value); }
 
 /**
  * @brief Copies the pixels of `source` that have data into `target`, where they overlap: `source` at `source_at` and
@@ -99,7 +93,7 @@ std::vector<Tile<pixel_t>> cut(const geo::Raster<pixel_t>& raster, const geo::Gr
   // A pixel equal to the grid's nodata would be written as having no data, so it would be lost.
   if ( raster.nodata != grid.nodata && std::ranges::find(raster.pixels, grid.nodata) != raster.pixels.end() ) {
     throw std::invalid_argument(
-        "a pixel of the raster has the value " + decimal(static_cast<double>(grid.nodata)) +
+        "a pixel of the raster has the value " + std::format("{}", static_cast<double>(grid.nodata)) +
         ", which is the grid's nodata: it would be lost. Give the raster the grid's nodata, or change the pixel"
     );
   }
@@ -108,12 +102,13 @@ std::vector<Tile<pixel_t>> cut(const geo::Raster<pixel_t>& raster, const geo::Gr
   const double size = 1.0 / static_cast<double>(ppd);
   if ( ! same_size(raster.pixel_width, size) || ! same_size(raster.pixel_height, size) ) {
     throw std::invalid_argument(
-        "the raster's pixels are " + decimal(raster.pixel_width) + " by " + decimal(raster.pixel_height) + " degrees, not the grid's " + decimal(size)
+        "the raster's pixels are " + std::format("{}", raster.pixel_width) + " by " + std::format("{}", raster.pixel_height) +
+        " degrees, not the grid's " + std::format("{}", size)
     );
   }
 
-  const std::optional<std::int64_t> first_column = whole((raster.west - WEST) * static_cast<double>(ppd));
-  const std::optional<std::int64_t> first_row = whole((NORTH - raster.north) * static_cast<double>(ppd));
+  const std::optional<std::int64_t> first_column = whole((raster.west - geo::GRID_WEST) * static_cast<double>(ppd));
+  const std::optional<std::int64_t> first_row = whole((geo::GRID_NORTH - raster.north) * static_cast<double>(ppd));
   if ( ! first_column || ! first_row ) {
     throw std::invalid_argument("the raster's corner is not on a corner of the grid's pixels");
   }
@@ -134,8 +129,8 @@ std::vector<Tile<pixel_t>> cut(const geo::Raster<pixel_t>& raster, const geo::Gr
   for ( std::int64_t tile_row = raster_at.row / tile; tile_row * tile < raster_at.row + height; ++tile_row ) {
     for ( std::int64_t tile_column = raster_at.column / tile; tile_column * tile < raster_at.column + width; ++tile_column ) {
       geo::Raster<pixel_t> pixels{
-          .west = WEST + (static_cast<double>(tile_column * tile) / static_cast<double>(ppd)),
-          .north = NORTH - (static_cast<double>(tile_row * tile) / static_cast<double>(ppd)),
+          .west = geo::GRID_WEST + (static_cast<double>(tile_column * tile) / static_cast<double>(ppd)),
+          .north = geo::GRID_NORTH - (static_cast<double>(tile_row * tile) / static_cast<double>(ppd)),
           .pixel_width = size,
           .pixel_height = size,
           .width = static_cast<std::size_t>(tile),

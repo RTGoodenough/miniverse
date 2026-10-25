@@ -9,10 +9,10 @@
 #include <utility>
 #include <vector>
 
+#include "geo/wkb_bytes.hpp"
 #include "miniverse/geo/concepts/raster.hpp"
 #include "miniverse/geo/raster.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/geo/wkb_bytes.hpp"
 
 namespace miniverse::geo::wkb {
 

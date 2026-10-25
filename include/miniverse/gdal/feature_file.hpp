@@ -21,6 +21,8 @@
  */
 namespace miniverse::gdal {
 
+namespace detail {
+
 /**
  * @brief The reader of a vector file as a layer of `kind_t`: what `feature_file` makes a layer with. A load gives the file's
  * features that intersect the location, in the file's order (a table's are by id), their tags as `read_features` writes them
@@ -64,6 +66,8 @@ class FeatureFile : public Reader<kind_t> {
   ~FeatureFile() override = default;
 };
 
+}  // namespace detail
+
 /**
  * @return The layer of `kind_t` that is `source`, a vector file, read in place of a table:
  *
@@ -76,7 +80,7 @@ class FeatureFile : public Reader<kind_t> {
  */
 template <FeatureKind kind_t>
 [[nodiscard]] Layer<kind_t> feature_file(VectorSource source) {
-  return Layer<kind_t>(std::make_shared<FeatureFile<kind_t>>(std::move(source)));
+  return Layer<kind_t>(std::make_shared<detail::FeatureFile<kind_t>>(std::move(source)));
 }
 
 }  // namespace miniverse::gdal

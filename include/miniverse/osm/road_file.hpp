@@ -44,8 +44,8 @@ class RoadFile : public Reader<kind_t> {
   }
 
  private:
-  std::string  _name;
-  WaysInMemory _ways;
+  std::string          _name;
+  detail::WaysInMemory _ways;
 
  public:
   RoadFile(const RoadFile&) = delete;

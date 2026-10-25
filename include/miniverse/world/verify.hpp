@@ -140,19 +140,18 @@ void check_settings(
         return;
       }
 
+      // One `finish` per layer, whatever happens: a throw that escaped would leave the checks waiting for this one.
       std::vector<std::string> problems;
+      std::exception_ptr       failed;
       try {
-        try {
-          std::ignore = kind_t::settings_from_rows(std::move(rows));
-        } catch ( const std::exception& unreadable ) {
-          problems.emplace_back(unreadable.what());
-        }
+        std::ignore = kind_t::settings_from_rows(std::move(rows));
+      } catch ( const std::exception& unreadable ) {
+        problems.emplace_back(unreadable.what());
       } catch ( ... ) {
-        checks->finish(layer_number, {}, std::current_exception());
-        return;
+        failed = std::current_exception();
       }
 
-      checks->finish(layer_number, std::move(problems), nullptr);
+      checks->finish(layer_number, std::move(problems), failed);
     });
   } catch ( ... ) {
     checks->finish(layer_number, {}, std::current_exception());
@@ -189,17 +188,17 @@ void check_table(
           }
 
           std::vector<std::string> problems;
+          std::exception_ptr       failed;
           try {
             problems.reserve(differences.size());
             for ( const schemacht::postgres::TableDifference& difference : differences ) {
               problems.push_back(schemacht::postgres::describe(difference));
             }
           } catch ( ... ) {
-            checks->finish(layer_number, {}, std::current_exception());
-            return;
+            failed = std::current_exception();  // no memory to say what differs: that, then
           }
 
-          checks->finish(layer_number, std::move(problems), nullptr);
+          checks->finish(layer_number, std::move(problems), failed);
         }
     );
   } catch ( ... ) {
@@ -210,11 +209,15 @@ void check_table(
 /** @brief Asks `reader` for its problems, on the calling thread, and tells `checks`. */
 template <LayerKind kind_t>
 void check_reader(const std::shared_ptr<const Reader<kind_t>>& reader, const std::shared_ptr<Checks>& checks, std::size_t layer_number) {
+  std::vector<std::string> problems;
+  std::exception_ptr       failed;
   try {
-    checks->finish(layer_number, reader->problems(), nullptr);
+    problems = reader->problems();
   } catch ( ... ) {
-    checks->finish(layer_number, {}, std::current_exception());
+    failed = std::current_exception();
   }
+
+  checks->finish(layer_number, std::move(problems), failed);
 }
 
 }  // namespace detail
