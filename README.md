@@ -31,7 +31,7 @@ It is built on schemacht, a sibling library, which describes tables as C++ types
 
 ## Requirements
 
-- A C++20 compiler (built with g++ 13; clang 18 parses it, through clang-tidy) and CMake 3.21 or newer.
+- A C++20 compiler (built with g++ 13; clang 18 parses it, through clang-tidy) and CMake 3.25 or newer.
 - libpq 17 or newer, and a PostgreSQL server with the `postgis` and `postgis_raster` extensions. `verify` needs
   PostgreSQL 17; raster tables need a PostgreSQL 14 or newer built with lz4, as the usual packages and images are.
 - Boost headers, 1.74 or newer (1.75 for the OSM component). Boost.Geometry supplies the geometry types.

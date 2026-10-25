@@ -6,6 +6,12 @@ function(miniverse_example name)
   add_executable(miniverse_example_${name} ${name}.cpp)
   target_link_libraries(miniverse_example_${name} PRIVATE ${ARGN})
   target_compile_definitions(miniverse_example_${name} PRIVATE MINIVERSE_EXAMPLE_DATA="${CMAKE_CURRENT_SOURCE_DIR}/data")
+  miniverse_checks(miniverse_example_${name})
+  # An example's functions are defined in its one file, where a real program would declare them in a header (as
+  # examples/.clang-tidy allows too).
+  target_compile_options(
+    miniverse_example_${name} PRIVATE -Wno-missing-declarations $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-missing-prototypes>
+  )
 endfunction()
 
 miniverse_example(features miniverse::miniverse)

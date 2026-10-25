@@ -45,8 +45,8 @@ template <schemacht::schema::IsSchema schema_t>
 using Remove = schemacht::query::Prepared<REMOVE<schema_t>>;
 
 /**
-  * @return The index on `dataset` that a push's sweep and a remove use, for a kind's `setup_sql`. It is not named: PostgreSQL
- * names it (`<table>_dataset_idx`), shortening and numbering the name as needed, so the name is unique.
+ * @return The index on `dataset` that a push's sweep and a remove use, for a kind's `setup_sql`. It is not named: PostgreSQL
+ * names it after the table (`roads_dataset_idx` for `roads`), shortening and numbering the name as needed, so the name is unique.
  */
 [[nodiscard]] inline std::string index_sql(const schemacht::schema::TableName& table) { return "CREATE INDEX ON " + table.quoted() + " (dataset)"; }
 

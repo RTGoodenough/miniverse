@@ -32,7 +32,7 @@ namespace miniverse {
  */
 class TablesDiffer : public std::runtime_error {
  public:
-  /** @param differences Each as `<table, or what a reader reads>: <what differs>`, in the layers' order. */
+  /** @param differences Each the table's name, or what a reader reads, then a colon and what differs; in the layers' order. */
   explicit TablesDiffer(std::vector<std::string> differences) : std::runtime_error(message_of(differences)), _differences(std::move(differences)) {}
 
   /** @return The differences given, in the layers' order. */
@@ -170,8 +170,7 @@ void check_table(
   try {
     database.execute(
         schemacht::postgres::table_differences_statement<typename kind_t::schema_type>().on(table),
-        [&database, &table, checks,
-         layer_number](const std::vector<schemacht::postgres::TableDifference>& differences, const std::exception_ptr& error) {
+        [&, checks, layer_number](const std::vector<schemacht::postgres::TableDifference>& differences, const std::exception_ptr& error) {
           if ( error ) {
             checks->finish(layer_number, {}, error);
             return;

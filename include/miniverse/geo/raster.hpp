@@ -76,7 +76,7 @@ struct Raster {
       return std::nullopt;
     }
 
-    const auto within = [](double pixels, std::size_t count) { return std::min(static_cast<std::size_t>(std::max(pixels, 0.0)), count - 1); };
+    const auto within = [](double along, std::size_t count) { return std::min(static_cast<std::size_t>(std::max(along, 0.0)), count - 1); };
 
     return PixelPosition{.column = within(across, width), .row = within(down, height)};
   }

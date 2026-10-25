@@ -173,7 +173,7 @@ TEST_CASE("reader: a stream with no chunk size has the default's 1000 rows a chu
   Miniverse   world(fixed<Shops>(shops()));
   std::size_t chunks = 0;
 
-  world.stream<Shops>(NEAR_ORIGIN, [&chunks](const Points& chunk) { chunks += chunk.size() == 5 ? 1 : 100; }).get();
+  world.stream<Shops>(NEAR_ORIGIN, [&chunks](const Points& chunk) { chunks += chunk.size() == 5 ? 1U : 100U; }).get();
 
   CHECK(chunks == 1);
 }

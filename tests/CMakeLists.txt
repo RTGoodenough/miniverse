@@ -5,6 +5,7 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/catchorg/Catch2.git
   GIT_TAG v3.7.1
   GIT_SHALLOW TRUE
+  SYSTEM  # its headers are system headers here: the tests' warnings are about the tests
   FIND_PACKAGE_ARGS 3
 )
 FetchContent_MakeAvailable(Catch2)
@@ -41,6 +42,7 @@ add_executable(
 )
 target_include_directories(miniverse_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miniverse_tests PRIVATE miniverse::miniverse Catch2::Catch2WithMain)
+miniverse_checks(miniverse_tests)
 # The integration tests share the test database's tables, so the tests run one at a time even under `ctest -j` (all of them:
 # the others take milliseconds, so they aren't worth discovering apart).
 catch_discover_tests(miniverse_tests PROPERTIES RESOURCE_LOCK miniverse_test_db)
@@ -61,6 +63,7 @@ if(TARGET miniverse_gdal)
   )
   target_include_directories(miniverse_gdal_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   target_link_libraries(miniverse_gdal_tests PRIVATE miniverse::gdal GDAL::GDAL Catch2::Catch2WithMain)
+  miniverse_checks(miniverse_gdal_tests)
   catch_discover_tests(miniverse_gdal_tests PROPERTIES RESOURCE_LOCK miniverse_test_db)
 endif()
 
@@ -73,6 +76,7 @@ if(TARGET miniverse_osm)
   # The tests make a PBF file with libosmium themselves, so they need its headers; a program that only reads ways does not.
   target_include_directories(miniverse_osm_tests SYSTEM PRIVATE ${MINIVERSE_OSMIUM_INCLUDE_DIR} ${MINIVERSE_PROTOZERO_INCLUDE_DIR})
   target_link_libraries(miniverse_osm_tests PRIVATE miniverse::osm Catch2::Catch2WithMain)
+  miniverse_checks(miniverse_osm_tests)
   catch_discover_tests(miniverse_osm_tests PROPERTIES RESOURCE_LOCK miniverse_test_db)
 endif()
 
@@ -101,6 +105,7 @@ function(miniverse_compile_fail case regex)
   add_library(compile_fail_${case} OBJECT EXCLUDE_FROM_ALL compile_fail/cases.cpp)
   target_link_libraries(compile_fail_${case} PRIVATE miniverse::miniverse)
   target_compile_definitions(compile_fail_${case} PRIVATE CASE_${case})
+  miniverse_checks(compile_fail_${case})
 
   add_test(NAME compile_fail.${case} COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --config $<CONFIG> --target compile_fail_${case})
   set_tests_properties(compile_fail.${case} PROPERTIES PASS_REGULAR_EXPRESSION "${regex}")
@@ -114,3 +119,18 @@ miniverse_compile_fail(NO_LAYERS "a miniverse holds at least one layer")
 miniverse_compile_fail(PUSH_NEEDS_DATASET "rows belong to a dataset")
 miniverse_compile_fail(PUSH_TAKES_NO_DATASET "this kind has no datasets")
 miniverse_compile_fail(CREATE_TABLES_NEED_SETTINGS "call create_table<Kind>\\(settings\\) for it")
+
+# ==============================================================================
+# Formatting
+# ==============================================================================
+# One test, if clang-format is found: every source and header of the project, checked against .clang-format.
+find_program(MINIVERSE_CLANG_FORMAT NAMES clang-format-18 clang-format DOC "clang-format, for the test `format`")
+if(MINIVERSE_CLANG_FORMAT)
+  set(MINIVERSE_FORMATTED_FILES)
+  foreach(directory include src tests examples)
+    file(GLOB_RECURSE MINIVERSE_FORMATTED_IN CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/${directory}/*.hpp ${PROJECT_SOURCE_DIR}/${directory}/*.cpp)
+    list(APPEND MINIVERSE_FORMATTED_FILES ${MINIVERSE_FORMATTED_IN})
+  endforeach()
+  add_test(NAME format COMMAND ${MINIVERSE_CLANG_FORMAT} --dry-run --Werror ${MINIVERSE_FORMATTED_FILES})
+endif()
+message(STATUS "format test (MINIVERSE_CLANG_FORMAT): ${MINIVERSE_CLANG_FORMAT}")

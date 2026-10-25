@@ -98,7 +98,7 @@ TEST_CASE("raster: the middle of every pixel of a fine raster is in that pixel",
   std::size_t elsewhere = 0;
   for ( std::size_t row = 0; row < raster.height; ++row ) {
     for ( std::size_t column = 0; column < raster.width; ++column ) {
-      elsewhere += raster.pixel_at(raster.centre_of(column, row)) == geo::PixelPosition{.column = column, .row = row} ? 0 : 1;
+      elsewhere += raster.pixel_at(raster.centre_of(column, row)) == geo::PixelPosition{.column = column, .row = row} ? 0U : 1U;
     }
   }
 

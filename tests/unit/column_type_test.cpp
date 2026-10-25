@@ -2,21 +2,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include <boost/geometry/io/wkt/read.hpp>
 #include <boost/geometry/io/wkt/write.hpp>
 
-#include <cstddef>
-#include <cstdint>
-#include <stdexcept>
-#include <string>
 #include <string_view>
-#include <utility>
-#include <vector>
 
 #include "miniverse/miniverse.hpp"
-#include "schemacht/json/json.hpp"
 #include "schemacht/postgres/field_codec.hpp"
-#include "schemacht/schema/field.hpp"
 #include "schemacht/util/hex.hpp"
 
 namespace bg = boost::geometry;

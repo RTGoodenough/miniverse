@@ -1,7 +1,6 @@
 #include "gdal/vector/fields.hpp"
 
 #include <cpl_json.h>
-#include <cpl_port.h>
 #include <ogr_core.h>
 #include <ogr_feature.h>
 #include <ogrsf_frmts.h>
@@ -66,7 +65,7 @@ schemacht::json::Json tags_of(const OGRFeature& feature, int id_field) {
       tags.AddNoSplitName(field->GetNameRef(), json_value(feature.GetFieldAsInteger(i) != 0));
 
     } else if ( type == OFTInteger || type == OFTInteger64 ) {
-      tags.AddNoSplitName(field->GetNameRef(), json_value(static_cast<GInt64>(feature.GetFieldAsInteger64(i))));
+      tags.AddNoSplitName(field->GetNameRef(), json_value(feature.GetFieldAsInteger64(i)));
 
     } else if ( type == OFTReal && std::isfinite(feature.GetFieldAsDouble(i)) ) {
       tags.AddNoSplitName(field->GetNameRef(), json_value(feature.GetFieldAsDouble(i)));

@@ -37,7 +37,7 @@ tests/
   support/               a hand-written test kind (Places), the scratch database and a fresh world on it (Fresh),
                          temporary files, WKT polygons, small rasters, ids and rows for checks
 examples/                nine programs; eight run as tests (make_database needs files outside the repository)
-cmake/                   the installed package's config
+cmake/                   the installed package's config, and checks.cmake: the warnings and lint of the project's own targets
 ```
 
 Concepts live in `concepts/` directories beside the headers that use them. Each component is a static library of its own
@@ -209,9 +209,11 @@ Options:
 |---|---|---|
 | `MINIVERSE_BUILD_GDAL`, `MINIVERSE_BUILD_OSM` | `AUTO` | build the component if its dependencies are found; `ON` fails without them |
 | `MINIVERSE_BUILD_TESTS`, `MINIVERSE_BUILD_EXAMPLES` | on when top level | |
-| `MINIVERSE_BUILD_DOCS` | `AUTO` | the `miniverse_docs` target, if Doxygen is found |
+| `MINIVERSE_BUILD_DOCS` | `AUTO` | the `miniverse_docs` target, if Doxygen 1.9 or newer is found |
 | `MINIVERSE_INSTALL` | on when top level | the install rules and the CMake package |
 | `MINIVERSE_SCHEMACHT_DIR` | `../schemacht` | schemacht's source tree, used when no installed schemacht is found |
+| `MINIVERSE_WARNINGS_AS_ERRORS` | on when top level | a warning in miniverse's own targets fails the build; configuring with `--compile-no-warning-as-error` turns it off for that build tree |
+| `MINIVERSE_LINT` | off | run clang-tidy on every translation unit as it is compiled (`MINIVERSE_CLANG_TIDY` names the program, with arguments after `;`) |
 
 The GDAL minimum, 3.7, is `MINIVERSE_MIN_GDAL` in `CMakeLists.txt`, checked after `find_package`, since GDAL's package
 only accepts a request for its own minor version. A full rebuild with unlimited parallel jobs has run out of memory on
@@ -224,9 +226,9 @@ a 16 GB machine; it has been built with `-j6`.
 ## Testing
 
 The suite is three test executables, `miniverse_tests` (compile, unit and integration tests), `miniverse_gdal_tests`
-and `miniverse_osm_tests`; the example programs, each run as a test of its own; and the compile-fail cases, each a
-build of `tests/compile_fail/cases.cpp` with one case defined that passes when the build fails with the expected
-message.
+and `miniverse_osm_tests`; the example programs, each run as a test of its own; the compile-fail cases, each a build of
+`tests/compile_fail/cases.cpp` with one case defined that passes when the build fails with the expected message; and
+`format`, clang-format over the tree, when it is found.
 
 Tests that need a database skip themselves unless `MINIVERSE_TEST_DB` is set:
 
@@ -256,15 +258,27 @@ A ThreadSanitizer build of `miniverse_tests` with the components off (`-DCMAKE_C
 paths: run `./miniverse_tests "[reader],[integration]"` from it. The test discovery step fails under TSan; the binary
 still links.
 
-## Linting and style
+## Static checks and style
 
-clang-tidy 18 with the repository's `.clang-tidy` (all checks but a few families turned off at its top, warnings as
-errors, include-cleaner included; `examples/.clang-tidy` and `tests/.clang-tidy` relax checks that fight sample and
-test code):
+Every target of the project (the libraries, the tests, the examples, the compile-fail cases) is compiled with the warnings
+in `cmake/checks.cmake`: `-Wall -Wextra -Wpedantic` and a strict set beyond them, for GCC and clang, as errors when
+miniverse is the top-level project. The warnings left off are listed there with the reason for each. schemacht's and
+Catch2's headers are system headers to the compiler, so only miniverse's own code is checked. Consumers of the installed
+package inherit none of the flags.
+
+clang-tidy 18 runs with the repository's `.clang-tidy`: every check but the families for other codebases and the few
+named at its top, warnings as errors, include-cleaner included; `examples/.clang-tidy` and `tests/.clang-tidy` relax checks
+that fight sample and test code. A build with `-DMINIVERSE_LINT=ON` runs it on every translation unit as it is compiled,
+which is the check to run before a commit (it adds a clang-tidy run per translation unit; keep `-j` low, a tidy process
+takes as much memory as a compile). One file at a time:
 
 ```sh
 clang-tidy -p build --header-filter='.*/miniverse/(include|src|tests|examples)/.*' <file>
 ```
+
+The `miniverse_docs` target fails on a public item without a comment or on a malformed one, and the test `format` runs
+clang-format over every source and header when `MINIVERSE_CLANG_FORMAT` finds one. Another version of clang-format can
+disagree with the one the tree was formatted with on a line or two: the test is as good as the version match.
 
 Conventions the code follows:
 

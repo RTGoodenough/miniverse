@@ -110,8 +110,8 @@ Raster<pixel_t> read_raster(std::span<const std::byte> bytes) {
 
   if ( (band & PIXEL_TYPE_MASK) != PixelType<pixel_t>::CODE ) {
     malformed(
-        "the band's pixel type is number " + std::to_string(band & PIXEL_TYPE_MASK) + ", not " + std::string(PixelType<pixel_t>::NAME) + " (number " +
-        std::to_string(PixelType<pixel_t>::CODE) + ")"
+        "the band's pixel type is number " + std::to_string(static_cast<unsigned>(band & PIXEL_TYPE_MASK)) + ", not " +
+        std::string(PixelType<pixel_t>::NAME) + " (number " + std::to_string(static_cast<unsigned>(PixelType<pixel_t>::CODE)) + ")"
     );
   }
 

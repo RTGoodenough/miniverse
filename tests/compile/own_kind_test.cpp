@@ -10,6 +10,8 @@
 
 #include "support/places.hpp"
 
-static_assert(std::same_as<decltype(miniverse::Miniverse(std::string(), miniverse::Layer<test::Places>("places"))), miniverse::Miniverse<test::Places>>);
+static_assert(
+    std::same_as<decltype(miniverse::Miniverse(std::string(), miniverse::Layer<test::Places>("places"))), miniverse::Miniverse<test::Places>>
+);
 
 TEST_CASE("a kind of your own needs only world.hpp", "[compile]") { SUCCEED("this file compiled against world.hpp alone"); }

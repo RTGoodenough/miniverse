@@ -40,7 +40,7 @@ class Reader {
   void byte_order() {
     const auto mark = std::to_integer<std::uint8_t>(byte());
     if ( mark != LITTLE_ENDIAN_MARK && mark != BIG_ENDIAN_MARK ) {
-      malformed("byte order mark " + std::to_string(mark) + " is neither 0 (big-endian) nor 1 (little-endian)");
+      malformed("byte order mark " + std::to_string(static_cast<unsigned>(mark)) + " is neither 0 (big-endian) nor 1 (little-endian)");
     }
 
     _little = mark == LITTLE_ENDIAN_MARK;

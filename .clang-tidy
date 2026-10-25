@@ -1,4 +1,7 @@
 
+# Every check, minus: the families for other codebases (llvm, llvmlibc, fuchsia, abseil, altera, android); hicpp's aliases
+# of checks already on (they report twice and need a second name in every NOLINT), keeping its four checks of its own; one
+# style choice; and modernize-use-constraints, on which clang-tidy 18 crashes in the units that use Boost.Geometry.
 Checks: >
   *,
   -llvm-*,
@@ -8,12 +11,12 @@ Checks: >
   -altera-*,
   -android-*,
   -hicpp-*,
-  -readability-braces-around-statements,
-  -hicpp-braces-around-statements,
-  -cppcoreguidelines-pro-type-union-access,
-  -hicpp-signed-bitwise,
-  -misc-no-recursion,
-  -modernize-use-trailing-return-type
+  hicpp-exception-baseclass,
+  hicpp-multiway-paths-covered,
+  hicpp-no-assembler,
+  hicpp-signed-bitwise,
+  -modernize-use-trailing-return-type,
+  -modernize-use-constraints
 
 WarningsAsErrors: "*"
 

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.25)
 
 project(miniverse VERSION 0.1.0 LANGUAGES CXX)
 
@@ -20,6 +20,10 @@ set_property(CACHE MINIVERSE_BUILD_OSM PROPERTY STRINGS AUTO ON OFF)
 set(MINIVERSE_SCHEMACHT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../schemacht" CACHE PATH "schemacht's source tree, used when no installed schemacht is found")
 set(MINIVERSE_BUILD_DOCS "AUTO" CACHE STRING "Add the target `miniverse_docs`, the API reference built from the headers with Doxygen: AUTO (if Doxygen is found), ON or OFF")
 set_property(CACHE MINIVERSE_BUILD_DOCS PROPERTY STRINGS AUTO ON OFF)
+option(MINIVERSE_WARNINGS_AS_ERRORS "Fail the build on a warning in miniverse's own targets" ${PROJECT_IS_TOP_LEVEL})
+option(MINIVERSE_LINT "Run clang-tidy on every translation unit of miniverse's own targets as it is compiled" OFF)
+
+include(cmake/checks.cmake)
 
 # ==============================================================================
 # Dependencies
@@ -34,7 +38,8 @@ if(NOT schemacht_FOUND)
   if(NOT DEFINED SCHEMACHT_INSTALL)  # a -D of its own wins
     set(SCHEMACHT_INSTALL ${MINIVERSE_INSTALL})
   endif()
-  add_subdirectory("${MINIVERSE_SCHEMACHT_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/schemacht")
+  # SYSTEM: its headers are system headers to the compiler here, so its warnings are its own.
+  add_subdirectory("${MINIVERSE_SCHEMACHT_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/schemacht" SYSTEM)
 endif()
 
 # Boost.Geometry: header-only, the geometry types (geo/types.hpp).
@@ -67,6 +72,7 @@ target_include_directories(
 
 target_link_libraries(miniverse PUBLIC schemacht::schemacht Boost::headers)
 target_compile_features(miniverse PUBLIC cxx_std_20)
+miniverse_checks(miniverse)
 
 add_library(miniverse::miniverse ALIAS miniverse)
 set_target_properties(miniverse PROPERTIES EXPORT_NAME miniverse)
@@ -117,6 +123,7 @@ if(GDAL_FOUND AND NOT MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "OFF")
   )
   target_include_directories(miniverse_gdal PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)  # its private headers, as "gdal/..."
   target_link_libraries(miniverse_gdal PUBLIC miniverse::miniverse GDAL::GDAL)
+  miniverse_checks(miniverse_gdal)
 
   add_library(miniverse::gdal ALIAS miniverse_gdal)
   set_target_properties(miniverse_gdal PROPERTIES EXPORT_NAME gdal)
@@ -155,6 +162,7 @@ if(MINIVERSE_HAS_OSM)
   add_library(miniverse_osm STATIC src/osm/boost_json.cpp src/osm/ways.cpp src/osm/ways_in_memory.cpp)
   target_include_directories(miniverse_osm SYSTEM PRIVATE ${MINIVERSE_OSMIUM_INCLUDE_DIR} ${MINIVERSE_PROTOZERO_INCLUDE_DIR})
   target_link_libraries(miniverse_osm PUBLIC miniverse::miniverse PRIVATE ZLIB::ZLIB EXPAT::EXPAT BZip2::BZip2 Threads::Threads)
+  miniverse_checks(miniverse_osm)
 
   add_library(miniverse::osm ALIAS miniverse_osm)
   set_target_properties(miniverse_osm PROPERTIES EXPORT_NAME osm)
@@ -168,10 +176,11 @@ message(STATUS "miniverse::osm (MINIVERSE_BUILD_OSM=${MINIVERSE_BUILD_OSM}): ${M
 # build/docs/html. No Doxyfile is kept: CMake's FindDoxygen writes one from the DOXYGEN_ variables below. Diagrams need
 # Graphviz (dot); without it the reference is built without them.
 string(TOUPPER "${MINIVERSE_BUILD_DOCS}" MINIVERSE_BUILD_DOCS_CHOICE)
+# Doxygen 1.9: WARN_AS_ERROR takes FAIL_ON_WARNINGS from there.
 if(MINIVERSE_BUILD_DOCS_CHOICE STREQUAL "ON")
-  find_package(Doxygen REQUIRED OPTIONAL_COMPONENTS dot)
+  find_package(Doxygen 1.9 REQUIRED OPTIONAL_COMPONENTS dot)
 elseif(MINIVERSE_BUILD_DOCS_CHOICE STREQUAL "AUTO")
-  find_package(Doxygen QUIET OPTIONAL_COMPONENTS dot)
+  find_package(Doxygen 1.9 QUIET OPTIONAL_COMPONENTS dot)
 elseif(NOT MINIVERSE_BUILD_DOCS_CHOICE STREQUAL "OFF")
   message(FATAL_ERROR "MINIVERSE_BUILD_DOCS is '${MINIVERSE_BUILD_DOCS}': AUTO, ON or OFF")
 endif()
@@ -193,8 +202,10 @@ if(DOXYGEN_FOUND AND NOT MINIVERSE_BUILD_DOCS_CHOICE STREQUAL "OFF")
   set(DOXYGEN_GENERATE_TREEVIEW YES)
   set(DOXYGEN_SHOW_INCLUDE_FILES NO)
   set(DOXYGEN_SORT_MEMBER_DOCS NO)
-  set(DOXYGEN_WARN_IF_UNDOCUMENTED NO)
-  set(DOXYGEN_WARN_AS_ERROR NO)
+  # The target is a check: a public item without a comment, or a malformed one, fails it. Parameters are documented in prose,
+  # so WARN_NO_PARAMDOC stays off.
+  set(DOXYGEN_WARN_IF_UNDOCUMENTED YES)
+  set(DOXYGEN_WARN_AS_ERROR FAIL_ON_WARNINGS)
   set(DOXYGEN_QUIET YES)
   set(DOXYGEN_FILE_PATTERNS "*.hpp" "*.md")
   set(DOXYGEN_EXAMPLE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/examples)
