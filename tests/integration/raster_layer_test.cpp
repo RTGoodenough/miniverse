@@ -120,7 +120,7 @@ using SearchPathPublic = schemacht::query::RawStatement<
 }
 
 using MergeRasters = schemacht::query::RawStatement<
-    "SELECT ST_AsBinary(miniverse_functions.merge_raster($1::raster, $2::raster)) AS rast", schemacht::query::RawArguments<Raster, Raster>,
+    "SELECT ST_AsBinary(miniverse_internal.merge_raster($1::raster, $2::raster)) AS rast", schemacht::query::RawArguments<Raster, Raster>,
     sch::Field<Raster, "rast">>;
 
 using ColumnCompression = schemacht::query::RawStatement<
@@ -363,7 +363,7 @@ TEST_CASE("integration: a raster pushed in parts is cut with the table's grid, a
 }
 
 TEST_CASE("integration: a push merges through the shared function by its full name, whatever the search path", "[integration]") {
-  // One connection, so the search path set here, without the schema miniverse_functions, holds for the push.
+  // One connection, so the search path set here, without the schema miniverse_internal, holds for the push.
   test::Fresh<World> tiled = with_tiles(test_db(), {.pool = {.connections = 1}, .read = {}});
   World&             world = tiled.world();
   std::ignore = world.database().execute(SearchPathPublic::bind()).get();
@@ -468,7 +468,7 @@ TEST_CASE("integration: two raster tables made at the same time are both made", 
     one.drop_tables();
     other.drop_tables();
     // As in a new database: the schema is not there yet, so both make it.
-    std::ignore = one.database().execute(schemacht::postgres::unchecked_sql("DROP SCHEMA IF EXISTS miniverse_functions CASCADE")).get();
+    std::ignore = one.database().execute(schemacht::postgres::unchecked_sql("DROP SCHEMA IF EXISTS miniverse_internal CASCADE")).get();
 
     std::future<void> making_one = std::async(std::launch::async, [&] { one.create_table<TestElevation>(GRID); });
     std::future<void> making_other = std::async(std::launch::async, [&] { other.create_table<FineElevation>(GRID); });

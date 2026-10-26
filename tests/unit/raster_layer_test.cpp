@@ -59,12 +59,10 @@ TEST_CASE(
 
   const std::vector<std::string> setup = Elevation::setup_sql(table, GRID);
 
-  REQUIRE(setup.size() == 6);
-  CHECK(setup.at(0).find("pg_advisory_xact_lock") != std::string::npos);  // first: setups take turns at what follows
-  CHECK(setup.at(1) == "CREATE SCHEMA IF NOT EXISTS miniverse_functions");
-  CHECK(setup.at(2).starts_with("CREATE OR REPLACE FUNCTION miniverse_functions.merge_raster("));  // what it does: tests/integration
+  REQUIRE(setup.size() == 4);
+  CHECK(setup.at(0).find("CREATE FUNCTION miniverse_internal.merge_raster(") != std::string::npos);  // what it does: tests/integration
   CHECK(
-      std::vector<std::string>(setup.begin() + 3, setup.end()) ==
+      std::vector<std::string>(setup.begin() + 1, setup.end()) ==
       std::vector<std::string>{
           R"(ALTER TABLE "srtm" ALTER COLUMN rast SET COMPRESSION lz4)",
           R"(CREATE INDEX ON "srtm" USING gist (ST_ConvexHull(rast)))",

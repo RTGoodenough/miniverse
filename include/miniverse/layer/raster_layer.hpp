@@ -12,6 +12,7 @@
 #include "miniverse/geo/operations.hpp"
 #include "miniverse/geo/raster.hpp"
 #include "miniverse/geo/types.hpp"
+#include "miniverse/internal_schema.hpp"
 #include "miniverse/layer/raster/tiles.hpp"
 #include "schemacht/postgres/statements.hpp"
 #include "schemacht/query/predicate.hpp"
@@ -43,15 +44,14 @@ template <geo::Pixel pixel_t>
 using Rast = schemacht::schema::Field<geo::Raster<pixel_t>, "rast">;
 
 /**
- * @brief How a push merges a tile onto the one at its grid position: `miniverse_functions.merge_raster(current, incoming)`,
- * made by the table's setup and shared by every raster table in the database. A pixel with data in the new tile wins; one
- * with no data keeps the old pixel. The function is called by its full name, so a push finds it whatever the search path. The
- * schema is not named `miniverse`: a role of that name would then create its unqualified tables in it, not in `public`, since
- * `"$user"` comes first on the default search path.
+ * @brief How a push merges a tile onto the one at its grid position: `miniverse_internal.merge_raster(current, incoming)`,
+ * made by the table's setup in the library's own schema (`INTERNAL_SCHEMA`) and shared by every raster table in the database.
+ * A pixel with data in the new tile wins; one with no data keeps the old pixel. The function is called by its full name, so a
+ * push finds it whatever the search path.
  */
 struct MergeRaster {
-  static constexpr std::string_view SCHEMA = "miniverse_functions";
-  static constexpr std::string_view FUNCTION = "miniverse_functions.merge_raster";
+  static constexpr std::string_view FUNCTION = "miniverse_internal.merge_raster";
+  static_assert(FUNCTION.starts_with(INTERNAL_SCHEMA), "the merge function lives in the library's own schema");
 };
 
 }  // namespace raster
@@ -79,6 +79,8 @@ struct MergeRaster {
  */
 template <geo::Pixel pixel_t>
 struct RasterLayer {
+  static constexpr std::int32_t LAYOUT = 1;  ///< The first layout recorded.
+
   using result_type = geo::Raster<pixel_t>;
   /// What a streamed load hands its callback: some of the tiles, each a raster of its own, since a window needs them all.
   using chunk_type = std::vector<geo::Raster<pixel_t>>;
@@ -115,12 +117,10 @@ struct RasterLayer {
       schemacht::schema::Field<double, "nodata">>;
 
   /**
-   * @return The statements that set the table up. They run in one transaction (`create_table` does so), and a failing one
-   * makes no table.
-   * - An advisory lock, held to the end of the transaction: PostgreSQL refuses a second transaction that creates the same
-   *   schema or replaces the same function at the same time, so two setups take turns.
-   * - The schema `miniverse_functions` and the merge function in it (`raster::MergeRaster`), replaced by each setup and shared
-   *   by every raster table. The first setup in a database needs CREATE on it; a push needs USAGE on the schema.
+   * @return The statements that set the table up. They run in one transaction (`create_table` does so), after the registry's
+   * setup, which makes the library's schema and holds the lock under which setups take turns; a failing one makes no table.
+   * - The merge function (`raster::MergeRaster`) in that schema, made if it is not there yet, and shared by every raster
+   *   table of the database. A push needs USAGE on the schema.
    * - lz4 compression of the tiles, which needs PostgreSQL 14 or newer built with lz4.
    * - The GiST index on `ST_ConvexHull(rast)`.
    * - The raster constraints that record `grid` for `raster_columns`: SRID 4326, pixel and tile size, alignment, one band of

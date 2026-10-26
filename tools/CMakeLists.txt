@@ -7,7 +7,7 @@ add_library(miniverse_cli11 INTERFACE)
 target_include_directories(miniverse_cli11 SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/CLI11)
 
 # The commands, a library of their own, which the tool and its tests link.
-add_library(miniverse_tool_commands STATIC create.cpp import.cpp remove.cpp verify.cpp settings.cpp)
+add_library(miniverse_tool_commands STATIC create.cpp import.cpp remove.cpp verify.cpp settings.cpp datasets.cpp)
 target_include_directories(miniverse_tool_commands PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(miniverse_tool_commands PUBLIC miniverse::miniverse)
 if(TARGET miniverse_gdal)

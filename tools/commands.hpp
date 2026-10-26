@@ -56,4 +56,7 @@ void verify(const Table& table);
 /** @brief Writes the grid that `table`, of a raster, was made with. */
 void settings(const Table& table);
 
+/** @brief Checks `table`, of features or roads, then writes its datasets: name, rows, and when each was last pushed. */
+void datasets(const Table& table);
+
 }  // namespace tool

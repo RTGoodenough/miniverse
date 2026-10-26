@@ -4,6 +4,7 @@
 #include <exception>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -12,7 +13,9 @@
 
 #include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/reader.hpp"
+#include "miniverse/world/registry.hpp"
 #include "miniverse/world/settings.hpp"
+#include "schemacht/postgres/async_client.hpp"
 #include "schemacht/postgres/database.hpp"
 #include "schemacht/postgres/table_differences.hpp"
 #include "schemacht/schema/table.hpp"
@@ -20,8 +23,8 @@
 
 /**
  * @file
- * The checks of a `Miniverse::verify`: each layer's table against its kind's schema and settings, or its reader asked for
- * its problems, all at once, settled together as one `TablesDiffer` naming every difference.
+ * The checks of a `Miniverse::verify`: each layer's table against the registry's record of it, then its kind's schema and
+ * settings, or its reader asked for its problems, all at once, settled together as one `TablesDiffer` naming every difference.
  */
 namespace miniverse {
 
@@ -127,50 +130,62 @@ class Checks {
   ~Checks() = default;
 };
 
-/** @brief Reads the settings of `table`, whose columns are the kind's, and tells `checks` why if it can't. */
+/**
+ * @brief Reads the settings of `table`, whose columns are the kind's, and tells `checks` why if it can't; if it can,
+ * `unregistered` (what the registry had to say, if anything) is the one problem.
+ */
 template <HasSettings kind_t>
 void check_settings(
     schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table,
-    const std::shared_ptr<Checks>& checks, std::size_t layer_number
+    const std::shared_ptr<Checks>& checks, std::size_t layer_number, std::optional<std::string> unregistered
 ) {
   try {
-    database.execute(settings_statement<kind_t>(table.name()), [checks, layer_number](SettingsRows<kind_t> rows, const std::exception_ptr& error) {
-      if ( error ) {
-        checks->finish(layer_number, {}, error);
-        return;
-      }
+    database.execute(
+        settings_statement<kind_t>(table.name()),
+        [checks, layer_number, unregistered = std::move(unregistered)](SettingsRows<kind_t> rows, const std::exception_ptr& error) {
+          if ( error ) {
+            checks->finish(layer_number, {}, error);
+            return;
+          }
 
-      // Exactly one `finish` per layer: a throw out of this callback would leave the checks waiting for it.
-      std::vector<std::string> problems;
-      std::exception_ptr       failed;
-      try {
-        std::ignore = kind_t::settings_from_rows(std::move(rows));
-      } catch ( const std::exception& unreadable ) {
-        problems.emplace_back(unreadable.what());
-      } catch ( ... ) {
-        failed = std::current_exception();
-      }
+          // Exactly one `finish` per layer: a throw out of this callback would leave the checks waiting for it.
+          std::vector<std::string> problems;
+          std::exception_ptr       failed;
+          try {
+            std::ignore = kind_t::settings_from_rows(std::move(rows));
+            if ( unregistered ) {
+              problems.push_back(*unregistered);
+            }
+          } catch ( const std::exception& unreadable ) {
+            problems.emplace_back(unreadable.what());
+          } catch ( ... ) {
+            failed = std::current_exception();
+          }
 
-      checks->finish(layer_number, std::move(problems), failed);
-    });
+          checks->finish(layer_number, std::move(problems), failed);
+        }
+    );
   } catch ( ... ) {
     checks->finish(layer_number, {}, std::current_exception());
   }
 }
 
 /**
- * @brief Checks `table` against its kind's schema, then its settings if the kind has any, and tells `checks`. `database` and
- * `table` are used after it returns: both must outlive the check, as the miniverse's do.
+ * @brief Checks `table`'s columns against its kind's schema, then its settings if the kind has any, and tells `checks`. A
+ * table that is as its kind says in both has `unregistered` (what the registry had to say, if anything) as its one problem:
+ * a table that is not there, or not the kind's, is told that instead.
  */
 template <LayerKind kind_t>
-void check_table(
+void check_columns(
     schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table,
-    const std::shared_ptr<Checks>& checks, std::size_t layer_number
+    const std::shared_ptr<Checks>& checks, std::size_t layer_number, std::optional<std::string> unregistered
 ) {
   try {
     database.execute(
         schemacht::postgres::table_differences_statement<typename kind_t::schema_type>().on(table),
-        [&, checks, layer_number](const std::vector<schemacht::postgres::TableDifference>& differences, const std::exception_ptr& error) {
+        [&, checks, layer_number, unregistered = std::move(unregistered)](
+            const std::vector<schemacht::postgres::TableDifference>& differences, const std::exception_ptr& error
+        ) {
           if ( error ) {
             checks->finish(layer_number, {}, error);
             return;
@@ -180,7 +195,7 @@ void check_table(
           // the question may not even be answerable (no raster type, so no `raster_columns`).
           if constexpr ( HasSettings<kind_t> ) {
             if ( differences.empty() ) {
-              check_settings<kind_t>(database, table, checks, layer_number);
+              check_settings<kind_t>(database, table, checks, layer_number, unregistered);
               return;
             }
           }
@@ -192,11 +207,71 @@ void check_table(
             for ( const schemacht::postgres::TableDifference& difference : differences ) {
               problems.push_back(schemacht::postgres::describe(difference));
             }
+            if ( differences.empty() && unregistered ) {
+              problems.push_back(*unregistered);
+            }
           } catch ( ... ) {
             failed = std::current_exception();  // when the message itself can't be made
           }
 
           checks->finish(layer_number, std::move(problems), failed);
+        }
+    );
+  } catch ( ... ) {
+    checks->finish(layer_number, {}, std::current_exception());
+  }
+}
+
+/** @return What the registry's answer `rows` (or the `error` it gave instead) says about a layer at `layout`; nothing if it is as recorded. */
+[[nodiscard]] inline std::optional<std::string> registry_problem(
+    const registry::LayerLayoutRows& rows, const std::exception_ptr& error, std::int32_t layout
+) {
+  std::optional<std::int32_t> found;
+  if ( error ) {
+    try {
+      std::rethrow_exception(error);
+    } catch ( const schemacht::postgres::QueryError& failed ) {
+      if ( failed.sqlstate() != "42P01" ) {  // undefined_table: a database with no registry holds no layer of this layout
+        throw;
+      }
+    }
+  } else if ( ! rows.empty() ) {
+    found = schemacht::schema::get<"layout">(rows.front());
+  }
+
+  return registry::layout_problem(found, layout);
+}
+
+/**
+ * @brief Checks `table` against the registry's record of it, then against its kind's schema and settings, and tells `checks`:
+ * a table of another layout is told that alone; one the registry does not know is told what its columns say, or, if they say
+ * nothing, that it is not in the registry. `database` and `table` are used after it returns: both must outlive the check, as
+ * the miniverse's do.
+ */
+template <LayerKind kind_t>
+void check_table(
+    schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table,
+    const std::shared_ptr<Checks>& checks, std::size_t layer_number
+) {
+  try {
+    database.execute(
+        registry::LayerLayout::bind(registry::name_of(table.name())),
+        [&, checks, layer_number](const registry::LayerLayoutRows& rows, const std::exception_ptr& error) {
+          // Exactly one `finish` per layer: a throw out of this callback would leave the checks waiting for it.
+          std::optional<std::string> problem;
+          try {
+            problem = registry_problem(rows, error, kind_t::LAYOUT);
+          } catch ( ... ) {
+            checks->finish(layer_number, {}, std::current_exception());
+            return;
+          }
+
+          if ( problem && ! rows.empty() ) {  // recorded, with another layout
+            checks->finish(layer_number, {std::move(*problem)}, nullptr);
+            return;
+          }
+
+          check_columns<kind_t>(database, table, checks, layer_number, std::move(problem));
         }
     );
   } catch ( ... ) {

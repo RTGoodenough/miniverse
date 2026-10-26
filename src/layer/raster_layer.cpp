@@ -32,9 +32,6 @@ constexpr double EXTENT_MARGIN = 1e-9;
 // How far 1 / pixel size may be from a whole number of pixels per degree. raster_columns gives the size rounded to 10 places.
 constexpr double PIXELS_PER_DEGREE_TOLERANCE = 0.25;
 
-// Held until the transaction ends; why: `RasterLayer::setup_sql`.
-constexpr std::string_view SETUP_LOCK = "DO $$ BEGIN PERFORM pg_advisory_xact_lock(hashtext('miniverse_functions')); END $$";
-
 // The tiles' TOAST compression, set before any tile is written since it applies from then on. pglz, PostgreSQL's default,
 // makes whole-number tiles load far slower than lz4.
 constexpr std::string_view TILE_COMPRESSION = "lz4";
@@ -42,7 +39,7 @@ constexpr std::string_view TILE_COMPRESSION = "lz4";
 // The body of `raster::MergeRaster`. ST_Union's LAST runs in C, where an ST_MapAlgebra expression does not.
 constexpr std::string_view MERGE_FUNCTION_DEFINITION =
     "(current raster, incoming raster) RETURNS raster LANGUAGE sql IMMUTABLE PARALLEL SAFE "
-    "AS $$ SELECT ST_Union(tile, 'LAST' ORDER BY n) FROM unnest(ARRAY[current, incoming]) WITH ORDINALITY AS tiles (tile, n) $$";
+    "AS $fn$ SELECT ST_Union(tile, 'LAST' ORDER BY n) FROM unnest(ARRAY[current, incoming]) WITH ORDINALITY AS tiles (tile, n) $fn$";
 
 /** @return `value` as the shortest decimal that reads back as the same `double`. */
 [[nodiscard]] std::string decimal(double value) { return std::format("{}", value); }
@@ -88,10 +85,13 @@ std::vector<std::string> RasterLayer<pixel_t>::setup_sql(const schemacht::schema
     separator = ", ";
   }
 
+  // The schema is there, and setups take turns: the registry's setup, run before this, made it under its lock. The function
+  // is made only if absent: replacing it takes its owner, and the role that made it need not be this one.
   return {
-      std::string(SETUP_LOCK),
-      std::format("CREATE SCHEMA IF NOT EXISTS {}", raster::MergeRaster::SCHEMA),
-      std::format("CREATE OR REPLACE FUNCTION {}{}", raster::MergeRaster::FUNCTION, MERGE_FUNCTION_DEFINITION),
+      std::format(
+          "DO $do$ BEGIN IF to_regprocedure('{0}(raster, raster)') IS NULL THEN CREATE FUNCTION {0}{1}; END IF; END $do$",
+          raster::MergeRaster::FUNCTION, MERGE_FUNCTION_DEFINITION
+      ),
       std::format("ALTER TABLE {} ALTER COLUMN rast SET COMPRESSION {}", table.quoted(), TILE_COMPRESSION),
       "CREATE INDEX ON " + table.quoted() + " USING gist (ST_ConvexHull(rast))",
       std::move(alter),

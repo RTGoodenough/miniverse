@@ -59,7 +59,12 @@ world.create_table<Elevation>({.pixels_per_degree = 3600, .tile_pixels = 512, .n
 ```
 
 `create_table` makes the table and runs the kind's setup (its spatial index; for a raster, its constraints and merge
-function) in one transaction, and waits. A kind with settings, such as a raster's grid, takes them here and the table
+function) in one transaction, and waits. It also records the table in the registry, with the layout the kind is at
+(`Kind::LAYOUT`, a number raised when a kind's table layout changes), for `verify` to read back. The registry is the
+schema `miniverse_internal`, which the library keeps for itself in the database: its tables `layers` and `datasets`,
+and its functions. The role that first makes a table in a database makes the schema and owns it; another role that
+makes tables needs CREATE on the database, and one that pushes needs USAGE on the schema with INSERT and UPDATE on
+`datasets` (DELETE, to remove). A worker that only loads and verifies needs USAGE and SELECT on `layers`. A kind with settings, such as a raster's grid, takes them here and the table
 keeps them. `create_tables()` makes every table of a miniverse whose kinds have no settings. `drop_tables()` drops them.
 PostGIS must already be enabled in the database (`CREATE EXTENSION postgis`, and `postgis_raster` for rasters). A raster
 table's setup turns on lz4 compression for its tiles, which needs a PostgreSQL 14 or newer built with lz4; the usual
@@ -78,8 +83,9 @@ transaction holds one of the pool's connections until it ends.
 Feature and road layers are pushed as datasets. A `Dataset` is a name for an export: the file a producer made of a
 region, under whatever name the pusher gives it. The first push of a name writes the dataset; every later push of the
 same name replaces it, all at once: what the new export lacks is gone, what it has is there. `remove` deletes a dataset and gives how many rows it deleted: 0 for a name no push wrote.
-A worker never sees dataset names: a load gives the layer as one whole. A feature's id is one the database gave its
-row; a way's is its own, OpenStreetMap's. So refresh a region by pushing its export again under the name it was first
+`datasets<Kind>()` lists a table's datasets, each with when it was last pushed and how many rows it holds. A worker
+never sees dataset names: a load gives the layer as one whole. A feature's id is one the database gave its row; a
+way's is its own, OpenStreetMap's. So refresh a region by pushing its export again under the name it was first
 pushed under, and keep a name to the same ground over time. Two pushes of one dataset at once take turns; pushes of different datasets run side by
 side. A raster layer is not pushed as a dataset: each tile is merged onto the one already there.
 
@@ -151,11 +157,13 @@ tile is megabytes, so ask for a few at a time.
 world.verify().get();
 ```
 
-`verify` compares every layer's table with its kind: the columns, their types, which may be null, the primary key, and
-that no other column would need filling. A kind with settings must also have them in the table. Every layer is checked
-at once, and the future holds a `TablesDiffer` naming every difference found. It is meant for a program's start, so a
-missing or wrong table fails there rather than at the first load. Indexes and permissions are not checked. It needs
-PostgreSQL 17.
+`verify` first asks the registry which layout each layer's table was made with. A table made with another layout than
+its kind is at now, or one the registry does not know (made before layouts were recorded, or by hand), is named with
+what to do: make it again and import its data. A table of the right layout is then compared with its kind: the
+columns, their types, which may be null, the primary key, and that no other column would need filling. A kind with
+settings must also have them in the table. Every layer is checked at once, and the future holds a `TablesDiffer`
+naming every difference found. It is meant for a program's start, so a missing or wrong table fails there rather than
+at the first load. Indexes and permissions are not checked. It needs PostgreSQL 17.
 
 `table_settings<Elevation>()` gives the settings a table was made with, for a writer that has to warp its source onto
 the table's grid.
@@ -411,6 +419,7 @@ and `postgis_raster`).
 | `remove <table> <dataset>` | Removes a dataset from a table of features or roads. A name no import wrote is an error. |
 | `verify <table>` | Checks the table is as its kind says; the differences are the error. |
 | `settings <table>` | Shows the grid of a raster table. |
+| `datasets <table>` | Lists the datasets of a table of features or roads: name, rows, and when each was last pushed. |
 
 What `import` reads depends on the kind:
 
@@ -454,6 +463,6 @@ tool built without one says so.
 - A location that is a point or a line lying exactly along the line between two raster tiles has no tile; strictly inside
   a tile it has that tile.
 - `verify` needs PostgreSQL 17 for the catalog query it uses.
-- A dataset cannot be deleted by area, only whole, by name. Tables made before datasets existed, and road tables made while
-  a way was keyed by its nodes (a generated `way_id`), do not verify against the current kinds and must be made again;
-  there is no migration.
+- A dataset cannot be deleted by area, only whole, by name. A table made with another layout than its kind is at now,
+  or before the registry existed, does not verify and must be made again and refilled; `verify` says so. There is no
+  migration.

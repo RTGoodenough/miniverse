@@ -20,6 +20,8 @@
  * and `struct Tracks : RoadLayer {};`.
  *
  * A kind says:
+ * - `LAYOUT`: a whole number for the layout of its table, raised when the layout changes. A table records the layout it was
+ *   made with, and `Miniverse::verify` names a table of another, which is made again and refilled.
  * - `result_type`: what a load gives (`Ways`, say).
  * - `schema_type`: its table's layout, a schemacht `Schema`. The schema's own name is a placeholder; the layer names the table.
  * - `load_statement_type`: a `schemacht::query::Prepared` against `schema_type` whose one argument is a polygon in WGS 84
@@ -107,6 +109,7 @@ concept LayerKind =
       typename kind_t::result_type;
       typename kind_t::schema_type;
       typename kind_t::load_statement_type::result_type;
+      { kind_t::LAYOUT } -> std::convertible_to<std::int32_t>;
     } && schemacht::postgres::TextSchema<typename kind_t::schema_type> &&
     requires(
         const geo::Polygon& location, const schemacht::schema::Table<typename kind_t::schema_type>& schema_table, LoadedRows<kind_t> rows,

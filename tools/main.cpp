@@ -7,6 +7,7 @@
 //   miniverse remove   --kind KIND TABLE DATASET
 //   miniverse verify   --kind KIND TABLE
 //   miniverse settings --kind KIND TABLE
+//   miniverse datasets --kind KIND TABLE
 //
 // `--db` gives the libpq connection string; without it, libpq's defaults and the PG* variables say where. TABLE is `table`
 // or `schema.table`. It exits with 0 when the command is done, 1 when it failed, and 2 for arguments it can't take, before
@@ -77,6 +78,9 @@ int main(int argc, char** argv) {
     CLI::App* settings = app.add_subcommand("settings", "Show the grid a raster table was made with");
     add_table(*settings, table);
 
+    CLI::App* datasets = app.add_subcommand("datasets", "List the datasets of a table of features or roads");
+    add_table(*datasets, table);
+
     try {
       app.parse(argc, argv);
     } catch ( const CLI::ParseError& error ) {
@@ -91,8 +95,10 @@ int main(int argc, char** argv) {
       tool::remove(table, dataset);
     } else if ( verify->parsed() ) {
       tool::verify(table);
-    } else {
+    } else if ( settings->parsed() ) {
       tool::settings(table);
+    } else {
+      tool::datasets(table);
     }
 
     return EXIT_SUCCESS;

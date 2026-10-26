@@ -9,7 +9,7 @@
 //   miniverse_example_import_raster "host=localhost dbname=gis user=gis"
 // It reads examples/data/heights.asc, 2 by 1 degrees of 8 pixels to a degree; a file of your own goes in its place. It
 // creates the table miniverse_example_heights, and drops it when it is done; a real uploader would keep it. A raster table's
-// setup also makes the schema miniverse_functions, which every raster table of the database shares, and which stays.
+// `create_table` also makes the schema miniverse_internal, the library's own, which stays.
 
 #include <gdal.h>
 #include <gdal_priv.h>

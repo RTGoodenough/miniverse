@@ -25,7 +25,8 @@ It is built on schemacht, a sibling library, which describes tables as C++ types
   (`gdal::raster_file`), an OpenStreetMap extract (`osm::road_file`), or a reader you write (`Reader<Kind>`).
 - **Importing files into tables:** `gdal::read_features`, `gdal::read_raster` (warped onto the table's grid) and
   `osm::read_ways`, each a chunk at a time.
-- **Checks:** `verify` compares every table with its kind before a program starts work.
+- **Checks:** `verify` compares every table with its kind, and with the layout it was made with, before a program
+  starts work.
 - **A command-line tool:** `miniverse` makes tables of the built-in kinds, imports files into them, removes datasets and
   checks tables, with no program to write.
 - **GDAL datasets:** a loaded raster as a GDAL dataset in memory (`gdal::dataset_of`), for GDAL's own tools or to write
@@ -118,7 +119,8 @@ miniverse import --db "host=localhost dbname=gis" --kind raster:int16 elevation 
 miniverse verify --db "host=localhost dbname=gis" --kind roads roads
 ```
 
-The commands are `create`, `import`, `remove` (a dataset), `verify` and `settings` (a raster table's grid). The guide's
+The commands are `create`, `import`, `remove` (a dataset), `verify`, `settings` (a raster table's grid) and `datasets`
+(a table's datasets). The guide's
 [command-line tool](docs/guide.md#the-command-line-tool) section has every option. It is installed with the library,
 into `bin/`. A program with kinds of its own uses the library instead.
 
@@ -126,8 +128,7 @@ into `bin/`. A program with kinds of its own uses the library instead.
 
 Each example is a program under [examples/](examples/), run with a connection string as its argument (`make_database`
 takes the new database's name and its input files too). Each makes its own tables and drops them afterwards, except
-`make_database`; the raster examples also make the schema `miniverse_functions`, which every raster table of a database
-shares, and leave it.
+`make_database`; each also makes the schema `miniverse_internal`, the library's registry of its tables, which stays.
 
 | Example | Shows | Needs |
 |---|---|---|

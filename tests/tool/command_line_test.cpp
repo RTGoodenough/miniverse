@@ -113,7 +113,9 @@ TEST_CASE("tool command line: an import's options reach the command", "[tool][in
   const Run named = run("import --kind features:multipolygon miniverse_test_tool_buildings " + BUILDINGS_FILE + " --dataset village --chunk 1");
   CHECK(named.exit == 0);
   CHECK_THAT(named.output, ContainsSubstring("as the dataset 'village'"));
+  CHECK_THAT(run("datasets --kind features:multipolygon miniverse_test_tool_buildings").output, ContainsSubstring("village\t4 rows\t20"));
   CHECK(run("remove --kind features:multipolygon miniverse_test_tool_buildings village").exit == 0);
+  CHECK_THAT(run("datasets --kind features:multipolygon miniverse_test_tool_buildings").output, ContainsSubstring("no datasets"));
   CHECK(buildings.world().load<Buildings>(EVERYWHERE).get().empty());
 
   // Of the extract's ways, one is a building, and not a road.

@@ -30,6 +30,8 @@ constexpr auto PLACES_IN =
     schemacht::query::select(schemacht::query::On<PlacesSchema>::col<"position">().apply<miniverse::geo::Intersects>(schemacht::query::arg<0>()));
 
 struct Places {
+  static constexpr std::int32_t LAYOUT = 1;
+
   using result_type = std::vector<miniverse::geo::Point>;
   using schema_type = PlacesSchema;
   using load_statement_type = schemacht::query::Prepared<PLACES_IN>;

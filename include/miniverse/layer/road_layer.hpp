@@ -64,6 +64,8 @@ using Tags = schemacht::schema::Field<schemacht::json::Json, "tags">;
  * is the neighbour's, and only the neighbour's sweep deletes it.
  */
 struct RoadLayer {
+  static constexpr std::int32_t LAYOUT = 1;  ///< The first layout recorded.
+
   using result_type = Ways;
   /// The table's layout. Its name, `roads`, is only a placeholder: a layer names its own table (`Layer`).
   using schema_type = schemacht::schema::Schema<"roads", road::WayId, dataset::Name, road::NodeIds, road::Geom, road::Tags, dataset::Pushed>;

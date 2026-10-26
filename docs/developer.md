@@ -8,10 +8,11 @@ How the library is put together, how to add to it, and how to build, test and li
 ```
 include/miniverse/
   world.hpp              Miniverse: the front that holds the layers and the pool and tells a table from a reader
+  internal_schema.hpp    the schema the library keeps for itself in a database
   world/                 one idea each: load.hpp (loads and streams), push.hpp, push_in_parts.hpp (PushInParts and the
                          push it runs), step_thread.hpp (the thread a push in parts runs on), datasets.hpp (stamp, lock,
-                         sweep, remove), verify.hpp (TablesDiffer, the checks), tables.hpp (make, drop), settings.hpp,
-                         async.hpp
+                         sweep, remove, list), verify.hpp (TablesDiffer, the checks), tables.hpp (make, drop), registry.hpp
+                         (what a database remembers about its layers: layouts and datasets), settings.hpp, async.hpp
   dataset.hpp            Dataset: the export a vector push writes under and replaces
   layer.hpp              Layer<Kind>: a table name or a reader
   reader.hpp             Reader<Kind>
@@ -130,7 +131,7 @@ handle is dropped. What runs on the caller's thread and waits: the constructor
   nodes exceeds. Batches of `WAYS_PER_STATEMENT`.
 - **RasterLayer<P>** (`layer/raster_layer.hpp`, `src/layer/raster_layer.cpp`; the pixel arithmetic in `layer/raster/tiles.hpp`,
   which tiles a location has in `layer/raster/reach.hpp`): `tile_id bigint PRIMARY KEY, rast raster`.
-  The tile id is the tile's row and column in the world grid. `setup_sql` makes the schema `miniverse_functions` and its
+  The tile id is the tile's row and column in the world grid. `setup_sql` makes, in the library's schema `miniverse_internal`, the
   `merge_raster` function (shared by every raster table of the database), sets lz4 compression on `rast`, makes a GiST
   index on `ST_ConvexHull(rast)`, and adds the constraints that record the grid in the form `raster_columns` parses (so
   GDAL and QGIS read the table). `to_rows` cuts a raster into the grid's tiles, in batches sized by
@@ -165,7 +166,9 @@ dependencies are private.
 
 `examples/own_kind.cpp` is the model: a `Towns` kind with typed columns, its own query and its own result. The steps:
 
-1. Define the result type the program works with.
+1. Define the result type the program works with, and `LAYOUT`, the table layout's number: 1 to begin with, raised
+   whenever `schema_type` or the setup changes, since a table records the layout it was made with and `verify` names
+   one of another.
 2. Define `schema_type` with schemacht `Field`s; a geometry column uses a `geo::` type, whose SQL type is
    `geometry(<Type>,4326)`.
 3. Write `LOAD` as a `query::select` against the schema, applying `geo::Intersects` (or another operation) to the
@@ -248,7 +251,7 @@ MINIVERSE_TEST_DB="postgresql://user:password@localhost:5432/scratch" ctest --te
 ```
 
 The database must have `postgis` and `postgis_raster` enabled and be one you can lose: the tests create and drop
-tables named `miniverse_test_*` and `miniverse_example_*`, and one test drops the shared schema `miniverse_functions`.
+tables named `miniverse_test_*` and `miniverse_example_*`, and some tests drop the library's schema `miniverse_internal`.
 Never point it at a database with data in it. The tests that share the database take a CTest `RESOURCE_LOCK`, so they
 run one at a time under `ctest -j`.
 

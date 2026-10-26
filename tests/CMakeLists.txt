@@ -136,6 +136,7 @@ miniverse_compile_fail(NO_LAYERS "a miniverse holds at least one layer")
 miniverse_compile_fail(PUSH_NEEDS_DATASET "rows belong to a dataset")
 miniverse_compile_fail(PUSH_TAKES_NO_DATASET "this kind has no datasets")
 miniverse_compile_fail(CREATE_TABLES_NEED_SETTINGS "call create_table<Kind>\\(settings\\) for it")
+miniverse_compile_fail(NO_LAYOUT "LAYOUT")
 
 # ==============================================================================
 # Formatting

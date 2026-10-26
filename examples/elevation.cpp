@@ -6,8 +6,8 @@
 //
 // Run with a libpq connection string to a database with PostGIS and postgis_raster:
 //   miniverse_example_elevation "host=localhost dbname=gis user=gis"
-// It creates the table miniverse_example_elevation, and drops it when it is done. A raster table's setup also makes the
-// schema miniverse_functions, which every raster table of the database shares, and which stays.
+// It creates the table miniverse_example_elevation, and drops it when it is done. `create_table` also makes the
+// schema miniverse_internal, the library's own, which stays.
 
 #include <algorithm>
 #include <cmath>

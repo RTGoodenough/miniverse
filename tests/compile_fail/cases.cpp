@@ -43,6 +43,13 @@ void make(miniverse::Miniverse<Elevation>& world) { world.create_tables(); }
 void open_nothing(const std::string& conninfo) { miniverse::Miniverse<> world(conninfo); }
 #endif
 
+#if defined(CASE_NO_LAYOUT)
+struct Unnumbered : miniverse::RoadLayer {
+  static constexpr const char* LAYOUT = "one";  // a layout is a whole number
+};
+void open(const std::string& conninfo) { miniverse::Miniverse<Unnumbered> world(conninfo, miniverse::Layer<Unnumbered>("roads")); }
+#endif
+
 #if defined(CASE_DUPLICATE_KIND)
 void open(const std::string& conninfo) {
   miniverse::Miniverse<Roads, Roads> world(conninfo, miniverse::Layer<Roads>("roads"), miniverse::Layer<Roads>("more_roads"));

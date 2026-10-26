@@ -251,8 +251,8 @@ class Miniverse {
 
   /**
    * @return A future for how many rows of `dataset` were deleted from the layer `kind_t`'s table, or the error: 0 for a
-   * name no push wrote, which is not an error here, for the program to judge. A layer with a reader is only read: the
-   * future holds a `std::logic_error`.
+   * name no push wrote, which is not an error here, for the program to judge. A remove takes turns with a push of the
+   * dataset. A layer with a reader is only read: the future holds a `std::logic_error`.
    */
   template <LayerKind kind_t>
   [[nodiscard]] std::future<std::uint64_t> remove(const Dataset& dataset) {
@@ -269,11 +269,30 @@ class Miniverse {
   }
 
   /**
-   * @return A future that completes if every layer's table is in the database and matches its kind's schema, as schemacht's
-   * `table_differences_statement` compares them (columns, types, nullability, primary key, and no other column an insert
-   * would have to fill); for a kind with settings the table must also hold settings to read. It holds a `TablesDiffer` naming
-   * every difference of every layer instead, or the error of a check that could not run (a PostgreSQL older than 17: a
-   * `QueryError`). Every layer is checked at once. For a program to call when it starts.
+   * @return A future for the datasets of the layer `kind_t`'s table, by name: each with when it was last pushed and how many
+   * rows it holds now, or the error. A layer with a reader is only read: the future holds a `std::logic_error`.
+   */
+  template <LayerKind kind_t>
+  [[nodiscard]] std::future<std::vector<DatasetInfo>> datasets() {
+    static_assert(holds<kind_t>(), "this miniverse has no such layer: add the kind to Miniverse<...>");
+    static_assert(HasDatasets<kind_t>, "this kind has no datasets to list");
+
+    if constexpr ( HasDatasets<kind_t> ) {
+      if ( ! layer<kind_t>().is_table() ) {
+        return only_read<kind_t, std::vector<DatasetInfo>>();
+      }
+
+      return detail::datasets<kind_t>(database(), layer<kind_t>().table());
+    }
+  }
+
+  /**
+   * @return A future that completes if every layer's table is in the registry as made with its kind's layout (`LAYOUT`) and
+   * matches its kind's schema, as schemacht's `table_differences_statement` compares them (columns, types, nullability,
+   * primary key, and no other column an insert would have to fill); for a kind with settings the table must also hold
+   * settings to read. A table of another layout, or none recorded, is named with what to do: make it again. It holds a
+   * `TablesDiffer` naming every difference of every layer instead, or the error of a check that could not run (a PostgreSQL
+   * older than 17: a `QueryError`). Every layer is checked at once. For a program to call when it starts.
    *
    * Not checked: indexes, other constraints, the raster merge function (`raster::MergeRaster`), and the role's privileges. A
    * layer with a reader is checked by `Reader::problems`, on the calling thread; what it finds is in the `TablesDiffer` too.
@@ -385,7 +404,7 @@ class Miniverse {
   [[nodiscard]] std::future<result_t> only_read() const {
     std::promise<result_t> failed;
     try {
-      throw std::logic_error("the layer read from " + layer<kind_t>().name() + " is only read: a push or a remove needs a layer that is a table");
+      throw std::logic_error("the layer read from " + layer<kind_t>().name() + " is only read: it has no table to write, or datasets to list");
     } catch ( ... ) {
       failed.set_exception(std::current_exception());  // also if the message itself could not be made
     }

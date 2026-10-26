@@ -157,3 +157,40 @@ TEST_CASE("integration: verify names every difference of every layer at once, in
     CHECK(error.differences().back() == R"("miniverse_test_verify_nothing": the table "miniverse_test_verify_nothing" is not in the database)");
   }
 }
+
+TEST_CASE("integration: verify names a table that is not in the registry, and one made with another layout", "[integration]") {
+  test::Fresh<World> made = with_tables(test_db());
+  auto&              database = made.world().database();
+
+  // Its columns are right, but its record is gone: made before layouts were recorded, or by hand.
+  std::ignore = database
+                    .execute(
+                        schemacht::postgres::unchecked_sql(
+                            "DELETE FROM miniverse_internal.layers WHERE table_name = $1", std::string("miniverse_test_verify_roads")
+                        )
+                    )
+                    .get();
+  CHECK_THAT(complaint_of(made.world()), ContainsSubstring(R"("miniverse_test_verify_roads": not in the registry)"));
+
+  // Made with an older layout.
+  std::ignore = database
+                    .execute(
+                        schemacht::postgres::unchecked_sql(
+                            "UPDATE miniverse_internal.layers SET layout = 0 WHERE table_name = $1", std::string("miniverse_test_verify_buildings")
+                        )
+                    )
+                    .get();
+  const std::string complaint = complaint_of(made.world());
+  CHECK_THAT(complaint, ContainsSubstring(R"("miniverse_test_verify_buildings": made with layout 0; this build needs layout 1)"));
+  CHECK_THAT(complaint, ! ContainsSubstring("miniverse_test_verify_elevation"));
+}
+
+TEST_CASE("integration: in a database with no registry, verify names every table as not in it", "[integration]") {
+  test::Fresh<World> made = with_tables(test_db());
+  std::ignore = made.world().database().execute(schemacht::postgres::unchecked_sql("DROP SCHEMA miniverse_internal CASCADE")).get();
+
+  const std::string complaint = complaint_of(made.world());
+
+  CHECK_THAT(complaint, ContainsSubstring(R"("miniverse_test_verify_roads": not in the registry)"));
+  CHECK_THAT(complaint, ContainsSubstring(R"("miniverse_test_verify_elevation": not in the registry)"));
+}

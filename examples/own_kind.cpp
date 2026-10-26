@@ -33,6 +33,8 @@ struct Town {
 
 /** @brief The layer kind of towns: one row each, loaded by where its centre is, the largest first. */
 struct Towns {
+  static constexpr std::int32_t LAYOUT = 1;  // raised when the table's layout changes
+
   using result_type = std::vector<Town>;
 
   // Each column is NOT NULL. The schema's name, `towns`, is only a placeholder: the layer names its table.

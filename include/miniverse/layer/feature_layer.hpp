@@ -65,6 +65,8 @@ using Tags = schemacht::schema::Field<schemacht::json::Json, "tags">;
  */
 template <geo::wkb::Geometry geometry_t>
 struct FeatureLayer {
+  static constexpr std::int32_t LAYOUT = 1;  ///< The first layout recorded.
+
   using result_type = Features<geometry_t>;
   /// The table's layout. Its name, `features`, is only a placeholder: a layer names its own table (`Layer`).
   using schema_type = schemacht::schema::Schema<"features", feature::Id, dataset::Name, feature::Geom<geometry_t>, feature::Tags, dataset::Pushed>;

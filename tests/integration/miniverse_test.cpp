@@ -13,12 +13,15 @@
 #include <future>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "miniverse/miniverse.hpp"
+#include "miniverse/world/registry.hpp"
 #include "schemacht/json/json.hpp"
 #include "schemacht/postgres/async_client.hpp"
+#include "schemacht/postgres/statements.hpp"
 #include "schemacht/query/raw_statement.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/table_name.hpp"
@@ -168,6 +171,69 @@ TEST_CASE("integration: create_tables makes the spatial index the loads use", "[
   CHECK(names == std::vector<std::string>{"miniverse_test_roads_dataset_idx", "miniverse_test_roads_geom_idx", "miniverse_test_roads_pkey"});
 }
 
+using DatasetRecords = schemacht::query::RawStatement<
+    "SELECT dataset FROM miniverse_internal.datasets WHERE table_name = $1 ORDER BY dataset", schemacht::query::RawArguments<std::string>,
+    schemacht::schema::Field<std::string, "dataset">>;
+
+using LayerRecord = schemacht::query::RawStatement<
+    "SELECT kind, layout FROM miniverse_internal.layers WHERE table_name = $1", schemacht::query::RawArguments<std::string>,
+    schemacht::schema::Field<std::string, "kind">, schemacht::schema::Field<std::int32_t, "layout">>;
+
+TEST_CASE("integration: create_table records the table in the registry, and drop_tables forgets it", "[integration]") {
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
+
+  const auto recorded = world.database().execute(LayerRecord::bind("miniverse_test_roads")).get();
+  REQUIRE(recorded.size() == 1);
+  CHECK(schemacht::schema::get<"kind">(recorded.front()) == "roads");
+  CHECK(schemacht::schema::get<"layout">(recorded.front()) == TestRoads::LAYOUT);
+
+  world.drop_tables();
+  CHECK(world.database().execute(LayerRecord::bind("miniverse_test_roads")).get().empty());
+  CHECK(world.database().execute(DatasetRecords::bind("miniverse_test_roads")).get().empty());  // the network's, gone with the table
+}
+
+TEST_CASE("integration: the record of a push is written in the push's own transaction", "[integration]") {
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
+
+  // The registry's table is taken away between the part and the commit: the commit fails, and the part is not there.
+  miniverse::PushInParts<TestRoads> parts = world.begin_push<TestRoads>(FAR_EAST_SURVEY).get();
+  parts.add({way(10, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get();
+  std::ignore = world.database().execute(schemacht::postgres::unchecked_sql("ALTER TABLE miniverse_internal.datasets RENAME TO away")).get();
+  CHECK_THROWS_AS(parts.commit().get(), schemacht::postgres::QueryError);
+  std::ignore = world.database().execute(schemacht::postgres::unchecked_sql("ALTER TABLE miniverse_internal.away RENAME TO datasets")).get();
+
+  CHECK(world.load<TestRoads>(FAR_EAST).get().empty());
+  CHECK(world.database().execute(DatasetRecords::bind("miniverse_test_roads")).get().size() == 1);
+}
+
+TEST_CASE("integration: datasets lists each with its rows and when it was last pushed, and remove takes it off the list", "[integration]") {
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
+
+  world.push<TestRoads>(FAR_EAST_SURVEY, many_ways(1000)).get();
+  std::vector<miniverse::DatasetInfo> listed = world.datasets<TestRoads>().get();
+  REQUIRE(listed.size() == 2);  // by name
+  CHECK(listed.at(0).name == FAR_EAST_SURVEY.name);
+  CHECK(listed.at(0).rows == miniverse::RoadLayer::WAYS_PER_STATEMENT + 1);
+  CHECK(listed.at(1).name == NETWORK.name);
+  CHECK(listed.at(1).rows == 4);
+  CHECK(listed.at(0).pushed > listed.at(1).pushed);  // the network was pushed first
+
+  // Pushed again: the same entry, with the newer push's rows and time.
+  world.push<TestRoads>(NETWORK, {way(1, {11, 12}, "LINESTRING(0 0,1 1)", "{}")}).get();
+  listed = world.datasets<TestRoads>().get();
+  REQUIRE(listed.size() == 2);
+  CHECK(listed.at(1).rows == 1);
+  CHECK(listed.at(1).pushed > listed.at(0).pushed);
+
+  CHECK(world.remove<TestRoads>(FAR_EAST_SURVEY).get() == miniverse::RoadLayer::WAYS_PER_STATEMENT + 1);
+  listed = world.datasets<TestRoads>().get();
+  REQUIRE(listed.size() == 1);
+  CHECK(listed.front().name == NETWORK.name);
+}
+
 TEST_CASE("integration: a stream of roads hands the ways over a chunk at a time, ordered by id", "[integration]") {
   test::Fresh<World> loaded = with_network(test_db());
 
@@ -291,6 +357,7 @@ TEST_CASE("integration: a push in parts that is dropped without a commit writes 
 
   CHECK(world.load<TestRoads>(FAR_EAST).get().empty());
   CHECK(ids(world.load<TestRoads>(EVERYWHERE).get()) == std::vector<std::int64_t>{1, 2, 3, 4});
+  CHECK(world.datasets<TestRoads>().get().size() == 1);  // nor is the dataset recorded
 }
 
 TEST_CASE("integration: a part that fails ends a push in parts, which then writes nothing", "[integration]") {

@@ -85,6 +85,7 @@ TEST_CASE("tool: an import replaces its dataset, named for the file unless given
   tool::import(table, {.files = {BUILDINGS_FILE}});                      // the same dataset, replaced
   tool::import(table, {.files = {BUILDINGS_FILE}, .dataset = "again"});  // another beside it
   CHECK(buildings.world().load<Buildings>(EVERYWHERE).get().size() == 2 * in_the_file);
+  tool::datasets(table);
 
   tool::remove(table, "buildings.geojson");
   CHECK(buildings.world().load<Buildings>(EVERYWHERE).get().size() == in_the_file);
@@ -155,6 +156,7 @@ TEST_CASE("tool: a table of another kind, an option for another kind, or a value
       tool::create(bytes, {.pixels_per_degree = 4, .metres = 30, .tile_pixels = 4, .nodata = "0"}), ContainsSubstring("one of the two")
   );
   CHECK_THROWS_WITH(tool::remove(bytes, "anything"), ContainsSubstring("has no datasets"));
+  CHECK_THROWS_WITH(tool::datasets(bytes), ContainsSubstring("has no datasets"));
   CHECK_THROWS_WITH(tool::import(bytes, {.files = {HEIGHTS_FILE}, .chunk = 5}), ContainsSubstring("--chunk is not for"));
   CHECK_THROWS_WITH(tool::verify({.conninfo = buildings.conninfo, .kind = "nothing", .name = "t"}), ContainsSubstring("there is no kind"));
 }

@@ -9,8 +9,8 @@
 // PostGIS and postgis_raster, on PostgreSQL 17 or newer (which `verify` needs for a table):
 //   miniverse_example_local_files "host=localhost dbname=gis user=gis"
 // It reads examples/data/streets.osm and examples/data/heights.asc. It creates the tables miniverse_example_local_roads and
-// miniverse_example_local_heights, and drops them when it is done; and, as every raster table's setup does, the schema
-// miniverse_functions, which stays.
+// miniverse_example_local_heights, and drops them when it is done; and, as every `create_table` does, the schema
+// miniverse_internal, which stays.
 
 #include <algorithm>
 #include <cstddef>
