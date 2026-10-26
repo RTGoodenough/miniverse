@@ -30,11 +30,11 @@ namespace miniverse {
 /** @brief A road table's own columns; the dataset's are in dataset_columns.hpp. */
 namespace road {
 
-/** @brief The way's id, numbered by the database as rows are written. */
-using WayId = schemacht::schema::Field<std::int64_t, "way_id", schemacht::schema::KeyRole::Primary, true>;
+/** @brief The way's own id, the source's (OpenStreetMap's way id): the table's key (see `RoadLayer`). */
+using WayId = schemacht::schema::Field<std::int64_t, "way_id", schemacht::schema::KeyRole::Primary>;
 
-/** @brief The way's nodes, in order: the table's unique key (see `RoadLayer`). */
-using NodeIds = schemacht::schema::Field<std::vector<std::int64_t>, "node_ids", schemacht::schema::KeyRole::Unique>;
+/** @brief The way's nodes, in order. */
+using NodeIds = schemacht::schema::Field<std::vector<std::int64_t>, "node_ids">;
 
 /** @brief The way as a line through its nodes. */
 using Geom = schemacht::schema::Field<geo::LineString, "geom">;
@@ -45,29 +45,30 @@ using Tags = schemacht::schema::Field<schemacht::json::Json, "tags">;
 }  // namespace road
 
 /**
- * @brief The layer kind of roads: one row per way, its geometry a `geometry(LineString,4326)` with a GiST index. A load gives
-  * the ways that intersect the location, in id order: one network, whatever exports it was pushed from.
+ * @brief The layer kind of roads: one row per way, keyed by the way's own id, its geometry a `geometry(LineString,4326)` with a
+ * GiST index. A load gives the ways that intersect the location, in id order: one network, whatever exports it was pushed from.
  *
  * @code
  * struct Roads : miniverse::RoadLayer {};
  * miniverse::Miniverse world(conninfo, miniverse::Layer<Roads>("osm_roads"));
  * @endcode
  *
-  * Ways are pushed under a `Dataset`, which a push replaces whole and `Miniverse::remove` deletes. A way is its nodes. The table
- * holds one row per sequence of node ids, so a way two exports both carry is one row, of the dataset that last pushed it, and
- * a way pushed again with the same nodes keeps its id. The export's way ids are not kept.
+ * Ways are pushed under a `Dataset`, which a push replaces whole and `Miniverse::remove` deletes. A way is its id, as in
+ * OpenStreetMap: a way two exports both carry is one row, of the dataset that last pushed it, and a way pushed again keeps its
+ * row, with the line, nodes and tags of the later push.
  *
- * This asks of the data that node ids are one space across the layer, stable and not reused for another place (a producer
- * that cannot promise that gets a layer of its own), and that an export holds its ways whole (`osm::read_ways` drops a way with
- * a missing node). A way that a neighbouring export took over, and this export then dropped, stays until that neighbour is
- * pushed again: its row is the neighbour's, and only the neighbour's sweep deletes it.
+ * This asks of the data that way ids and node ids are each one space across the layer, OpenStreetMap's, stable and not reused
+ * for another place: data of the layer's own takes ids from a range OpenStreetMap does not use, and a producer that cannot
+ * promise that gets a layer of its own. An export holds its ways whole (`osm::read_ways` drops a way with a missing node). A
+ * way that a neighbouring export took over, and this export then dropped, stays until that neighbour is pushed again: its row
+ * is the neighbour's, and only the neighbour's sweep deletes it.
  */
 struct RoadLayer {
   using result_type = Ways;
   /// The table's layout. Its name, `roads`, is only a placeholder: a layer names its own table (`Layer`).
   using schema_type = schemacht::schema::Schema<"roads", road::WayId, dataset::Name, road::NodeIds, road::Geom, road::Tags, dataset::Pushed>;
   using row_type = schema_type::row_type;
-  /// A row as it is written: without the id, which the database numbers.
+  /// A row as it is written: every column, the way's id among them.
   using insert_row_type = schema_type::insert_row_type;
 
   /** @brief The ways that intersect argument 0, a polygon, in id order: their id, nodes, line and tags. */
@@ -91,17 +92,17 @@ struct RoadLayer {
   [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table);
 
   /**
-   * @return `ways` as rows of `dataset` marked `stamp`, without their ids, in the order given, in batches of `WAYS_PER_STATEMENT`.
+   * @return `ways` as rows of `dataset` marked `stamp`, in the order given, in batches of `WAYS_PER_STATEMENT`.
    * @throws std::invalid_argument for a way whose node ids and coordinates differ in number.
    */
   [[nodiscard]] static std::vector<std::vector<insert_row_type>> to_rows(Ways ways, const Dataset& dataset, std::int64_t stamp);
 
   /**
-   * @return The write of `rows`: a way whose nodes are not in the table is a new row; one whose nodes are there updates that
-   * row (dataset, line, tags and stamp) and keeps its id. Two ways of the same nodes in one statement fail it.
+   * @return The write of `rows`: a way whose id is not in the table is a new row; one whose id is there updates that row
+   * (dataset, nodes, line, tags and stamp). Two ways of one id in one statement fail it.
    */
   [[nodiscard]] static schemacht::postgres::SchemaStatement<schema_type, std::tuple<>> write_statement(const std::vector<insert_row_type>& rows) {
-    return schemacht::postgres::upsert_statement<schema_type, schemacht::postgres::ConflictOn<"node_ids">>(rows);
+    return schemacht::postgres::upsert_statement<schema_type>(rows);
   }
 
   /** @return The ways of `rows`, which are already the ones that intersect the location. */

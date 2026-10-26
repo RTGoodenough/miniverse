@@ -78,9 +78,9 @@ transaction holds one of the pool's connections until it ends.
 Feature and road layers are pushed as datasets. A `Dataset` is a name for an export: the file a producer made of a
 region, under whatever name the pusher gives it. The first push of a name writes the dataset; every later push of the
 same name replaces it, all at once: what the new export lacks is gone, what it has is there. `remove` deletes a dataset and gives how many rows it deleted: 0 for a name no push wrote.
-A worker never sees dataset names: a load gives the layer as one whole, with ids the database gave the rows, not the
-export's ids. So refresh a region by pushing its export again under the name it was first pushed under, and keep a name
-to the same ground over time. Two pushes of one dataset at once take turns; pushes of different datasets run side by
+A worker never sees dataset names: a load gives the layer as one whole. A feature's id is one the database gave its
+row; a way's is its own, OpenStreetMap's. So refresh a region by pushing its export again under the name it was first
+pushed under, and keep a name to the same ground over time. Two pushes of one dataset at once take turns; pushes of different datasets run side by
 side. A raster layer is not pushed as a dataset: each tile is merged onto the one already there.
 
 For data too large to hold at once, `begin_push` opens a push that takes parts, from `examples/import_osm.cpp`:
@@ -202,20 +202,28 @@ for roads), in the file's order. It holds the position of every node of the file
 an extract of the area wanted rather than a continent. A way with a node the file lacks (an extract cuts ways at its
 edge) is left out and counted.
 
-In a table a way is its nodes. The table holds one row per sequence of node ids: a way that two exports both carry whole
-(one that crosses the line between them) is one row, of the dataset that last pushed it, and a way pushed again with the
-same nodes keeps its id, whatever its id in the export. The export's way ids are not kept, and need mean nothing. A
-load gives the layer as one network, joined by node ids, whatever exports it came from. What this asks of the data:
+In a table a way is its id, as in OpenStreetMap: the row's key is the way id the file gave it. A way that two exports
+both carry whole (one that crosses the line between them) is one row, of the dataset that last pushed it, and a way
+pushed again keeps its row and takes the later push's nodes, line and tags. A load gives the layer as one network,
+joined by node ids, whatever exports it came from. What this asks of the data:
 
-- One layer, one node id space. Node ids are stable across exports and over time, and never reused for another place. A
-  producer that cannot promise that gets a layer of its own.
-- Way ids carry no meaning. They may change on every export.
-- Two ways with the same ordered node ids are the same way; the later push's line and tags win.
+- One layer, one id space, OpenStreetMap's: way ids and node ids are stable across exports and over time, and never
+  reused for another place. A producer that cannot promise that gets a layer of its own.
 - An export holds its ways whole, as `osmium extract` and Geofabrik produce them; a way with a missing node is dropped on
   read.
 - A dataset is refreshed under the name it was first pushed under, and a name covers the same ground over time.
 
 A way that a neighbouring export took over and then dropped stays until that neighbour is pushed again.
+
+Roads of your own join the same layer by being OpenStreetMap-shaped, which is how the OpenStreetMap tools combine
+sources: `ogr2osm` turns a shapefile or GeoPackage into an `.osm` file (with placeholder negative ids, as editors give
+new objects), `osmium renumber --start-id` moves those into a range of ids OpenStreetMap does not use (without
+`--start-id` it numbers from 1, OpenStreetMap's own range), and a road that joins an OpenStreetMap street shares its node
+at the junction. Pushed as a dataset of its own, or merged into an extract first
+with `osmium merge`, it is one network with the rest. Where your source and OpenStreetMap describe the same street, that
+is conflation, a step for people with tools such as JOSM's Conflation plugin, before the data comes here: miniverse
+matches ways by id and nothing else. A source with ids of its own and no conflation is a second network, and belongs in
+a layer of its own.
 
 ## Raster layers
 
@@ -446,5 +454,6 @@ tool built without one says so.
 - A location that is a point or a line lying exactly along the line between two raster tiles has no tile; strictly inside
   a tile it has that tile.
 - `verify` needs PostgreSQL 17 for the catalog query it uses.
-- A dataset cannot be deleted by area, only whole, by name. Tables made before datasets existed do not verify against the
-  current kinds and must be made again; there is no migration.
+- A dataset cannot be deleted by area, only whole, by name. Tables made before datasets existed, and road tables made while
+  a way was keyed by its nodes (a generated `way_id`), do not verify against the current kinds and must be made again;
+  there is no migration.

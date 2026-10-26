@@ -37,8 +37,8 @@ std::vector<std::vector<RoadLayer::insert_row_type>> RoadLayer::to_rows(Ways way
     }
 
     batches.back().emplace_back(
-        dataset::Name{dataset.name}, road::NodeIds{std::move(way.node_ids)}, road::Geom{std::move(way.coordinates)}, road::Tags{std::move(way.tags)},
-        dataset::Pushed{stamp}
+        road::WayId{way.id}, dataset::Name{dataset.name}, road::NodeIds{std::move(way.node_ids)}, road::Geom{std::move(way.coordinates)},
+        road::Tags{std::move(way.tags)}, dataset::Pushed{stamp}
     );
   }
 

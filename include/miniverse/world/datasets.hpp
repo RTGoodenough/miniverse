@@ -38,7 +38,7 @@ inline void lock_dataset(schemacht::postgres::Transaction& transaction, const Da
 
 /**
  * @return What a push of `dataset` runs before it commits: the kind's sweep, which deletes the dataset's rows in `table` whose
- * stamp is not `stamp`, this push's. A row the push wrote again (a `RoadLayer`'s way of the same nodes) keeps its id.
+ * stamp is not `stamp`, this push's. A row the push wrote again (a `RoadLayer`'s way, by its id) is kept, with the new stamp.
  */
 template <HasDatasets kind_t>
 [[nodiscard]] std::function<void(schemacht::postgres::Transaction&)> sweep_of(

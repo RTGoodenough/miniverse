@@ -237,7 +237,7 @@ TEST_CASE("integration: a PBF file pushed a chunk at a time, as parts of one dat
   CHECK(read.ways == 2);
   REQUIRE(loaded.size() == in_file.size());
   for ( std::size_t i = 0; i < in_file.size(); ++i ) {
-    CHECK(loaded.at(i).id == static_cast<std::int64_t>(i) + 1);  // the table's own ids, in the order written; the file's are not kept
+    CHECK(loaded.at(i).id == in_file.at(i).id);
     CHECK(loaded.at(i).node_ids == in_file.at(i).node_ids);
     CHECK(bg::to_wkt(loaded.at(i).coordinates) == bg::to_wkt(in_file.at(i).coordinates));
   }
@@ -357,15 +357,15 @@ TEST_CASE("integration: a road file loads as the table it was pushed into", "[os
             "POLYGON((40 40,41 40,41 41,40 41,40 40))",
         } ) {
     INFO(wkt);
-    // The same ways, by their nodes: the table's ids are its own, the file's are the file's, and each side has its own order.
-    const auto      by_nodes = [](const miniverse::Way& one, const miniverse::Way& other) { return one.node_ids < other.node_ids; };
+    // The same ways: the table gives them in id order, the file in its own.
+    const auto      by_id = [](const miniverse::Way& one, const miniverse::Way& other) { return one.id < other.id; };
     miniverse::Ways in_table = tables.load<Roads>(polygon(wkt)).get();
     miniverse::Ways in_file = from_file.load<Roads>(polygon(wkt)).get();
-    std::ranges::sort(in_table, by_nodes);
-    std::ranges::sort(in_file, by_nodes);
+    std::ranges::sort(in_file, by_id);
 
     REQUIRE(in_file.size() == in_table.size());
     for ( std::size_t i = 0; i < in_table.size(); ++i ) {
+      CHECK(in_file.at(i).id == in_table.at(i).id);
       CHECK(in_file.at(i).node_ids == in_table.at(i).node_ids);
       CHECK(bg::to_wkt(in_file.at(i).coordinates) == bg::to_wkt(in_table.at(i).coordinates));
     }

@@ -14,7 +14,7 @@ It is built on schemacht, a sibling library, which describes tables as C++ types
 ## What it does
 
 - **Layer kinds:** features of one geometry type with JSON tags (`FeatureLayer<Geometry>`), roads as OpenStreetMap ways
-  with their node ids (`RoadLayer`), and rasters of one band on a fixed grid (`RasterLayer<Pixel>`). A kind of your own
+  keyed by their way id, with their node ids (`RoadLayer`), and rasters of one band on a fixed grid (`RasterLayer<Pixel>`). A kind of your own
   is a type that names its table's columns, its query and its result.
 - **Loading by polygon:** `load` gives everything in an area as one value; `stream` hands it to a callback a chunk at a
   time. Every call returns a `std::future`, so several layers load at once.

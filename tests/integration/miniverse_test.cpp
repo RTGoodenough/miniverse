@@ -66,10 +66,7 @@ const geo::Polygon TRIANGLE = polygon("POLYGON((0 0,4 0,0 4,0 0))");
   };
 }
 
-/**
- * @return `WAYS_PER_STATEMENT + 1` ways, one more than a statement holds, with ids and node ids from `first_id` (each way its
- * own two nodes: a way is its nodes), all in the degree from (50, 50).
- */
+/** @return `WAYS_PER_STATEMENT + 1` ways, one more than a statement holds, with ids from `first_id` and two nodes each, all in the degree from (50, 50). */
 [[nodiscard]] miniverse::Ways many_ways(std::int64_t first_id) {
   constexpr std::size_t COUNT = miniverse::RoadLayer::WAYS_PER_STATEMENT + 1;
   miniverse::Ways       ways;
@@ -90,10 +87,7 @@ const geo::Polygon FAR_EAST = polygon("POLYGON((50 50,51 50,51 51,50 51,50 50))"
 
 using test::ids;
 
-/**
- * @brief A world with the network in it as the dataset `NETWORK`, its table made fresh and dropped afterwards. The ids a load
- * gives are the database's: 1 to 4, in the order pushed, which is the network's.
- */
+/** @brief A world with the network in it as the dataset `NETWORK`, its table made fresh and dropped afterwards: ways 1 to 4. */
 [[nodiscard]] test::Fresh<World> with_network(const std::string& conninfo) {
   return test::Fresh<World>(
       [](World& world) {
@@ -171,12 +165,7 @@ TEST_CASE("integration: create_tables makes the spatial index the loads use", "[
     names.push_back(schemacht::schema::get<"indexname">(row));
   }
 
-  CHECK(
-      names ==
-      std::vector<std::string>{
-          "miniverse_test_roads_dataset_idx", "miniverse_test_roads_geom_idx", "miniverse_test_roads_node_ids_key", "miniverse_test_roads_pkey"
-      }
-  );
+  CHECK(names == std::vector<std::string>{"miniverse_test_roads_dataset_idx", "miniverse_test_roads_geom_idx", "miniverse_test_roads_pkey"});
 }
 
 TEST_CASE("integration: a stream of roads hands the ways over a chunk at a time, ordered by id", "[integration]") {
@@ -204,8 +193,8 @@ TEST_CASE("integration: a push that breaks the table's rules writes nothing and 
   test::Fresh<World> loaded = with_network(test_db());
   World&             world = loaded.world();
 
-  // Two ways of the same nodes in one statement: the database can't update one row twice in a statement.
-  miniverse::Ways twice{way(5, {51, 52}, "LINESTRING(0 0,1 1)", "{}"), way(6, {51, 52}, "LINESTRING(0 0,1 1)", R"({"highway": "path"})")};
+  // Two ways of one id in one statement: the database can't update one row twice in a statement.
+  miniverse::Ways twice{way(5, {51, 52}, "LINESTRING(0 0,1 1)", "{}"), way(5, {53, 54}, "LINESTRING(0 0,1 1)", R"({"highway": "path"})")};
   try {
     world.push<TestRoads>(FAR_EAST_SURVEY, std::move(twice)).get();
     FAIL("the push succeeded");
@@ -224,8 +213,8 @@ TEST_CASE("integration: a push of more ways than one statement holds writes them
 
   const miniverse::Ways far_east = world.load<TestRoads>(FAR_EAST).get();
   CHECK(far_east.size() == miniverse::RoadLayer::WAYS_PER_STATEMENT + 1);
-  CHECK(far_east.front().id == 5);  // numbered on from the network's four, in the order pushed
-  CHECK(far_east.back().id == 5 + static_cast<std::int64_t>(miniverse::RoadLayer::WAYS_PER_STATEMENT));
+  CHECK(far_east.front().id == 1000);
+  CHECK(far_east.back().id == 1000 + static_cast<std::int64_t>(miniverse::RoadLayer::WAYS_PER_STATEMENT));
   CHECK(far_east.front().node_ids == std::vector<std::int64_t>{2000, 2001});
 }
 
@@ -234,7 +223,7 @@ TEST_CASE("integration: a push whose later statement breaks the table's rules wr
   World&             world = loaded.world();
 
   miniverse::Ways ways = many_ways(1000);
-  ways.push_back(ways.back());  // the second statement now holds two ways of the same nodes
+  ways.push_back(ways.back());  // the second statement now holds one way twice
 
   // The error is the second statement's own (one row updated twice), not the commit's "rolled back".
   try {
@@ -259,7 +248,7 @@ TEST_CASE("integration: a push in parts is there for everyone once it commits, a
   parts.commit().get();
 
   CHECK(before.empty());
-  CHECK(ids(world.load<TestRoads>(FAR_EAST).get()) == std::vector<std::int64_t>{5, 6, 7});
+  CHECK(ids(world.load<TestRoads>(FAR_EAST).get()) == std::vector<std::int64_t>{10, 11, 12});
 }
 
 TEST_CASE("integration: the parts of a push in parts are written in the order added, and need not be waited for", "[integration]") {
@@ -274,7 +263,7 @@ TEST_CASE("integration: the parts of a push in parts are written in the order ad
   committed.get();
   first.get();
   second.get();
-  CHECK(ids(world.load<TestRoads>(FAR_EAST).get()) == std::vector<std::int64_t>{5, 6});
+  CHECK(ids(world.load<TestRoads>(FAR_EAST).get()) == std::vector<std::int64_t>{10, 11});
 }
 
 TEST_CASE("integration: a push in parts assigned over another drops the other, which then writes nothing", "[integration]") {
@@ -288,7 +277,7 @@ TEST_CASE("integration: a push in parts assigned over another drops the other, w
   parts.add({way(11, {2, 3}, "LINESTRING(50.2 50.2,50.3 50.3)", "{}")}).get();
   parts.commit().get();
 
-  CHECK(ids(world.load<TestRoads>(FAR_EAST).get()) == std::vector<std::int64_t>{6});
+  CHECK(ids(world.load<TestRoads>(FAR_EAST).get()) == std::vector<std::int64_t>{11});
 }
 
 TEST_CASE("integration: a push in parts that is dropped without a commit writes nothing", "[integration]") {
@@ -311,9 +300,9 @@ TEST_CASE("integration: a part that fails ends a push in parts, which then write
   miniverse::PushInParts<TestRoads> parts = world.begin_push<TestRoads>(FAR_EAST_SURVEY).get();
   parts.add({way(10, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get();
 
-  // The same nodes twice in one part: the part fails with its own error, a row updated twice in one statement.
+  // One id twice in one part: the part fails with its own error, a row updated twice in one statement.
   try {
-    parts.add({way(11, {5, 6}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}"), way(12, {5, 6}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get();
+    parts.add({way(11, {5, 6}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}"), way(11, {7, 8}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get();
     FAIL("the part was added");
   } catch ( const schemacht::postgres::QueryError& error ) {
     CHECK(error.sqlstate() == "21000");
@@ -351,19 +340,19 @@ TEST_CASE("integration: a push in parts that was moved from takes no more calls"
   CHECK_THROWS_AS(first.add({}).get(), std::logic_error);  // NOLINT(bugprone-use-after-move) -- what is under test
   CHECK_THROWS_AS(first.commit().get(), std::logic_error);
   second.commit().get();
-  CHECK(ids(world.load<TestRoads>(FAR_EAST).get()) == std::vector<std::int64_t>{5});
+  CHECK(ids(world.load<TestRoads>(FAR_EAST).get()) == std::vector<std::int64_t>{10});
 }
 
-TEST_CASE("integration: a push of a dataset again replaces it, and a way of the same nodes keeps its id", "[integration]") {
+TEST_CASE("integration: a push of a dataset again replaces it, and a way pushed again keeps its row with the newer push's nodes", "[integration]") {
   test::Fresh<World> loaded = with_network(test_db());
   World&             world = loaded.world();
 
-  // The network again from a newer export: way 1 unchanged but numbered 100, way 3 with new tags, way 4 gone, a new way 5.
+  // The network again from a newer export: way 1 with a node moved, way 3 with new tags, way 4 gone, a new way 5.
   world
       .push<TestRoads>(
           NETWORK,
           {
-              way(100, {11, 12}, "LINESTRING(0 0,1 1)", R"({"highway": "primary"})"),
+              way(1, {11, 13}, "LINESTRING(0 0,1 1.5)", R"({"highway": "primary"})"),
               way(2, {21, 22, 23}, "LINESTRING(10 10,10.5 10.25,11 11)", R"({"highway": "residential", "name": "High Street"})"),
               way(3, {31, 32}, "LINESTRING(0.5 2,0.5 3)", R"({"highway": "footway"})"),
               way(5, {51, 52}, "LINESTRING(1 1,1.5 1.5)", "{}"),
@@ -371,13 +360,34 @@ TEST_CASE("integration: a push of a dataset again replaces it, and a way of the 
       )
       .get();
 
-  const miniverse::Ways           everywhere = world.load<TestRoads>(EVERYWHERE).get();
-  const std::vector<std::int64_t> all = ids(everywhere);
+  const miniverse::Ways everywhere = world.load<TestRoads>(EVERYWHERE).get();
+  CHECK(ids(everywhere) == std::vector<std::int64_t>{1, 2, 3, 5});
   REQUIRE(everywhere.size() == 4);
-  CHECK(std::vector<std::int64_t>(all.begin(), all.begin() + 3) == std::vector<std::int64_t>{1, 2, 3});  // kept: the same nodes
+  CHECK(everywhere.at(0).node_ids == std::vector<std::int64_t>{11, 13});
+  CHECK(bg::to_wkt(everywhere.at(0).coordinates) == "LINESTRING(0 0,1 1.5)");
   CHECK(everywhere.at(2).tags.text() == R"({"highway": "footway"})");
-  CHECK(everywhere.at(3).id > 4);  // new, numbered on: ids have gaps, since the database counts every row a push tries
-  CHECK(everywhere.at(3).node_ids == std::vector<std::int64_t>{51, 52});
+}
+
+TEST_CASE("integration: a way of thousands of nodes is stored like any other", "[integration]") {
+  test::Fresh<World> loaded = with_network(test_db());
+  World&             world = loaded.world();
+
+  // Across the far-east degree, a node every ten thousandth: far longer than a b-tree entry could hold.
+  constexpr std::int64_t    NODES = 5000;
+  std::vector<std::int64_t> node_ids;
+  geo::LineString           line;
+  for ( std::int64_t i = 0; i < NODES; ++i ) {
+    node_ids.push_back(90'000 + i);
+    line.emplace_back(50.1 + (static_cast<double>(i) / 10'000), 50.5);
+  }
+  world.push<TestRoads>(
+           FAR_EAST_SURVEY, {miniverse::Way{.id = 9, .node_ids = node_ids, .coordinates = line, .tags = schemacht::json::Json("{}")}}
+  ).get();
+
+  const miniverse::Ways far_east = world.load<TestRoads>(FAR_EAST).get();
+  REQUIRE(far_east.size() == 1);
+  CHECK(far_east.front().id == 9);
+  CHECK(far_east.front().node_ids == node_ids);
 }
 
 TEST_CASE("integration: a way two datasets both carry is one row, of the dataset that last pushed it", "[integration]") {
@@ -390,23 +400,16 @@ TEST_CASE("integration: a way two datasets both carry is one row, of the dataset
       .push<TestRoads>(
           neighbour,
           {
-              way(7, {21, 22, 23}, "LINESTRING(10 10,10.5 10.25,11 11)", R"({"highway": "residential", "name": "High Street"})"),
+              way(2, {21, 22, 23}, "LINESTRING(10 10,10.5 10.25,11 11)", R"({"highway": "residential", "name": "High Street"})"),
               way(8, {81, 82}, "LINESTRING(11 11,12 12)", "{}"),
           }
       )
       .get();
-  const miniverse::Ways north_east = world.load<TestRoads>(NORTH_EAST).get();
-  REQUIRE(north_east.size() == 2);  // High Street once, with its id, and the neighbour's own way
-  CHECK(north_east.front().id == 2);
-  CHECK(north_east.back().node_ids == std::vector<std::int64_t>{81, 82});
+  CHECK(ids(world.load<TestRoads>(NORTH_EAST).get()) == std::vector<std::int64_t>{2, 8});  // High Street once, and the neighbour's own way
 
   // The network pushed again without High Street: it is the neighbour's now, so it stays.
   world.push<TestRoads>(NETWORK, {way(1, {11, 12}, "LINESTRING(0 0,1 1)", "{}")}).get();
-  const miniverse::Ways everywhere = world.load<TestRoads>(EVERYWHERE).get();
-  REQUIRE(everywhere.size() == 3);
-  CHECK(everywhere.at(0).id == 1);
-  CHECK(everywhere.at(1).id == 2);
-  CHECK(everywhere.at(2).node_ids == std::vector<std::int64_t>{81, 82});
+  CHECK(ids(world.load<TestRoads>(EVERYWHERE).get()) == std::vector<std::int64_t>{1, 2, 8});
 
   // Removing the neighbour takes High Street with it.
   CHECK(world.remove<TestRoads>(neighbour).get() == 2);

@@ -208,7 +208,7 @@ class Miniverse {
    * @return A future that completes once `data` has replaced `dataset` in the layer `kind_t`'s table, or holds the error
    * (nothing is then changed). On a thread started for the push, in one transaction: the dataset is locked, the rows are
    * written, and the dataset's rows this push did not write are deleted. The first push of a name writes the dataset; every
-   * later push replaces it, and a row the kind can tell is the same (a `RoadLayer`'s way, by its nodes) keeps its id. Two
+   * later push replaces it, and a row the kind can tell is the same (a `RoadLayer`'s way, by its id) keeps its row. Two
    * pushes of one dataset take turns; pushes of different datasets run side by side. What a dataset is, and what it asks of
    * the data, is in `Dataset` and the kind's own doc.
    *

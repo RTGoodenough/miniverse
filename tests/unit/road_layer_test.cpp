@@ -33,26 +33,29 @@ TEST_CASE("road layer: ways become rows and back", "[road]") {
       {.id = 9, .node_ids = {3, 4, 5}, .coordinates = bg::from_wkt<geo::LineString>("LINESTRING(2 2,3 3,4 4)"), .tags = schemacht::json::Json("{}")}
   );
 
-  // Written: the dataset and the stamp with each, and no id.
+  // Written: each with its id, the dataset and the stamp.
   const auto written = rows(miniverse::RoadLayer::to_rows(miniverse::Ways(ways), miniverse::Dataset{"town"}, 42));
   REQUIRE(written.size() == 2);
+  CHECK(schemacht::schema::get<"way_id">(written.front()) == 7);
+  CHECK(schemacht::schema::get<"way_id">(written.back()) == 9);
   CHECK(schemacht::schema::get<"dataset">(written.front()) == "town");
   CHECK(schemacht::schema::get<"pushed">(written.front()) == 42);
   CHECK(schemacht::schema::get<"node_ids">(written.back()) == std::vector<std::int64_t>{3, 4, 5});
 
-  // Read back, as a load has them: with the ids the database gave the rows.
+  // Read back, as a load has them.
   std::vector<miniverse::RoadLayer::load_statement_type::result_type> stored;
-  for ( std::size_t i = 0; i < written.size(); ++i ) {
+  stored.reserve(written.size());
+  for ( const auto& row : written ) {
     stored.emplace_back(
-        miniverse::road::WayId{static_cast<std::int64_t>(100 + i)}, miniverse::road::NodeIds{schemacht::schema::get<"node_ids">(written.at(i))},
-        miniverse::road::Geom{schemacht::schema::get<"geom">(written.at(i))}, miniverse::road::Tags{schemacht::schema::get<"tags">(written.at(i))}
+        miniverse::road::WayId{schemacht::schema::get<"way_id">(row)}, miniverse::road::NodeIds{schemacht::schema::get<"node_ids">(row)},
+        miniverse::road::Geom{schemacht::schema::get<"geom">(row)}, miniverse::road::Tags{schemacht::schema::get<"tags">(row)}
     );
   }
   const miniverse::Ways back = miniverse::RoadLayer::from_rows(std::move(stored), {});
 
   REQUIRE(back.size() == ways.size());
   for ( std::size_t i = 0; i < ways.size(); ++i ) {
-    CHECK(back.at(i).id == static_cast<std::int64_t>(100 + i));
+    CHECK(back.at(i).id == ways.at(i).id);
     CHECK(back.at(i).node_ids == ways.at(i).node_ids);
     CHECK(bg::to_wkt(back.at(i).coordinates) == bg::to_wkt(ways.at(i).coordinates));
     CHECK(back.at(i).tags == ways.at(i).tags);
