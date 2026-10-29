@@ -34,6 +34,7 @@ add_executable(
   unit/raster_layer_test.cpp
   unit/reader_test.cpp
   unit/step_thread_test.cpp
+  integration/failure_test.cpp
   integration/feature_layer_test.cpp
   integration/geometry_test.cpp
   integration/miniverse_test.cpp

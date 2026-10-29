@@ -117,8 +117,8 @@ class Miniverse {
    * order. A tile is megabytes, so ask for a few at a time.
    *
    * `on_chunk` runs on a thread of the pool's, one call at a time. It returns `void`, or a `bool` where `false` stops the load.
-   * What it throws is the load's error; chunks handed over before an error stay handed over. It must not wait on another of
-   * this miniverse's futures. For a layer with a reader, the chunks come in the reader's order (a file's own), on a thread
+   * What it throws is the load's error, as is a connection lost under the load; chunks handed over before an error stay
+   * handed over. It must not wait on another of this miniverse's futures. For a layer with a reader, the chunks come in the reader's order (a file's own), on a thread
    * started for the load, which the future waits for if it is dropped.
    */
   template <LayerKind kind_t, ChunkCallback<kind_t> callback_t>
@@ -163,10 +163,9 @@ class Miniverse {
    *
    * The push runs on a thread started for it; the future waits for that thread if it is dropped. There the kind makes the rows
    * (with the table's settings, read first, for a kind that has them) and writes them in its batches, one statement each, in
-   * one transaction: the push holds every row of `data`, and one statement's text at a time, and writes all of `data` or none. The transaction is
-   * begun
-   * before the rows are made, and holds one of the pool's connections until it ends. For data too large to hold at once,
-   * `begin_push` takes it in parts.
+   * one transaction: the push holds every row of `data`, and one statement's text at a time, and writes all of `data` or
+   * none. The transaction is begun before the rows are made, and holds one of the pool's connections until it ends. For
+   * data too large to hold at once, `begin_push` takes it in parts.
    *
    * The kind's `write_statement` says what happens to a row already there: a `RasterLayer`'s tile is merged onto it (new pixels
    * win, nodata keeps the old pixel), and overlapping pushes merge in the order they commit, the later winning where both have

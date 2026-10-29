@@ -86,8 +86,10 @@ same name replaces it, all at once: what the new export lacks is gone, what it h
 `datasets<Kind>()` lists a table's datasets, each with when it was last pushed and how many rows it holds. A worker
 never sees dataset names: a load gives the layer as one whole. A feature's id is one the database gave its row; a
 way's is its own, OpenStreetMap's. So refresh a region by pushing its export again under the name it was first
-pushed under, and keep a name to the same ground over time. Two pushes of one dataset at once take turns; pushes of different datasets run side by
-side. A raster layer is not pushed as a dataset: each tile is merged onto the one already there.
+pushed under, and keep a name to the same ground over time. Two pushes of one dataset at once take turns, and a `remove`
+of it waits for an open push of it the same way; pushes of different datasets run side by side, and a load or a stream
+never waits for a push, nor a push for one. A raster layer is not pushed as a dataset: each tile is merged onto the one
+already there.
 
 For data too large to hold at once, `begin_push` opens a push that takes parts, from `examples/import_osm.cpp`:
 
@@ -453,6 +455,15 @@ tool built without one says so.
 - A push holds one of the pool's connections for its transaction; with a pool of one connection nothing else runs
   during it. The pool's size is `Database::Options::pool.connections` (4 by default), given to the `Miniverse`
   constructor that takes options.
+- A connection lost under a call (the server ended it, the network went) fails that call's future. For a push in parts,
+  the part that found it gone fails with that error, and so does every later `add` and the `commit`: nothing of the push
+  is written, and the server let go of the dataset's lock with the connection, so a new push of the dataset runs at
+  once. A stream's future fails; the chunks handed over before it stay handed over. The pool re-establishes the
+  connection, with its session settings, and the next call waits for it.
+- The library sets no timeouts. libpq's `options` in the connection string sets them for every connection of the pool:
+  `options='-c lock_timeout=5000 -c statement_timeout=60000'` (in a URL, `?options=-c%20lock_timeout%3D5000`). A push
+  or remove that waits longer than `lock_timeout` for an open push of its dataset fails with SQLSTATE `55P03`, and a
+  statement that runs longer than `statement_timeout` with `57014`, each through its future, with nothing written.
 
 ## Limits
 
@@ -463,6 +474,10 @@ tool built without one says so.
 - A location that is a point or a line lying exactly along the line between two raster tiles has no tile; strictly inside
   a tile it has that tile.
 - `verify` needs PostgreSQL 17 for the catalog query it uses.
+- The pool sets its session settings with `SET` on each connection it opens. PgBouncer in transaction mode hands a
+  connection's session to other clients between transactions, so those settings are lost and leak: connect directly,
+  or through a pooler in session mode that passes libpq's `options` startup parameter through (PgBouncer rejects it
+  unless `ignore_startup_parameters` names it, and then drops it, with the timeouts set in it).
 - A dataset cannot be deleted by area, only whole, by name. A table made with another layout than its kind is at now,
   or before the registry existed, does not verify and must be made again and refilled; `verify` says so. There is no
   migration.

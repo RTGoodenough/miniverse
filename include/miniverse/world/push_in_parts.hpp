@@ -112,7 +112,8 @@ struct Push {
  *
  * It is one transaction: the parts are seen by no one else until `commit`, and one dropped without a commit writes nothing.
  * It holds one of the pool's connections from `begin_push` until it ends. A part that fails ends the push: it is rolled
- * back, and every later `add`, and the `commit`, fails with that part's error.
+ * back, and every later `add`, and the `commit`, fails with that part's error. A connection lost under the push ends it
+ * the same way, with the error of the part that found it gone.
  *
  * The parts are made into rows and written on the push's own thread, in the order they are added: an `add` need not be
  * waited for before the next, or before the `commit`. Each `add` holds its part until the part is written, so a reader far

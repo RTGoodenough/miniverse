@@ -266,6 +266,10 @@ Parts of the suite:
   rounding differences.
 - `tests/unit/reader_test.cpp`: the reader contract, including that loads run on their own threads.
 - `tests/unit/step_thread_test.cpp`: the thread a push in parts runs on.
+- `tests/integration/failure_test.cpp`: the database failing under a call, and writers in each other's way. It ends
+  backends of its own role with `pg_terminate_backend` (allowed without any grant), makes two miniverses over one
+  table, and appends libpq's `options` to the connection string for the timeouts, so the string must take a keyword
+  or a URL parameter at its end.
 - `tests/integration/raster_layer_test.cpp`: the table's constraints, index use (by `EXPLAIN`), merging, lz4.
 
 A ThreadSanitizer build of `miniverse_tests` with the components off (`-DCMAKE_CXX_FLAGS=-fsanitize=thread
