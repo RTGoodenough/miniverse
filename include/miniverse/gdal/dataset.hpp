@@ -11,9 +11,9 @@
  * (a warp to a local projection, a slope, contours, a file of any format it writes).
  *
  * @code
- * struct Elevation : miniverse::RasterLayer<std::int16_t> {};
+ * using Elevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "elevation">;
  *
- * const miniverse::geo::Raster<std::int16_t> heights = world.load<Elevation>(area).get();
+ * const miniverse::geo::Raster<std::int16_t> heights = world.load<"elevation">(area).get();
  * const GDALDatasetUniquePtr                 dataset = miniverse::gdal::dataset_of(heights);
  *
  * // As a GeoTIFF, for a viewer:

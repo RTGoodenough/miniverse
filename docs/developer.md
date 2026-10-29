@@ -14,22 +14,23 @@ include/miniverse/
                          sweep, remove, list), verify.hpp (TablesDiffer, the checks), tables.hpp (make, drop), registry.hpp
                          (what a database remembers about its layers: layouts and datasets), settings.hpp, async.hpp
   dataset.hpp            Dataset: the export a vector push writes under and replaces
-  layer.hpp              Layer<Kind>: a table name or a reader
-  reader.hpp             Reader<Kind>
+  layer.hpp              Layer<Model, "name">: a model under a name, in a table named at run time or read by a reader; IsLayer
+  reader.hpp             Reader<Model>
   location.hpp           check_location: what a reader's load holds a polygon to, as a table's would refuse
-  miniverse.hpp          umbrella: world.hpp plus the built-in kinds and geo types
-  concepts/              LayerKind, HasSettings, HasNoSettings, HasDatasets, HasOwnChunks, ChunkCallback
+  miniverse.hpp          umbrella: world.hpp plus the built-in models and geo types
+  concepts/              LayerModel, WritesPlain, WritesSettings, WritesDatasets, HasOwnChunks, ChunkCallback
   geo/                   one idea each: types.hpp (Boost.Geometry), grid.hpp, raster.hpp, wkb.hpp and raster_wkb.hpp,
                          column_types.hpp, operations.hpp (PostGIS tests); concepts/ under each area holds its concepts
-  layer/                 feature.hpp and way.hpp (what a load gives), the kinds feature_layer.hpp, road_layer.hpp,
-                         raster_layer.hpp; dataset_columns.hpp (what a kind with datasets keeps in its table, and its sweep
-                         and remove); raster/reach.hpp (which tiles a location has), raster/tiles.hpp (cut, window)
+  model/                 feature.hpp and way.hpp (what a load gives), the models feature_model.hpp, road_model.hpp,
+                         raster_model.hpp; writes.hpp (the three ways a push treats the rows already there) and
+                         dataset_columns.hpp (the two columns of a model with datasets); raster/reach.hpp (which tiles a
+                         location has), raster/tiles.hpp (cut, window)
   gdal/                  component miniverse::gdal: vector.hpp and raster.hpp (files read into layers), feature_file.hpp
                          and raster_file.hpp (files as layers), dataset.hpp; gdal.hpp is its umbrella
   osm/                   component miniverse::osm: ways.hpp (files read), road_file.hpp (a file as a layer, over
                          ways_in_memory.hpp, a detail); osm.hpp is its umbrella
-src/                     the compiled parts: geo WKB (over its private geo/wkb_bytes.hpp), the kinds' statements and
-                         conversions, layer/raster/, gdal/ (with its private raster/ and vector/), osm/
+src/                     the compiled parts: geo WKB (over its private geo/wkb_bytes.hpp), the models' statements and
+                         conversions, model/raster/, gdal/ (with its private raster/ and vector/), osm/
 tests/
   compile/               static_asserts on the concepts and types
   compile_fail/          cases that must not compile, each checked for its message
@@ -37,10 +38,10 @@ tests/
   integration/           need MINIVERSE_TEST_DB
   gdal/, osm/            the components' tests, including the file-versus-table comparisons
   tool/                  the command-line tool: its commands against tables loaded with the library, and the program run
-  support/               a hand-written test kind (Places), the scratch database and a fresh world on it (Fresh),
+  support/               a hand-written test model (Places), the scratch database and a fresh world on it (Fresh),
                          temporary files, WKT polygons, small rasters, ids and rows for checks
 examples/                nine programs; eight run as tests (make_database needs files outside the repository)
-tools/                   the command-line tool `miniverse`: kinds.hpp (the kinds it knows, by name), layer_of.hpp (a table's
+tools/                   the command-line tool `miniverse`: models.hpp (the models it knows, by name), layer_of.hpp (a table's
                          name as a layer), commands.hpp and a file per command (a library of their own, which the tests
                          call), main.cpp (the command line, CLI11)
 cmake/                   the installed package's config, and checks.cmake: the warnings and lint of the project's own targets
@@ -53,29 +54,41 @@ Concepts live in `concepts/` directories beside the headers that use them. Each 
 
 ## How it fits together
 
-### A kind
+### A model
 
-A kind is a type that is never instantiated; `Miniverse<Roads, Elevation>` holds one layer per kind. The concept
-`LayerKind` in `concepts/miniverse.hpp` says what a kind supplies:
+A model is a type that is never instantiated. A `Layer<Model, "name">` puts it under a name of the program's, and
+`Miniverse<Roads, Elevation>` holds such layers, each found by its name at compile time (`detail::index_of_layer` in
+`world.hpp`, over the layers' `NAME`s) and typed on its model from there on. The concept `LayerModel` in
+`concepts/miniverse.hpp` says what a model supplies:
 
 | Member | Role |
 |---|---|
 | `result_type` | what a load returns (`Ways`, `Features<G>`, `geo::Raster<P>`) |
 | `schema_type` | the table's columns, as a schemacht `Schema`; its own name is a placeholder, the `Layer` names the table |
 | `load_statement_type` | a `schemacht::query::Prepared` select against `schema_type` whose argument 0 is the location polygon |
+| `writes` | how a push treats the rows already there: one of the three types in `model/writes.hpp` |
 | `from_rows(rows, location)` | the load statement's rows made into a `result_type` |
-| `to_rows(result[, settings \| dataset, stamp])` | the other way, in batches of one statement each; the kind sizes them |
+| `to_rows(result[, settings \| dataset, stamp])` | the other way, in batches of one statement each; the model sizes them |
 | `write_statement(rows)` | the insert or upsert of one batch |
 | `setup_sql(table[, settings])` | what runs after `CREATE TABLE`: an index, constraints, a function |
-| `sweep_statement_type`, `remove_statement_type` | for a kind with datasets: the deletes of a dataset's unstamped rows, and of a dataset |
 
-A kind is exactly one of `HasNoSettings`, `HasSettings` and `HasDatasets`. A kind with datasets (the two vector kinds)
-has an id column (generated by the database for features, the source's own for roads), a `dataset` column and a `pushed`
-stamp; `to_rows(result, dataset, stamp)` produces `insert_row_type` rows, which leave out a generated id, and
-`RowsOf`/`RowBatches` are those for every kind (the same as `row_type` when nothing is generated). A kind with settings (`HasSettings`: a raster's grid) also has `settings_type`, `settings_statement_type` and
-`settings_from_rows`, so a push can read the settings back from the table. A kind whose result cannot be made from part
-of the rows (`HasOwnChunks`: a raster, stitched from all its tiles) says what a streamed chunk is instead: `chunk_type`
-and `chunk_from_rows`.
+`writes` says what else the model has, and the concepts `WritesPlain`, `WritesSettings` and `WritesDatasets` check it:
+
+- `writes::Plain`: `setup_sql(table)` and `to_rows(result)`.
+- `writes::WithSettings<T>` (a raster's grid, `SettingsOf<Model>`): `setup_sql(table, settings)`, `settings_statement_type`
+  (a `RawStatement` taking the table's quoted name) and `settings_from_rows`, so a push can read the settings back from
+  the table, and `to_rows(result, settings)`.
+- `writes::Datasets` (the two vector models): `dataset::Name` and `dataset::Pushed` among the schema's columns,
+  `setup_sql(table)` for the model's own indexes, and `to_rows(result, dataset, stamp)`. The rest is the policy's, so a
+  model of its own writes none of it: the sweep of a dataset's rows another push wrote (`writes::Datasets::sweep<Schema>`),
+  the remove of a dataset (`remove<Schema>`), the index on `dataset` (`setup_sql`), and the key of the lock two pushes of
+  one dataset take turns on (`lock_key`).
+
+A model with datasets has an id column (generated by the database for features, the source's own for roads);
+`to_rows(result, dataset, stamp)` produces `insert_row_type` rows, which leave out a generated id, and
+`RowsOf`/`RowBatches` are those for every model (the same as `row_type` when nothing is generated). A model whose result
+cannot be made from part of the rows (`HasOwnChunks`: a raster, stitched from all its tiles) says what a streamed chunk
+is instead: `chunk_type` and `chunk_from_rows`.
 
 The statements are built with schemacht's query builder and checked against the schema at compile time. PostGIS tests
 are small operation types in `geo/operations.hpp` (`Intersects`, `OutlineIntersects`), applied to a
@@ -83,17 +96,18 @@ column: `col<"geom">().apply<geo::Intersects>(arg<0>())`.
 
 ### A load, a stream, a push
 
-`Miniverse` holds the layers and the pool. Each public call checks that the miniverse has the kind, tells a layer that
-is a table from one with a reader, and calls a function template in `world/`, in `namespace miniverse::detail`: the
-table side takes the `Database` and the layer's `Table`, the reader side the `Reader`. What follows is what those do.
+`Miniverse` holds the layers and the pool. Each public call takes a layer's name, finds the layer and its model
+(`ModelOf<name>`; a name the miniverse lacks fails a `static_assert`), tells a layer that is a table from one with a
+reader, and calls a function template in `world/`, in `namespace miniverse::detail`, typed on the model: the table side
+takes the `Database` and the layer's `Table`, the reader side the `Reader`. What follows is what those do.
 
-- **load:** `Miniverse::load<Kind>` binds the kind's load statement to the location, runs it on the pool, and hands the
+- **load:** `Miniverse::load<"name">` binds the model's load statement to the location, runs it on the pool, and hands the
   rows to `from_rows` on a pool thread. The future carries the result or the error. For a layer with a reader, the
   reader's `load` runs on a thread started for the call (`on_a_thread`, in `world/async.hpp`). Both in `world/load.hpp`.
 - **stream:** the statement runs in schemacht's chunked mode (`ReadOptions::chunk_rows`); each chunk of rows goes through
   `from_rows` or `chunk_from_rows` and to the callback, one call at a time, on a pool thread. A callback returning
   `false` cancels the statement.
-- **push:** on a thread started for it (`on_a_thread`), `begun` reads the table's settings if the kind has any
+- **push:** on a thread started for it (`on_a_thread`), `begun` reads the table's settings if the model has any
   (`world/settings.hpp`) and begins a transaction; `Push::add` makes the batches with `to_rows` and sends one statement
   per batch, waiting for each; `Push::commit` runs what comes before the commit, then commits. A step that throws rolls
   the transaction back and keeps the error, which every later step throws. A whole push is `begun`, one `add` and a
@@ -102,35 +116,36 @@ table side takes the `Database` and the layer's `Table`, the reader side the `Re
   and the `commit` post a step to it, so they run in order; dropping the handle runs the steps queued and joins the thread
   (`world/push.hpp`, `world/push_in_parts.hpp`).
 - **push of a dataset** (`world/datasets.hpp`): a random 64-bit stamp is drawn; the transaction begins with an advisory
-  lock on the dataset's name (`pg_advisory_xact_lock(hashtext(name))`), so two pushes of one dataset run in turn; the
-  rows carry the dataset and the stamp; before the commit the kind's sweep deletes the dataset's rows whose stamp is
-  another push's. A failure anywhere rolls the whole back. `remove` runs the kind's remove statement outside a transaction.
-- **verify:** schemacht's `table_differences_statement` for each table, all at once; the settings statement for kinds
+  lock on the table and the dataset's name (`pg_advisory_xact_lock(hashtext(writes::Datasets::lock_key(...)))`), so two
+  pushes of one dataset into one table run in turn; the rows carry the dataset and the stamp; before the commit the
+  policy's sweep deletes the dataset's rows whose stamp is another push's, and the registry records the push. A failure
+  anywhere rolls the whole back. `remove` runs the policy's remove statement in a transaction under the same lock.
+- **verify:** schemacht's `table_differences_statement` for each table, all at once; the settings statement for models
   with settings; `Reader::problems` for readers. The results are gathered by `Checks` in `world/verify.hpp` and settled
   together.
-- **create_table:** `CREATE TABLE` from the schema and the kind's `setup_sql`, in one transaction, waited for
+- **create_table:** `CREATE TABLE` from the schema and the model's `setup_sql`, in one transaction, waited for
   (`world/tables.hpp`).
 
 Thread boundaries: a load's and a stream's conversions and the stream callbacks run on the pool's threads. A push and a
-reader's load run on a thread started for the call, where the kind makes the rows; their futures wait for that thread
+reader's load run on a thread started for the call, where the model makes the rows; their futures wait for that thread
 when dropped. The parts of a push in parts run on the push's own thread, started with the push and joined when the
 handle is dropped. What runs on the caller's thread and waits: the constructor
 (it opens the pool), `create_table` and `drop_tables`, `osm::road_file` (it reads the file), `Reader::settings` and
 `Reader::problems`, and the `.get()` calls the caller makes.
 
-### The built-in kinds
+### The built-in models
 
-- **FeatureLayer<G>** (`layer/feature_layer.hpp`): `feature_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, dataset
+- **FeatureModel<G>** (`model/feature_model.hpp`): `feature_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, dataset
   text, geom geometry(<G>,4326), tags jsonb, pushed bigint`, a GiST index on `geom` and a btree on `dataset`. Writes are
   plain inserts; the load projects id, geometry and tags. Geometries are written and read as PostGIS WKB (`geo/wkb.hpp`).
   Batches are bounded by `FEATURES_PER_STATEMENT` and `POINTS_PER_STATEMENT`.
-- **RoadLayer** (`layer/road_layer.hpp`): `way_id bigint PRIMARY KEY, dataset text, node_ids bigint[], geom
+- **RoadModel** (`model/road_model.hpp`): `way_id bigint PRIMARY KEY, dataset text, node_ids bigint[], geom
   geometry(LineString,4326), tags jsonb, pushed bigint`, a GiST index and a btree on `dataset`. The way id is the
   source's own (OpenStreetMap's), and writes are schemacht's `upsert_statement` matched on it: a way whose id is there
   updates that row. The array is data, not a key: a btree entry holds at most 2704 bytes, which a way of some hundreds of
   nodes exceeds. Batches of `WAYS_PER_STATEMENT`.
-- **RasterLayer<P>** (`layer/raster_layer.hpp`, `src/layer/raster_layer.cpp`; the pixel arithmetic in `layer/raster/tiles.hpp`,
-  which tiles a location has in `layer/raster/reach.hpp`): `tile_id bigint PRIMARY KEY, rast raster`.
+- **RasterModel<P>** (`model/raster_model.hpp`, `src/model/raster_model.cpp`; the pixel arithmetic in `model/raster/tiles.hpp`,
+  which tiles a location has in `model/raster/reach.hpp`): `tile_id bigint PRIMARY KEY, rast raster`.
   The tile id is the tile's row and column in the world grid. `setup_sql` makes, in the library's schema `miniverse_internal`, the
   `merge_raster` function (shared by every raster table of the database), sets lz4 compression on `rast`, makes a GiST
   index on `ST_ConvexHull(rast)`, and adds the constraints that record the grid in the form `raster_columns` parses (so
@@ -162,31 +177,32 @@ dependencies are private.
 
 ## How to
 
-### Add a kind
+### Add a model
 
-`examples/own_kind.cpp` is the model: a `Towns` kind with typed columns, its own query and its own result. The steps:
+`examples/own_model.cpp` is the example: `TownModel`, with typed columns, its own query and its own result. The steps:
 
 1. Define the result type the program works with, and `LAYOUT`, the table layout's number: 1 to begin with, raised
    whenever `schema_type` or the setup changes, since a table records the layout it was made with and `verify` names
    one of another.
-2. Define `schema_type` with schemacht `Field`s; a geometry column uses a `geo::` type, whose SQL type is
-   `geometry(<Type>,4326)`.
+2. Name `writes`: `writes::Plain` unless the rows belong to datasets or the table keeps settings. Define `schema_type`
+   with schemacht `Field`s; a geometry column uses a `geo::` type, whose SQL type is `geometry(<Type>,4326)`.
 3. Write `LOAD` as a `query::select` against the schema, applying `geo::Intersects` (or another operation) to the
    geometry column with `arg<0>()`; `using load_statement_type = query::Prepared<LOAD>`.
 4. Write `setup_sql`, `to_rows`, `write_statement` and `from_rows`.
-5. `static_assert(miniverse::LayerKind<Towns>)` tells you what is missing. `tests/compile/own_kind_test.cpp` shows that
-   such a kind needs only `world.hpp` and the `geo` headers.
+5. `static_assert(miniverse::LayerModel<TownModel>)` tells you what is missing. A `Layer<TownModel, "towns">` names it. `tests/compile/own_model_test.cpp` shows that
+   such a model needs only `world.hpp` and the `geo` headers.
 
-A kind with settings adds `settings_type`, `settings_statement_type` (a `RawStatement` taking the table's quoted name)
-and `settings_from_rows`; `RasterLayer` is the example. A kind with datasets puts `dataset::Name` and `dataset::Pushed`
-(`layer/dataset_columns.hpp`) in its schema, adds `to_rows(result, dataset, stamp)`, names `dataset::Sweep<schema_type>` and
-`dataset::Remove<schema_type>` as its `sweep_statement_type` and `remove_statement_type`, and has `dataset::index_sql` in its
-`setup_sql`; `FeatureLayer` is the plain example and `RoadLayer` the one keyed by the source's own id, written by upsert.
+A model with `writes::WithSettings<T>` adds `settings_statement_type` (a `RawStatement` taking the table's quoted name),
+`settings_from_rows`, and the settings argument to `setup_sql` and `to_rows`; `RasterModel` is the example. A model with
+`writes::Datasets` puts `dataset::Name` and `dataset::Pushed` (`model/dataset_columns.hpp`) in its schema and takes the
+dataset and stamp in `to_rows`; the rest is the policy's. `FeatureModel` is the plain example and `RoadModel` the one
+keyed by the source's own id, written by upsert.
 
 ### Add a reader
 
-Derive from `Reader<Kind>` and implement `name`, `load`, `stream`, and `problems` if there is anything `verify` should
-check; `settings` for a kind with settings. Keep every member `const` and thread-safe. `tests/unit/reader_test.cpp` has
+Derive from `Reader<Model>` and implement `name`, `load`, `stream`, and `problems` if there is anything `verify` should
+check; `settings` for a model with settings. Keep every member `const` and thread-safe. A layer takes the reader as a
+`std::shared_ptr<const Reader<Model>>`. `tests/unit/reader_test.cpp` has
 two small readers and the tests a reader should pass; the readers behind `gdal::feature_file`, `gdal::raster_file` and `osm::road_file` are
 the real ones.
 
@@ -194,9 +210,9 @@ the real ones.
 
 A reader of files follows the pattern of `gdal/vector.hpp` and `gdal/feature_file.hpp`: in the first, a `Source` struct
 naming the file and options, a chunked `read_*` for importing into tables, a `read_*_in(location)` for layers and a
-`problems_of` for `verify`; in a header of its own, the `*File<Kind>` reader and the `*_file<Kind>` function that makes
-the `Layer`. Constrain `Kind` with a concept in `concepts/` that says
-which kinds the format can feed (`gdal::FeatureKind`, `gdal::RasterKind`, `osm::WayKind`). Add a test that pushes a file
+`problems_of` for `verify`; in a header of its own, the `*File<Model>` reader and the `*_file<Layer>` function that makes
+the `Layer` of it. Constrain the layer's model with a concept in `concepts/` that says
+which models the format can feed (`gdal::ReadsFeatures`, `gdal::ReadsRasters`, `osm::ReadsWays`). Add a test that pushes a file
 into a table and compares loads and streams of the two, as `tests/gdal/raster_equivalence_test.cpp` does with
 `check_loads_as_a_table`.
 
@@ -204,8 +220,8 @@ into a table and compares loads and streams of the two, as `tests/gdal/raster_eq
 
 The pixel types are listed in `geo/concepts/raster.hpp` (`Pixel`, and `PixelType<P>` with PostGIS's name for each),
 `src/gdal/common.hpp` (`gdal_type`, which has a `static_assert` for a type it does not know), the `extern template`
-list at the end of `layer/raster_layer.hpp`, and the explicit instantiation lists at the end of `src/geo/raster_wkb.cpp`,
-`src/layer/raster/tiles.cpp`, `src/layer/raster_layer.cpp`, `src/gdal/raster.cpp` and `src/gdal/dataset.cpp`. A missed
+list at the end of `model/raster_model.hpp`, and the explicit instantiation lists at the end of `src/geo/raster_wkb.cpp`,
+`src/model/raster/tiles.cpp`, `src/model/raster_model.cpp`, `src/gdal/raster.cpp` and `src/gdal/dataset.cpp`. A missed
 instantiation is a link error. The function templates are only declared in their headers, so they need no `extern
 template` lines: a comment at the end of each header names the types they are defined for, and takes the new one too.
 
@@ -270,7 +286,7 @@ Parts of the suite:
   backends of its own role with `pg_terminate_backend` (allowed without any grant), makes two miniverses over one
   table, and appends libpq's `options` to the connection string for the timeouts, so the string must take a keyword
   or a URL parameter at its end.
-- `tests/integration/raster_layer_test.cpp`: the table's constraints, index use (by `EXPLAIN`), merging, lz4.
+- `tests/integration/raster_model_test.cpp`: the table's constraints, index use (by `EXPLAIN`), merging, lz4.
 
 A ThreadSanitizer build of `miniverse_tests` with the components off (`-DCMAKE_CXX_FLAGS=-fsanitize=thread
 -DMINIVERSE_BUILD_GDAL=OFF -DMINIVERSE_BUILD_OSM=OFF -DMINIVERSE_BUILD_EXAMPLES=OFF`) is the check for the threaded

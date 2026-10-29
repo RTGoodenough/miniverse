@@ -11,8 +11,8 @@
 #include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/geo/operations.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer/dataset_columns.hpp"  // IWYU pragma: export
-#include "miniverse/layer/feature.hpp"          // IWYU pragma: export
+#include "miniverse/model/feature.hpp"  // IWYU pragma: export
+#include "miniverse/model/writes.hpp"   // IWYU pragma: export
 #include "schemacht/json/json.hpp"
 #include "schemacht/postgres/statements.hpp"
 #include "schemacht/query/predicate.hpp"
@@ -24,7 +24,7 @@
 
 /**
  * @file
- * The layer kind of features of one geometry type: its table's columns and index, and its rows made from features and back.
+ * The model of features of one geometry type: its table's columns and index, and its rows made from features and back.
  */
 namespace miniverse {
 
@@ -44,16 +44,16 @@ using Tags = schemacht::schema::Field<schemacht::json::Json, "tags">;
 }  // namespace feature
 
 /**
- * @brief The layer kind of features of one geometry type: one row per feature, its geometry a `geometry(<Type>,4326)` with a
+ * @brief The model of features of one geometry type: one row per feature, its geometry a `geometry(<Type>,4326)` with a
   * GiST index, its tags a `jsonb`. A load gives the features that intersect the location, in id order. A layer of your own is
  * one line:
  *
  * @code
- * struct Buildings : miniverse::FeatureLayer<miniverse::geo::MultiPolygon> {};
+ * using Buildings = miniverse::Layer<miniverse::FeatureModel<miniverse::geo::MultiPolygon>, "buildings">;
  *
- * miniverse::Miniverse world(conninfo, miniverse::Layer<Buildings>("osm_buildings"));
- * world.create_table<Buildings>();  // once
- * for ( const miniverse::Feature<miniverse::geo::MultiPolygon>& building : world.load<Buildings>(area).get() ) { ... }
+ * miniverse::Miniverse world(conninfo, Buildings("osm_buildings"));
+ * world.create_table<"buildings">();  // once
+ * for ( const miniverse::Feature<miniverse::geo::MultiPolygon>& building : world.load<"buildings">(area).get() ) { ... }
  * @endcode
  *
   * A table holds one geometry type; the column refuses another. How a file of mixed polygons and multipolygons is read is the
@@ -64,9 +64,10 @@ using Tags = schemacht::schema::Field<schemacht::json::Json, "tags">;
  * each other.
  */
 template <geo::wkb::Geometry geometry_t>
-struct FeatureLayer {
+struct FeatureModel {
   static constexpr std::int32_t LAYOUT = 1;  ///< The first layout recorded.
 
+  using writes = miniverse::writes::Datasets;
   using result_type = Features<geometry_t>;
   /// The table's layout. Its name, `features`, is only a placeholder: a layer names its own table (`Layer`).
   using schema_type = schemacht::schema::Schema<"features", feature::Id, dataset::Name, feature::Geom<geometry_t>, feature::Tags, dataset::Pushed>;
@@ -84,10 +85,6 @@ struct FeatureLayer {
           .order_by(schemacht::query::On<schema_type>::template col<"feature_id">().asc());
   using load_statement_type = schemacht::query::Prepared<LOAD>;
 
-  /// The sweep and the remove of a dataset: dataset_columns.hpp.
-  using sweep_statement_type = dataset::Sweep<schema_type>;
-  using remove_statement_type = dataset::Remove<schema_type>;
-
   /** @brief A statement's worth of features, unless their points fill it first (`POINTS_PER_STATEMENT`). */
   static constexpr std::size_t FEATURES_PER_STATEMENT = 5000;
 
@@ -97,7 +94,7 @@ struct FeatureLayer {
    */
   static constexpr std::size_t POINTS_PER_STATEMENT = std::size_t{1} << 20U;
 
-  /** @return The GiST index on `geom` and the dataset index (`dataset::index_sql`), both unnamed: PostgreSQL names them. */
+  /** @return The GiST index on `geom`, unnamed: PostgreSQL names it. The dataset index is `writes::Datasets`'s. */
   [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table);
 
   /**
@@ -115,10 +112,10 @@ struct FeatureLayer {
   [[nodiscard]] static result_type from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& /*location*/);
 };
 
-extern template struct FeatureLayer<geo::Point>;
-extern template struct FeatureLayer<geo::LineString>;
-extern template struct FeatureLayer<geo::Polygon>;
-extern template struct FeatureLayer<geo::MultiLineString>;
-extern template struct FeatureLayer<geo::MultiPolygon>;
+extern template struct FeatureModel<geo::Point>;
+extern template struct FeatureModel<geo::LineString>;
+extern template struct FeatureModel<geo::Polygon>;
+extern template struct FeatureModel<geo::MultiLineString>;
+extern template struct FeatureModel<geo::MultiPolygon>;
 
 }  // namespace miniverse

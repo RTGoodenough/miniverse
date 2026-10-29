@@ -19,19 +19,19 @@
 
 namespace geo = miniverse::geo;
 
-struct Buildings : miniverse::FeatureLayer<geo::MultiPolygon> {};
+using Buildings = miniverse::Layer<miniverse::FeatureModel<geo::MultiPolygon>, "buildings">;
 
 using Building = miniverse::Feature<geo::MultiPolygon>;
 
 int main(int argc, char** argv) {
   try {
-    miniverse::Miniverse world(example::conninfo(argc, argv), miniverse::Layer<Buildings>("miniverse_example_buildings"));
+    miniverse::Miniverse world(example::conninfo(argc, argv), Buildings("miniverse_example_buildings"));
 
     world.drop_tables();
     world.create_tables();
 
     // Each chunk is waited for before the next is read, so one chunk is held at a time.
-    miniverse::PushInParts<Buildings> buildings = world.begin_push<Buildings>(miniverse::Dataset{"buildings.geojson"}).get();
+    miniverse::PushInParts<Buildings::model_type> buildings = world.begin_push<"buildings">(miniverse::Dataset{"buildings.geojson"}).get();
 
     const miniverse::gdal::VectorRead read = miniverse::gdal::read_features<geo::MultiPolygon>(
         {.path = MINIVERSE_EXAMPLE_DATA "/buildings.geojson"}, 10'000,
@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
     // The buildings of the village: all but the file's barn, which is out of this area. Each has the id the database gave it
     // (the file's is not kept), its fields as tags, and its polygons: a single polygon is a multipolygon of one.
     std::cout << "in the village:\n";
-    for ( const Building& building : world.load<Buildings>(example::box(10, 50, 10.01, 50.01)).get() ) {
+    for ( const Building& building : world.load<"buildings">(example::box(10, 50, 10.01, 50.01)).get() ) {
       std::cout << "  building " << building.id << ", " << building.geometry.size() << (building.geometry.size() == 1 ? " part: " : " parts: ")
                 << building.tags.text() << '\n';
     }

@@ -52,10 +52,10 @@ namespace {
 void check_loads_as_a_table(
     const gdal::RasterSource& source, const std::vector<geo::Polygon>& locations, const geo::Grid<std::int16_t>& grid = GRID
 ) {
-  miniverse::Miniverse tables(test_db(), miniverse::Layer<Elevation>("miniverse_test_gdal_elevation"));
+  miniverse::Miniverse tables(test_db(), Elevation("miniverse_test_gdal_elevation"));
   tables.drop_tables();
-  tables.create_table<Elevation>(grid);
-  std::ignore = gdal::read_raster<std::int16_t>(source, grid, 1, [&tables](Raster window) { tables.push<Elevation>(std::move(window)).get(); });
+  tables.create_table<"elevation">(grid);
+  std::ignore = gdal::read_raster<std::int16_t>(source, grid, 1, [&tables](Raster window) { tables.push<"elevation">(std::move(window)).get(); });
 
   miniverse::Miniverse files(gdal::raster_file<Elevation>(source, grid));
 
@@ -67,10 +67,10 @@ void check_loads_as_a_table(
       return [&tiles](std::vector<Raster> chunk) { tiles.insert(tiles.end(), chunk.begin(), chunk.end()); };
     };
 
-    const Raster from_table = tables.load<Elevation>(locations.at(i)).get();
-    const Raster from_file = files.load<Elevation>(locations.at(i)).get();
-    tables.stream<Elevation>(locations.at(i), into(table_tiles), {.chunk_rows = 3}).get();
-    files.stream<Elevation>(locations.at(i), into(file_tiles), {.chunk_rows = 3}).get();
+    const Raster from_table = tables.load<"elevation">(locations.at(i)).get();
+    const Raster from_file = files.load<"elevation">(locations.at(i)).get();
+    tables.stream<"elevation">(locations.at(i), into(table_tiles), {.chunk_rows = 3}).get();
+    files.stream<"elevation">(locations.at(i), into(file_tiles), {.chunk_rows = 3}).get();
 
     CHECK(from_file == from_table);
     CHECK(in_order(file_tiles) == in_order(table_tiles));
@@ -86,14 +86,14 @@ TEST_CASE("integration: a GeoTIFF pushed a window at a time, onto the table's ow
   const std::string path = files.path_of("on_grid.tif");
   write_tiff(path, {.epsg = 4326, .west = 1, .north = 3, .pixel = 0.25, .width = 8, .height = 8, .pixels = numbered(8, 8)});
 
-  miniverse::Miniverse world(test_db(), miniverse::Layer<Elevation>("miniverse_test_gdal_elevation"));
+  miniverse::Miniverse world(test_db(), Elevation("miniverse_test_gdal_elevation"));
   world.drop_tables();
-  world.create_table<Elevation>(GRID);
+  world.create_table<"elevation">(GRID);
 
-  const geo::Grid<std::int16_t> grid = world.table_settings<Elevation>().get();  // as a writer gets it: from the table
+  const geo::Grid<std::int16_t> grid = world.table_settings<"elevation">().get();  // as a writer gets it: from the table
   const gdal::RasterRead        read =
-      gdal::read_raster<std::int16_t>(as_it_is(path), grid, 1, [&](Raster window) { world.push<Elevation>(std::move(window)).get(); });
-  const Raster loaded = world.load<Elevation>(bg::from_wkt<geo::Polygon>("POLYGON((1 1,3 1,3 3,1 3,1 1))")).get();
+      gdal::read_raster<std::int16_t>(as_it_is(path), grid, 1, [&](Raster window) { world.push<"elevation">(std::move(window)).get(); });
+  const Raster loaded = world.load<"elevation">(bg::from_wkt<geo::Polygon>("POLYGON((1 1,3 1,3 3,1 3,1 1))")).get();
 
   CHECK(read.windows == 4);
   CHECK(loaded == gdal::read_raster<std::int16_t>(as_it_is(path), grid));  // what GDAL read from the file, on the grid

@@ -6,28 +6,32 @@ call in full; the examples under `examples/` are complete programs, and the long
 
 ## The model
 
-A **layer** is one kind of data in one table of a PostGIS database, or read by a reader (a file, or data of the program's
-own). A **kind** is a C++ type that says what the layer's rows are, what a load returns and how the table is queried. The
-built-in kinds are `FeatureLayer<Geometry>`, `RoadLayer` and `RasterLayer<Pixel>`; a dataset of your own gets a kind of
-its own by deriving:
+A **model** is a C++ type that says what a table's rows are, what a load returns, how the table is queried and how a push
+treats the rows already there. The built-in models are `FeatureModel<Geometry>`, `RoadModel` and `RasterModel<Pixel>`;
+a model of your own is a type of the same shape (see [Add a model](developer.md#add-a-model)). A model is never made: it
+only names what a table of it is.
+
+A **layer** is a model under a name of the program's, in one table of a PostGIS database, or read by a reader (a file, or
+data of the program's own):
 
 ```cpp
-struct Roads : miniverse::RoadLayer {};
-struct Elevation : miniverse::RasterLayer<std::int16_t> {};  // heights in whole metres
+using Roads = miniverse::Layer<miniverse::RoadModel, "roads">;
+using Elevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "elevation">;  // heights in whole metres
 ```
 
-Two datasets of the same kind are two types (`struct Roads : RoadLayer {}; struct Tracks : RoadLayer {};`), so the
-compiler tells them apart.
+The name is what the program asks for the layer by (`load<"roads">`). Two tables of one model are two layers of two
+names, `Layer<RoadModel, "roads">` and `Layer<RoadModel, "tracks">`.
 
-A **miniverse** holds one layer of each kind named in its template arguments, and one pool of connections they share:
+A **miniverse** holds the layers it is made with, and one pool of connections they share:
 
 ```cpp
-miniverse::Miniverse world(conninfo, miniverse::Layer<Roads>("osm_roads"), miniverse::Layer<Elevation>("srtm"));
+miniverse::Miniverse world(conninfo, Roads("osm_roads"), Elevation());
 ```
 
-The table names are given when the miniverse is made, so one program serves whichever tables its configuration names.
-A `Layer` can also take a schema name (`Layer<Roads>("gis", "roads")`) or a reader (see [Files as layers](#files-as-layers)).
-Asking the miniverse for a kind it does not hold is a compile error.
+Each layer names its table when the miniverse is made, so one program serves whichever tables its configuration names;
+made with no table name, a layer is in the table called as it is (`elevation`, here). A layer can also take a schema
+name (`Roads("gis", "roads")`) or a reader (see [Files as layers](#files-as-layers)). Asking the miniverse for a name it
+does not hold is a compile error, as is giving two layers one name.
 
 The calls that read and write data (`load`, `stream`, `push`, `begin_push`, `remove`, `verify`, `table_settings`) return a
 `std::future`, and their errors arrive through it, not as exceptions from the call. The constructor, `create_table`,
@@ -54,18 +58,18 @@ tables. Boost.Geometry's `correct` closes a ring and fixes its direction.
 ### Making tables
 
 ```cpp
-world.create_table<Roads>();
-world.create_table<Elevation>({.pixels_per_degree = 3600, .tile_pixels = 512, .nodata = -32768});
+world.create_table<"roads">();
+world.create_table<"elevation">({.pixels_per_degree = 3600, .tile_pixels = 512, .nodata = -32768});
 ```
 
-`create_table` makes the table and runs the kind's setup (its spatial index; for a raster, its constraints and merge
-function) in one transaction, and waits. It also records the table in the registry, with the layout the kind is at
-(`Kind::LAYOUT`, a number raised when a kind's table layout changes), for `verify` to read back. The registry is the
+`create_table` makes the table and runs the model's setup (its spatial index; for a raster, its constraints and merge
+function) in one transaction, and waits. It also records the table in the registry, with the layout the model is at
+(`Model::LAYOUT`, a number raised when a model's table layout changes), for `verify` to read back. The registry is the
 schema `miniverse_internal`, which the library keeps for itself in the database: its tables `layers` and `datasets`,
 and its functions. The role that first makes a table in a database makes the schema and owns it; another role that
 makes tables needs CREATE on the database, and one that pushes needs USAGE on the schema with INSERT and UPDATE on
-`datasets` (DELETE, to remove). A worker that only loads and verifies needs USAGE and SELECT on `layers`. A kind with settings, such as a raster's grid, takes them here and the table
-keeps them. `create_tables()` makes every table of a miniverse whose kinds have no settings. `drop_tables()` drops them.
+`datasets` (DELETE, to remove). A worker that only loads and verifies needs USAGE and SELECT on `layers`. A model with settings, such as a raster's grid, takes them here and the table
+keeps them. `create_tables()` makes every table of a miniverse whose models have no settings. `drop_tables()` drops them.
 PostGIS must already be enabled in the database (`CREATE EXTENSION postgis`, and `postgis_raster` for rasters). A raster
 table's setup turns on lz4 compression for its tiles, which needs a PostgreSQL 14 or newer built with lz4; the usual
 packages and images are.
@@ -73,8 +77,8 @@ packages and images are.
 ### Pushing
 
 ```cpp
-world.push<Roads>(miniverse::Dataset{"village"}, std::move(roads)).get();
-world.push<Elevation>(std::move(heights)).get();
+world.push<"roads">(miniverse::Dataset{"village"}, std::move(roads)).get();
+world.push<"elevation">(std::move(heights)).get();
 ```
 
 A push writes all of its data or none: the rows go in batches of one statement each, inside one transaction. The
@@ -83,18 +87,18 @@ transaction holds one of the pool's connections until it ends.
 Feature and road layers are pushed as datasets. A `Dataset` is a name for an export: the file a producer made of a
 region, under whatever name the pusher gives it. The first push of a name writes the dataset; every later push of the
 same name replaces it, all at once: what the new export lacks is gone, what it has is there. `remove` deletes a dataset and gives how many rows it deleted: 0 for a name no push wrote.
-`datasets<Kind>()` lists a table's datasets, each with when it was last pushed and how many rows it holds. A worker
+`datasets<"roads">()` lists a table's datasets, each with when it was last pushed and how many rows it holds. A worker
 never sees dataset names: a load gives the layer as one whole. A feature's id is one the database gave its row; a
 way's is its own, OpenStreetMap's. So refresh a region by pushing its export again under the name it was first
-pushed under, and keep a name to the same ground over time. Two pushes of one dataset at once take turns, and a `remove`
-of it waits for an open push of it the same way; pushes of different datasets run side by side, and a load or a stream
-never waits for a push, nor a push for one. A raster layer is not pushed as a dataset: each tile is merged onto the one
-already there.
+pushed under, and keep a name to the same ground over time. Two pushes of one dataset of one layer at once take turns,
+and a `remove` of it waits for an open push of it the same way; pushes of different datasets run side by side, and a
+load or a stream never waits for a push, nor a push for one. A raster layer is not pushed as a dataset: each tile is
+merged onto the one already there.
 
 For data too large to hold at once, `begin_push` opens a push that takes parts, from `examples/import_osm.cpp`:
 
 ```cpp
-miniverse::PushInParts<Roads> roads = world.begin_push<Roads>(miniverse::Dataset{"town.osm.pbf"}).get();
+miniverse::PushInParts<miniverse::RoadModel> roads = world.begin_push<"roads">(miniverse::Dataset{"town.osm.pbf"}).get();
 
 miniverse::osm::read_ways({.path = path, .keys = {"highway"}}, 10'000, [&roads](miniverse::Ways chunk) {
   roads.add(std::move(chunk)).get();
@@ -113,11 +117,11 @@ leaves the dataset empty.
 ### Loading
 
 ```cpp
-std::future<miniverse::Ways> roads = world.load<Roads>(area);
+std::future<miniverse::Ways> roads = world.load<"roads">(area);
 for ( const miniverse::Way& way : roads.get() ) { ... }
 ```
 
-A load gives what the kind says a load is: for features and roads, those that intersect the location, ordered by id;
+A load gives what the model says a load is: for features and roads, those that intersect the location, ordered by id;
 for a raster, the pixels of the location's box (see [Raster layers](#raster-layers)). Loads of several layers can be
 started together and waited for together, as `examples/local_files.cpp` does.
 
@@ -128,7 +132,7 @@ area without holding the result. From `examples/road_network.cpp`:
 
 ```cpp
 world
-    .stream<Roads>(
+    .stream<"roads">(
         area,
         [&network, &roads, &chunks](const miniverse::Ways& chunk) {
           for ( const miniverse::Way& road : chunk ) {
@@ -143,7 +147,7 @@ world
     .get();  // once this returns, every chunk has been handed over
 ```
 
-A chunk is `chunk_rows` rows made into the kind's result (the last chunk has what is left); without options the pool's
+A chunk is `chunk_rows` rows made into the model's result (the last chunk has what is left); without options the pool's
 default of 1000 rows applies. The callback runs on a thread of the pool (for a file layer, on the thread started for the
 load), one call at a time, never two at once, so what it fills needs no lock as long as the caller only waits on the
 future. It may return `bool`: `false` stops the stream.
@@ -160,25 +164,25 @@ world.verify().get();
 ```
 
 `verify` first asks the registry which layout each layer's table was made with. A table made with another layout than
-its kind is at now, or one the registry does not know (made before layouts were recorded, or by hand), is named with
-what to do: make it again and import its data. A table of the right layout is then compared with its kind: the
-columns, their types, which may be null, the primary key, and that no other column would need filling. A kind with
+its model is at now, or one the registry does not know (made before layouts were recorded, or by hand), is named with
+what to do: make it again and import its data. A table of the right layout is then compared with its model: the
+columns, their types, which may be null, the primary key, and that no other column would need filling. A model with
 settings must also have them in the table. Every layer is checked at once, and the future holds a `TablesDiffer`
 naming every difference found. It is meant for a program's start, so a missing or wrong table fails there rather than
 at the first load. Indexes and permissions are not checked. It needs PostgreSQL 17.
 
-`table_settings<Elevation>()` gives the settings a table was made with, for a writer that has to warp its source onto
+`table_settings<"elevation">()` gives the settings a table was made with, for a writer that has to warp its source onto
 the table's grid.
 
 ## Feature layers
 
-A `FeatureLayer<Geometry>` holds features of one geometry type: `geo::Point`, `geo::LineString`, `geo::Polygon`,
+A `FeatureModel<Geometry>` holds features of one geometry type: `geo::Point`, `geo::LineString`, `geo::Polygon`,
 `geo::MultiLineString` or `geo::MultiPolygon`. Each feature has an `id`, its `geometry` and its `tags`, one JSON object
 held as text (`schemacht::json::Json`). From `examples/features.cpp`:
 
 ```cpp
-struct Cafes : miniverse::FeatureLayer<geo::Point> {};
-struct Parks : miniverse::FeatureLayer<geo::Polygon> {};
+using Cafes = miniverse::Layer<miniverse::FeatureModel<geo::Point>, "cafes">;
+using Parks = miniverse::Layer<miniverse::FeatureModel<geo::Polygon>, "parks">;
 ```
 
 The table's geometry column is typed (`geometry(MultiPolygon,4326)`), so the database refuses another type. A dataset
@@ -203,7 +207,7 @@ ground are both loaded there: cut feature datasets to each other.
 
 ## Road layers
 
-A `RoadLayer` holds OpenStreetMap ways: each `Way` has its `id`, its `node_ids` in order, its `coordinates` as a
+A `RoadModel` holds OpenStreetMap ways: each `Way` has its `id`, its `node_ids` in order, its `coordinates` as a
 `geo::LineString` with one point per node, and its `tags`. Node ids are what let a worker join roads into a network:
 two ways that meet share a node. `examples/road_network.cpp` builds a graph from them and finds the shortest route.
 
@@ -237,14 +241,14 @@ a layer of its own.
 
 ## Raster layers
 
-A `RasterLayer<Pixel>` holds one band of pixels, cut into the square tiles of a grid, one row per tile. The pixel type is
+A `RasterModel<Pixel>` holds one band of pixels, cut into the square tiles of a grid, one row per tile. The pixel type is
 one of `std::int8_t`, `std::uint8_t`, `std::int16_t`, `std::uint16_t`, `std::int32_t`, `std::uint32_t`, `float` or
 `double`.
 
 ### The grid
 
 ```cpp
-world.create_table<Elevation>({.pixels_per_degree = 3600, .tile_pixels = 512, .nodata = -32768});
+world.create_table<"elevation">({.pixels_per_degree = 3600, .tile_pixels = 512, .nodata = -32768});
 ```
 
 The grid is chosen once, when the table is made, and every source is warped onto it. It is in WGS 84 degrees: a whole
@@ -272,7 +276,7 @@ Files become rasters with `gdal::read_raster`, which warps the file from its own
 the grid, a window of whole tiles at a time. From `examples/import_raster.cpp`:
 
 ```cpp
-const geo::Grid<std::int16_t> grid = world.table_settings<Elevation>().get();
+const geo::Grid<std::int16_t> grid = world.table_settings<"elevation">().get();
 
 miniverse::gdal::read_raster<std::int16_t>({.path = path, .resampling = miniverse::gdal::Resampling::Bilinear}, grid, 2,
     [&heights](Heights window) { heights.add(std::move(window)).get(); });
@@ -328,16 +332,18 @@ all have readers is made without a connection string, from `examples/local_files
 World files(miniverse::osm::road_file<Roads>(streets), miniverse::gdal::raster_file<Elevation>(heights, grid));
 ```
 
-- `gdal::feature_file<Kind>(VectorSource)`: a vector file; the features in the location, tested exactly against it,
+Each takes the layer type and gives a layer of it with the file as its reader:
+
+- `gdal::feature_file<Layer>(VectorSource)`: a vector file; the features in the location, tested exactly against it,
   after the file's own spatial index has narrowed them down, if it has one.
-- `gdal::raster_file<Kind>(RasterSource, grid)`: a raster file, warped onto the given grid on each load. The grid is what
-  a table's would be, and `table_settings` returns it.
-- `osm::road_file<Kind>(WaySource)`: an OpenStreetMap file, read whole into memory when the layer is made and indexed by
+- `gdal::raster_file<Layer>(RasterSource, grid)`: a raster file, warped onto the given grid on each load. The grid is
+  what a table's would be, and `table_settings` returns it.
+- `osm::road_file<Layer>(WaySource)`: an OpenStreetMap file, read whole into memory when the layer is made and indexed by
   position; a bad file fails there.
 
 The readers are in `miniverse/gdal/feature_file.hpp`, `miniverse/gdal/raster_file.hpp` and `miniverse/osm/road_file.hpp`;
 `miniverse/gdal/gdal.hpp` and `miniverse/osm/osm.hpp` include all of a component. No component header brings in the
-built-in kinds or the `Miniverse` itself: include `miniverse/miniverse.hpp` (or `world.hpp`, with kinds of your own)
+built-in models or the `Miniverse` itself: include `miniverse/miniverse.hpp` (or `world.hpp`, with models of your own)
 beside them.
 
 `load`, `stream`, `verify` and `table_settings` work the same on these layers; `push`, `begin_push` and `remove` fail with
@@ -352,15 +358,16 @@ tests push each test file into a table and compare the loads by geometry and nod
 
 ## A reader of your own
 
-`Reader<Kind>` is the class behind the file layers; a class of your own can hand a layer fixed data, for a test. It
-implements `name`, `load` and `stream` (and `settings`, for a kind with settings such as a raster), optionally
-`problems` for `verify`. From `tests/unit/reader_test.cpp`, a reader of fixed points, abridged:
+`Reader<Model>` is the class behind the file layers; a class of your own can hand a layer fixed data, for a test. It
+implements `name`, `load` and `stream` (and `settings`, for a model with settings such as a raster), optionally
+`problems` for `verify`. A layer is made from a shared pointer to one. From `tests/unit/reader_test.cpp`, a reader of
+fixed points, abridged:
 
 ```cpp
 using Points = miniverse::Features<geo::Point>;
 
-template <miniverse::LayerKind kind_t>
-class FixedPoints : public miniverse::Reader<kind_t> {
+template <miniverse::LayerModel model_t>
+class FixedPoints : public miniverse::Reader<model_t> {
  public:
   [[nodiscard]] std::string name() const override { return "fixed points"; }
 
@@ -373,7 +380,7 @@ class FixedPoints : public miniverse::Reader<kind_t> {
     return inside;
   }
 
-  void stream(const geo::Polygon& location, std::size_t chunk_rows, const miniverse::Reader<kind_t>::OnChunk& on_chunk) const override {
+  void stream(const geo::Polygon& location, std::size_t chunk_rows, const miniverse::Reader<model_t>::OnChunk& on_chunk) const override {
     const Points inside = load(location);
     for ( std::size_t first = 0; first < inside.size(); first += chunk_rows ) {
       const std::size_t last = std::min(inside.size(), first + chunk_rows);
@@ -385,9 +392,10 @@ class FixedPoints : public miniverse::Reader<kind_t> {
   ...
 };
 
-struct Shops : miniverse::FeatureLayer<geo::Point> {};
+using ShopModel = miniverse::FeatureModel<geo::Point>;
+using Shops = miniverse::Layer<ShopModel, "shops">;
 
-miniverse::Miniverse world(miniverse::Layer<Shops>(std::make_shared<FixedPoints<Shops>>(points)));
+miniverse::Miniverse world(Shops(std::make_shared<FixedPoints<ShopModel>>(points)));
 ```
 
 Every member is `const` and may be called from several threads at once. `load` and `stream` run on a thread started for
@@ -395,21 +403,21 @@ the load; `name`, `settings` and `problems` on the caller's thread.
 
 ## The command-line tool
 
-`miniverse` does what an uploader does for the built-in kinds, without a program: it makes a table, imports files into
+`miniverse` does what an uploader does for the built-in models, without a program: it makes a table, imports files into
 it, removes a dataset, checks a table, and shows a raster table's grid. Each command acts on one table, named with its
-kind:
+model:
 
 ```sh
-miniverse <command> [--db <connection string>] --kind <kind> <table> ...
+miniverse <command> [--db <connection string>] --model <model> <table> ...
 ```
 
 - `--db` is a libpq connection string, of keywords or a URI. Without it, libpq's defaults and the `PG*` variables say
   where.
 - The table is `table`, in the connection's search path, or `schema.table`.
-- `--kind` is `features:<geometry>` (`point`, `linestring`, `polygon`, `multilinestring` or `multipolygon`), `roads`,
+- `--model` is `features:<geometry>` (`point`, `linestring`, `polygon`, `multilinestring` or `multipolygon`), `roads`,
   or `raster:<pixel>` (`int8`, `uint8`, `int16`, `uint16`, `int32`, `uint32`, `float32` or `float64`).
 - It exits with 0 when the command is done, 1 when it failed, and 2 for arguments it can't take, before it connects; the
-  reason is on standard error. An option for another kind of table than the one named is one of those.
+  reason is on standard error. An option for a table of another model than the one named is one of those.
 
 The database and its extensions are made beforehand, as for the library (`createdb`, then `CREATE EXTENSION postgis`
 and `postgis_raster`).
@@ -419,11 +427,11 @@ and `postgis_raster`).
 | `create <table>` | Makes the table, as `create_table`. A raster table takes its grid: `--pixels-per-degree N` or `--metres M` (made the nearest pixels per degree), `--tile-pixels N` and `--nodata V`. |
 | `import <table> <file>...` | Checks the table, as `verify`, then pushes the files into it a part at a time, each file all of it or none. |
 | `remove <table> <dataset>` | Removes a dataset from a table of features or roads. A name no import wrote is an error. |
-| `verify <table>` | Checks the table is as its kind says; the differences are the error. |
+| `verify <table>` | Checks the table is as its model says; the differences are the error. |
 | `settings <table>` | Shows the grid of a raster table. |
 | `datasets <table>` | Lists the datasets of a table of features or roads: name, rows, and when each was last pushed. |
 
-What `import` reads depends on the kind:
+What `import` reads depends on the model:
 
 - **Features:** one vector file of any format GDAL opens, as `gdal::read_features`. It replaces the dataset `--dataset`,
   which is the file's name unless given (a directory's, for a path ending in `/`): two files of one name in different
@@ -442,7 +450,7 @@ tool built without one says so.
 
 ## Errors and threads
 
-- Errors from the database and from a kind's conversions arrive through the future of the call. `verify` fails with
+- Errors from the database and from a model's conversions arrive through the future of the call. `verify` fails with
   `TablesDiffer`; a push to a file layer with `std::logic_error`; a wrong argument (a grid that is none, a chunk of zero
   rows) with `std::invalid_argument`; GDAL and libosmium errors as `std::runtime_error` with the library's message.
 - Stream callbacks run on the pool's threads (on the load's own thread for a file layer), one call at a time. A `push`
@@ -478,6 +486,6 @@ tool built without one says so.
   connection's session to other clients between transactions, so those settings are lost and leak: connect directly,
   or through a pooler in session mode that passes libpq's `options` startup parameter through (PgBouncer rejects it
   unless `ignore_startup_parameters` names it, and then drops it, with the timeouts set in it).
-- A dataset cannot be deleted by area, only whole, by name. A table made with another layout than its kind is at now,
+- A dataset cannot be deleted by area, only whole, by name. A table made with another layout than its model is at now,
   or before the registry existed, does not verify and must be made again and refilled; `verify` says so. There is no
   migration.

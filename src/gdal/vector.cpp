@@ -27,7 +27,7 @@
 #include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/geo/types.hpp"
 #include "miniverse/geo/wkb.hpp"
-#include "miniverse/layer/feature.hpp"
+#include "miniverse/model/feature.hpp"
 
 namespace miniverse::gdal {
 

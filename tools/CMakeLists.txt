@@ -1,4 +1,4 @@
-# The command-line tool `miniverse`: makes, fills and checks the tables of a database, for the built-in kinds of layer. It
+# The command-line tool `miniverse`: makes, fills and checks the tables of a database, for the built-in models. It
 # reads vector and raster files when miniverse::gdal is built, and OpenStreetMap files when miniverse::osm is.
 
 # CLI11, the command-line parser, as its release's single header (third_party/CLI11). It is a system header here: the

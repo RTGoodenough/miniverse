@@ -5,18 +5,18 @@
 #include <string>
 #include <vector>
 
-#include "miniverse/layer/way.hpp"
+#include "miniverse/model/way.hpp"
 
 /**
  * @file
  * OpenStreetMap files as ways, read with libosmium: a `.osm.pbf` extract, or any other form libosmium opens (`.osm`,
- * `.osm.bz2`), as the `Ways` a `RoadLayer` is pushed, or read in its place (road_file.hpp). Each way comes with its node ids,
+ * `.osm.bz2`), as the `Ways` a `RoadModel` is pushed, or read in its place (road_file.hpp). Each way comes with its node ids,
  * which other formats of the same data drop.
  *
  * @code
- * struct Roads : miniverse::RoadLayer {};
+ * using Roads = miniverse::Layer<miniverse::RoadModel, "roads">;
  *
- * auto parts = world.begin_push<Roads>(miniverse::Dataset{"region.osm.pbf"}).get();
+ * auto parts = world.begin_push<"roads">(miniverse::Dataset{"region.osm.pbf"}).get();
  * miniverse::osm::read_ways({.path = "region.osm.pbf", .keys = {"highway"}}, 10000, [&](miniverse::Ways roads) {
  *   parts.add(std::move(roads)).get();  // a chunk at a time, so the ways are not held whole
  * });

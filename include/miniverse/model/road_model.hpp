@@ -10,8 +10,8 @@
 #include "miniverse/geo/column_types.hpp"
 #include "miniverse/geo/operations.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer/dataset_columns.hpp"  // IWYU pragma: export
-#include "miniverse/layer/way.hpp"              // IWYU pragma: export
+#include "miniverse/model/way.hpp"     // IWYU pragma: export
+#include "miniverse/model/writes.hpp"  // IWYU pragma: export
 #include "schemacht/json/json.hpp"
 #include "schemacht/postgres/statements.hpp"
 #include "schemacht/query/predicate.hpp"
@@ -23,14 +23,14 @@
 
 /**
  * @file
- * The layer kind of roads, OpenStreetMap ways: its table's columns and index, and its rows made from ways and back.
+ * The model of roads, OpenStreetMap ways: its table's columns and index, and its rows made from ways and back.
  */
 namespace miniverse {
 
 /** @brief A road table's own columns; the dataset's are in dataset_columns.hpp. */
 namespace road {
 
-/** @brief The way's own id, the source's (OpenStreetMap's way id): the table's key (see `RoadLayer`). */
+/** @brief The way's own id, the source's (OpenStreetMap's way id): the table's key (see `RoadModel`). */
 using WayId = schemacht::schema::Field<std::int64_t, "way_id", schemacht::schema::KeyRole::Primary>;
 
 /** @brief The way's nodes, in order. */
@@ -45,12 +45,12 @@ using Tags = schemacht::schema::Field<schemacht::json::Json, "tags">;
 }  // namespace road
 
 /**
- * @brief The layer kind of roads: one row per way, keyed by the way's own id, its geometry a `geometry(LineString,4326)` with a
+ * @brief The model of roads: one row per way, keyed by the way's own id, its geometry a `geometry(LineString,4326)` with a
  * GiST index. A load gives the ways that intersect the location, in id order: one network, whatever exports it was pushed from.
  *
  * @code
- * struct Roads : miniverse::RoadLayer {};
- * miniverse::Miniverse world(conninfo, miniverse::Layer<Roads>("osm_roads"));
+ * using Roads = miniverse::Layer<miniverse::RoadModel, "roads">;
+ * miniverse::Miniverse world(conninfo, Roads("osm_roads"));
  * @endcode
  *
  * Ways are pushed under a `Dataset`, which a push replaces whole and `Miniverse::remove` deletes. A way is its id, as in
@@ -63,9 +63,10 @@ using Tags = schemacht::schema::Field<schemacht::json::Json, "tags">;
  * way that a neighbouring export took over, and this export then dropped, stays until that neighbour is pushed again: its row
  * is the neighbour's, and only the neighbour's sweep deletes it.
  */
-struct RoadLayer {
+struct RoadModel {
   static constexpr std::int32_t LAYOUT = 1;  ///< The first layout recorded.
 
+  using writes = miniverse::writes::Datasets;
   using result_type = Ways;
   /// The table's layout. Its name, `roads`, is only a placeholder: a layer names its own table (`Layer`).
   using schema_type = schemacht::schema::Schema<"roads", road::WayId, dataset::Name, road::NodeIds, road::Geom, road::Tags, dataset::Pushed>;
@@ -83,14 +84,10 @@ struct RoadLayer {
           .order_by(schemacht::query::On<schema_type>::col<"way_id">().asc());
   using load_statement_type = schemacht::query::Prepared<LOAD>;
 
-  /// The sweep and the remove of a dataset: dataset_columns.hpp.
-  using sweep_statement_type = dataset::Sweep<schema_type>;
-  using remove_statement_type = dataset::Remove<schema_type>;
-
   /** @brief A statement's worth of ways: a way is some hundreds of bytes to a few kilobytes as text. */
   static constexpr std::size_t WAYS_PER_STATEMENT = 5000;
 
-  /** @return The GiST index on `geom` and the dataset index (`dataset::index_sql`), both unnamed: PostgreSQL names them. */
+  /** @return The GiST index on `geom`, unnamed: PostgreSQL names it. The dataset index is `writes::Datasets`'s. */
   [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table);
 
   /**

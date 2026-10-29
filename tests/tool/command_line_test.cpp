@@ -19,7 +19,7 @@
 #include <utility>
 #include <vector>
 
-#include "kinds.hpp"
+#include "layer_of.hpp"
 #include "miniverse/miniverse.hpp"
 #include "schemacht/postgres/statements.hpp"
 #include "support/database.hpp"
@@ -95,53 +95,55 @@ void to_shapefiles(const std::string& from, const std::string& to) {
   GDALClose(source);
 }
 
-/** @return A world of the one layer `kind_t` in `table`, its table dropped before and after the test. */
-template <typename kind_t>
-[[nodiscard]] test::Fresh<miniverse::Miniverse<kind_t>> fresh(miniverse::Layer<kind_t> layer) {
-  return test::Fresh<miniverse::Miniverse<kind_t>>([](miniverse::Miniverse<kind_t>& /*world*/) {}, test_db(), std::move(layer));
+using Buildings = tool::Layer<miniverse::FeatureModel<geo::MultiPolygon>>;
+using Roads = tool::Layer<miniverse::RoadModel>;
+using Heights = tool::Layer<miniverse::RasterModel<std::int16_t>>;
+
+/** @return A world of the one layer `layer`, its table dropped before and after the test. */
+template <miniverse::IsLayer layer_t>
+[[nodiscard]] test::Fresh<miniverse::Miniverse<layer_t>> fresh(layer_t layer) {
+  return test::Fresh<miniverse::Miniverse<layer_t>>([](miniverse::Miniverse<layer_t>& /*world*/) {}, test_db(), std::move(layer));
 }
 
 }  // namespace
 
 TEST_CASE("tool command line: an import's options reach the command", "[tool][integration]") {
-  using Buildings = tool::Features<geo::MultiPolygon>;
-  auto buildings = fresh(miniverse::Layer<Buildings>("miniverse_test_tool_buildings"));
-  auto roads = fresh(miniverse::Layer<tool::Roads>("miniverse_test_tool_roads"));
-  auto heights = fresh(miniverse::Layer<tool::Raster<std::int16_t>>("miniverse_test_tool_heights"));
+  auto buildings = fresh(Buildings("miniverse_test_tool_buildings"));
+  auto roads = fresh(Roads("miniverse_test_tool_roads"));
+  auto heights = fresh(Heights("miniverse_test_tool_heights"));
 
-  CHECK(run("create --kind features:multipolygon miniverse_test_tool_buildings").exit == 0);
-  const Run named = run("import --kind features:multipolygon miniverse_test_tool_buildings " + BUILDINGS_FILE + " --dataset village --chunk 1");
+  CHECK(run("create --model features:multipolygon miniverse_test_tool_buildings").exit == 0);
+  const Run named = run("import --model features:multipolygon miniverse_test_tool_buildings " + BUILDINGS_FILE + " --dataset village --chunk 1");
   CHECK(named.exit == 0);
   CHECK_THAT(named.output, ContainsSubstring("as the dataset 'village'"));
-  CHECK_THAT(run("datasets --kind features:multipolygon miniverse_test_tool_buildings").output, ContainsSubstring("village\t4 rows\t20"));
-  CHECK(run("remove --kind features:multipolygon miniverse_test_tool_buildings village").exit == 0);
-  CHECK_THAT(run("datasets --kind features:multipolygon miniverse_test_tool_buildings").output, ContainsSubstring("no datasets"));
-  CHECK(buildings.world().load<Buildings>(EVERYWHERE).get().empty());
+  CHECK_THAT(run("datasets --model features:multipolygon miniverse_test_tool_buildings").output, ContainsSubstring("village\t4 rows\t20"));
+  CHECK(run("remove --model features:multipolygon miniverse_test_tool_buildings village").exit == 0);
+  CHECK_THAT(run("datasets --model features:multipolygon miniverse_test_tool_buildings").output, ContainsSubstring("no datasets"));
+  CHECK(buildings.world().load<"table">(EVERYWHERE).get().empty());
 
   // Of the extract's ways, one is a building, and not a road.
-  CHECK(run("create --kind roads miniverse_test_tool_roads").exit == 0);
-  CHECK_THAT(run("import --kind roads miniverse_test_tool_roads " + STREETS_FILE + " --keys building").output, ContainsSubstring(": 1 ways"));
-  CHECK(roads.world().load<tool::Roads>(EVERYWHERE).get().size() == 1);
+  CHECK(run("create --model roads miniverse_test_tool_roads").exit == 0);
+  CHECK_THAT(run("import --model roads miniverse_test_tool_roads " + STREETS_FILE + " --keys building").output, ContainsSubstring(": 1 ways"));
+  CHECK(roads.world().load<"table">(EVERYWHERE).get().size() == 1);
 
   // A degree is 3711 pixels of 30 m; windows of one tile are more windows than of two.
   CHECK_THAT(
-      run("create --kind raster:int16 miniverse_test_tool_heights --metres 30 --tile-pixels 256 --nodata -32768").output,
+      run("create --model raster:int16 miniverse_test_tool_heights --metres 30 --tile-pixels 256 --nodata -32768").output,
       ContainsSubstring("3711 pixels per degree")
   );
-  const Run ones = run("import --kind raster:int16 miniverse_test_tool_heights " + HEIGHTS_FILE + " --window-tiles 1 --resampling nearest");
-  const Run twos = run("import --kind raster:int16 miniverse_test_tool_heights " + HEIGHTS_FILE + " --window-tiles 2 --resampling nearest");
+  const Run ones = run("import --model raster:int16 miniverse_test_tool_heights " + HEIGHTS_FILE + " --window-tiles 1 --resampling nearest");
+  const Run twos = run("import --model raster:int16 miniverse_test_tool_heights " + HEIGHTS_FILE + " --window-tiles 2 --resampling nearest");
   CHECK(ones.exit == 0);
   CHECK(twos.exit == 0);
   CHECK(ones.output != twos.output);
-  const Run band = run("import --kind raster:int16 miniverse_test_tool_heights " + HEIGHTS_FILE + " --band 2");
+  const Run band = run("import --model raster:int16 miniverse_test_tool_heights " + HEIGHTS_FILE + " --band 2");
   CHECK(band.exit == 1);
   CHECK_THAT(band.output, ContainsSubstring("so no band 2"));
-  CHECK_THAT(run("settings --kind raster:int16 miniverse_test_tool_heights").output, ContainsSubstring("nodata: -32768"));
+  CHECK_THAT(run("settings --model raster:int16 miniverse_test_tool_heights").output, ContainsSubstring("nodata: -32768"));
 }
 
 TEST_CASE("tool command line: a table in a schema is named schema.table, and a directory's dataset is its name", "[tool][integration]") {
-  using Places = tool::Features<geo::MultiPolygon>;
-  miniverse::Miniverse<Places> world(test_db(), miniverse::Layer<Places>("miniverse_test_tool", "places"));
+  miniverse::Miniverse<Buildings> world(test_db(), Buildings("miniverse_test_tool", "places"));
   std::ignore = world.database().execute(schemacht::postgres::unchecked_sql("DROP SCHEMA IF EXISTS miniverse_test_tool CASCADE")).get();
   std::ignore = world.database().execute(schemacht::postgres::unchecked_sql("CREATE SCHEMA miniverse_test_tool")).get();
 
@@ -149,9 +151,9 @@ TEST_CASE("tool command line: a table in a schema is named schema.table, and a d
   const std::string shapes = files.path_of("shapes");
   to_shapefiles(BUILDINGS_FILE, shapes);
 
-  CHECK(run("create --kind features:multipolygon miniverse_test_tool.places").exit == 0);
-  CHECK(run("verify --kind features:multipolygon miniverse_test_tool.places").exit == 0);
-  const Run directory = run("import --kind features:multipolygon miniverse_test_tool.places " + shapes + "/");  // as a shell completes it
+  CHECK(run("create --model features:multipolygon miniverse_test_tool.places").exit == 0);
+  CHECK(run("verify --model features:multipolygon miniverse_test_tool.places").exit == 0);
+  const Run directory = run("import --model features:multipolygon miniverse_test_tool.places " + shapes + "/");  // as a shell completes it
   CHECK(directory.exit == 0);
   CHECK_THAT(directory.output, ContainsSubstring("as the dataset 'shapes'"));
 
@@ -159,15 +161,14 @@ TEST_CASE("tool command line: a table in a schema is named schema.table, and a d
 }
 
 TEST_CASE("tool command line: it exits with 2 for arguments it can't take, and 1 for a command that failed", "[tool][integration]") {
-  using Buildings = tool::Features<geo::MultiPolygon>;
-  auto buildings = fresh(miniverse::Layer<Buildings>("miniverse_test_tool_buildings"));
-  CHECK(run("create --kind features:multipolygon miniverse_test_tool_buildings").exit == 0);
+  auto buildings = fresh(Buildings("miniverse_test_tool_buildings"));
+  CHECK(run("create --model features:multipolygon miniverse_test_tool_buildings").exit == 0);
 
-  CHECK(run("verify --kind nothing miniverse_test_tool_buildings").exit == 2);
-  CHECK(run("import --kind features:multipolygon miniverse_test_tool_buildings " + BUILDINGS_FILE + " --band 2").exit == 2);
-  CHECK(run("create --kind raster:int8 miniverse_test_tool_bytes --pixels-per-degree 4 --tile-pixels 4 --nodata 300").exit == 2);
-  CHECK(run("verify --kind features:point miniverse_test_tool_buildings").exit == 1);
-  CHECK(run("create --kind features:multipolygon miniverse_test_tool_buildings").exit == 1);  // there already
-  CHECK(run("remove --kind features:multipolygon miniverse_test_tool_buildings never_imported").exit == 1);
+  CHECK(run("verify --model nothing miniverse_test_tool_buildings").exit == 2);
+  CHECK(run("import --model features:multipolygon miniverse_test_tool_buildings " + BUILDINGS_FILE + " --band 2").exit == 2);
+  CHECK(run("create --model raster:int8 miniverse_test_tool_bytes --pixels-per-degree 4 --tile-pixels 4 --nodata 300").exit == 2);
+  CHECK(run("verify --model features:point miniverse_test_tool_buildings").exit == 1);
+  CHECK(run("create --model features:multipolygon miniverse_test_tool_buildings").exit == 1);  // there already
+  CHECK(run("remove --model features:multipolygon miniverse_test_tool_buildings never_imported").exit == 1);
   CHECK(run("--help").exit == 0);
 }

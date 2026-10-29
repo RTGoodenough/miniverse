@@ -8,7 +8,7 @@
 #   -Wfloat-equal                   grid coordinates are exact by construction and are compared as such, above all in tests
 #   -Weffc++, -Wnoexcept            thousands of sites inside libstdc++ itself
 #   -Wshadow-all (clang)            flags the `[x = std::move(x)]` init-capture; -Wshadow does not
-#   -Wctad-maybe-unsupported        `Miniverse world(layers...)` deduces its kinds from the constructor by design
+#   -Wctad-maybe-unsupported        `Miniverse world(layers...)` deduces its models from the constructor by design
 #   -Wundefined-func-template       the headers declare templates that one source file defines for each type (developer.md)
 #   -Wunused-member-function        the five special members that every class declares
 #   -Wglobal-constructors,          tests' constants

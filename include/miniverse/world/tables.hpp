@@ -27,31 +27,37 @@ inline void make_registry(schemacht::postgres::Transaction& transaction) {
 }
 
 /**
- * @brief Makes `table` as the kind's schema says, runs `setup` on it and records it in the registry with the kind's layout, in
- * one transaction, and waits for it. Each statement is waited for in turn, so the error is the failing statement's own; a
- * throw drops the transaction, which rolls it back.
+ * @brief Makes `table` as the model's schema says, runs `setup` on it, then what its `writes` adds (a dataset index), and
+ * records it in the registry with the model's layout, in one transaction, and waits for it. Each statement is waited for in
+ * turn, so the error is the failing statement's own; a throw drops the transaction, which rolls it back.
  */
-template <LayerKind kind_t>
+template <LayerModel model_t>
 void make_table(
-    schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table, std::vector<std::string> setup
+    schemacht::postgres::Database& database, const schemacht::schema::Table<typename model_t::schema_type>& table, std::vector<std::string> setup
 ) {
+  if constexpr ( WritesDatasets<model_t> ) {
+    for ( std::string& sql : model_t::writes::setup_sql(table.name()) ) {
+      setup.push_back(std::move(sql));
+    }
+  }
+
   schemacht::postgres::Transaction transaction = database.begin().get();
   make_registry(transaction);
-  transaction.execute(schemacht::postgres::create_table_statement<typename kind_t::schema_type>().on(table)).get();
+  transaction.execute(schemacht::postgres::create_table_statement<typename model_t::schema_type>().on(table)).get();
   for ( std::string& sql : setup ) {
     transaction.execute(schemacht::postgres::unchecked_sql(std::move(sql))).get();
   }
-  transaction.execute(registry::registered(registry::name_of(table.name()), kind_t::schema_type::TABLE_NAME, kind_t::LAYOUT)).get();
+  transaction.execute(registry::registered(registry::name_of(table.name()), model_t::schema_type::TABLE_NAME, model_t::LAYOUT)).get();
 
   transaction.commit().get();
 }
 
 /** @brief Drops `table` if it exists and forgets it and its datasets in the registry, in one transaction, and waits for it. */
-template <LayerKind kind_t>
-void drop_table(schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table) {
+template <LayerModel model_t>
+void drop_table(schemacht::postgres::Database& database, const schemacht::schema::Table<typename model_t::schema_type>& table) {
   schemacht::postgres::Transaction transaction = database.begin().get();
   make_registry(transaction);  // a drop in a database with no registry yet
-  transaction.execute(schemacht::postgres::drop_table_statement<typename kind_t::schema_type>().on(table)).get();
+  transaction.execute(schemacht::postgres::drop_table_statement<typename model_t::schema_type>().on(table)).get();
   transaction.execute(registry::datasets_forgotten(registry::name_of(table.name()))).get();
   transaction.execute(registry::layer_forgotten(registry::name_of(table.name()))).get();
 

@@ -41,7 +41,7 @@ inline constexpr double METRES_PER_DEGREE = 111'319.490793;
  * them (29.997 m; `Grid::metres_per_pixel` gives what a grid came to). For the `pixels_per_degree` of a `Grid`:
  *
  * @code
- * world.create_table<Elevation>({.pixels_per_degree = geo::pixels_per_degree_of_metres(30), .tile_pixels = 256, .nodata = -32768});
+ * world.create_table<"elevation">({.pixels_per_degree = geo::pixels_per_degree_of_metres(30), .tile_pixels = 256, .nodata = -32768});
  * @endcode
  *
  * A pixel is that many metres from north to south everywhere, and from east to west at the equator; towards the poles it is

@@ -13,21 +13,22 @@ It is built on schemacht, a sibling library, which describes tables as C++ types
 
 ## What it does
 
-- **Layer kinds:** features of one geometry type with JSON tags (`FeatureLayer<Geometry>`), roads as OpenStreetMap ways
-  keyed by their way id, with their node ids (`RoadLayer`), and rasters of one band on a fixed grid (`RasterLayer<Pixel>`). A kind of your own
-  is a type that names its table's columns, its query and its result.
+- **Layer models:** features of one geometry type with JSON tags (`FeatureModel<Geometry>`), roads as OpenStreetMap ways
+  keyed by their way id, with their node ids (`RoadModel`), and rasters of one band on a fixed grid (`RasterModel<Pixel>`). A model of your own
+  is a type that names its table's columns, its query and its result. A layer is a model under a name of the program's
+  (`Layer<RoadModel, "roads">`), so one model serves as many tables as the program names.
 - **Loading by polygon:** `load` gives everything in an area as one value; `stream` hands it to a callback a chunk at a
   time. Every call returns a `std::future`, so several layers load at once.
 - **Pushing:** `push` writes in one transaction; `begin_push` takes large data in parts, all written or none. Vector
   layers are pushed as datasets, the exports they came from: a push of a dataset replaces it, and `remove` deletes one.
   Raster pushes merge onto the tiles already there.
 - **Files as layers:** a GeoPackage, shapefile or GeoJSON (`gdal::feature_file`), a GeoTIFF or anything else GDAL opens
-  (`gdal::raster_file`), an OpenStreetMap extract (`osm::road_file`), or a reader you write (`Reader<Kind>`).
+  (`gdal::raster_file`), an OpenStreetMap extract (`osm::road_file`), or a reader you write (`Reader<Model>`).
 - **Importing files into tables:** `gdal::read_features`, `gdal::read_raster` (warped onto the table's grid) and
   `osm::read_ways`, each a chunk at a time.
-- **Checks:** `verify` compares every table with its kind, and with the layout it was made with, before a program
+- **Checks:** `verify` compares every table with its model, and with the layout it was made with, before a program
   starts work.
-- **A command-line tool:** `miniverse` makes tables of the built-in kinds, imports files into them, removes datasets and
+- **A command-line tool:** `miniverse` makes tables of the built-in models, imports files into them, removes datasets and
   checks tables, with no program to write.
 - **GDAL datasets:** a loaded raster as a GDAL dataset in memory (`gdal::dataset_of`), for GDAL's own tools or to write
   as a GeoTIFF.
@@ -85,23 +86,23 @@ A worker that loads the roads and the heights of an area. It is given a world of
 the worker's code is the same. From [examples/local_files.cpp](examples/local_files.cpp):
 
 ```cpp
-struct Roads : miniverse::RoadLayer {};
-struct Elevation : miniverse::RasterLayer<std::int16_t> {};  // heights in whole metres
+using Roads = miniverse::Layer<miniverse::RoadModel, "roads">;
+using Elevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "elevation">;  // heights in whole metres
 
 using World = miniverse::Miniverse<Roads, Elevation>;
 
 Survey survey(World& world, const geo::Polygon& area) {
   world.verify().get();
 
-  std::future<miniverse::Ways> roads_loading = world.load<Roads>(area);
-  std::future<Heights>         heights_loading = world.load<Elevation>(area);
+  std::future<miniverse::Ways> roads_loading = world.load<"roads">(area);
+  std::future<Heights>         heights_loading = world.load<"elevation">(area);
   const miniverse::Ways        roads = roads_loading.get();
   const Heights                heights = heights_loading.get();
   ...
 }
 
 // Tables, in production:
-World tables(conninfo, miniverse::Layer<Roads>("miniverse_example_local_roads"), miniverse::Layer<Elevation>("miniverse_example_local_heights"));
+World tables(conninfo, Roads("miniverse_example_local_roads"), Elevation("miniverse_example_local_heights"));
 
 // Files, in a test:
 World files(miniverse::osm::road_file<Roads>(streets), miniverse::gdal::raster_file<Elevation>(heights, grid));
@@ -109,20 +110,20 @@ World files(miniverse::osm::road_file<Roads>(streets), miniverse::gdal::raster_f
 
 ## The command-line tool
 
-`miniverse` makes, fills and checks tables of the built-in kinds, for data that is uploaded before workers run:
+`miniverse` makes, fills and checks tables of the built-in models, for data that is uploaded before workers run:
 
 ```sh
-miniverse create --db "host=localhost dbname=gis" --kind features:multipolygon buildings
-miniverse import --db "host=localhost dbname=gis" --kind features:multipolygon buildings buildings.gpkg
-miniverse create --db "host=localhost dbname=gis" --kind raster:int16 elevation --metres 30 --tile-pixels 512 --nodata -32768
-miniverse import --db "host=localhost dbname=gis" --kind raster:int16 elevation heights/*.tif
-miniverse verify --db "host=localhost dbname=gis" --kind roads roads
+miniverse create --db "host=localhost dbname=gis" --model features:multipolygon buildings
+miniverse import --db "host=localhost dbname=gis" --model features:multipolygon buildings buildings.gpkg
+miniverse create --db "host=localhost dbname=gis" --model raster:int16 elevation --metres 30 --tile-pixels 512 --nodata -32768
+miniverse import --db "host=localhost dbname=gis" --model raster:int16 elevation heights/*.tif
+miniverse verify --db "host=localhost dbname=gis" --model roads roads
 ```
 
 The commands are `create`, `import`, `remove` (a dataset), `verify`, `settings` (a raster table's grid) and `datasets`
 (a table's datasets). The guide's
 [command-line tool](docs/guide.md#the-command-line-tool) section has every option. It is installed with the library,
-into `bin/`. A program with kinds of its own uses the library instead.
+into `bin/`. A program with models of its own uses the library instead.
 
 ## Examples
 
@@ -135,7 +136,7 @@ takes the new database's name and its input files too). Each makes its own table
 | `features` | a feature layer in one line, pushed as a dataset, loaded by polygon, pushed again | database |
 | `road_network` | roads streamed into a graph of the worker's own, with routing | database |
 | `elevation` | a raster table's grid, merged pushes, loads and streams, `value_at` | database |
-| `own_kind` | a layer kind written by hand, with typed columns and its own query | database |
+| `own_model` | a model written by hand, with typed columns and its own query | database |
 | `import_vector` | a vector file pushed in parts into a feature layer | database, gdal |
 | `import_raster` | a raster file warped onto a table's grid, and a load as a GDAL dataset | database, gdal |
 | `import_osm` | an OpenStreetMap extract pushed into a road layer | database, osm |
@@ -151,6 +152,6 @@ beside miniverse's, in `share/doc/miniverse/`.
 ## Documentation
 
 - [docs/guide.md](docs/guide.md): using miniverse, from layers and locations to files and readers of your own.
-- [docs/developer.md](docs/developer.md): how it is put together, how to add a kind, how to build, test and lint.
+- [docs/developer.md](docs/developer.md): how it is put together, how to add a model, how to build, test and lint.
 - The API reference is generated from the headers with Doxygen: `cmake --build build --target miniverse_docs`, then open
   `build/docs/html/index.html`. The headers carry the same comments.

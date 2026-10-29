@@ -21,15 +21,13 @@
 namespace geo = miniverse::geo;
 using schemacht::json::Json;
 
-// A kind of layer is a type, used as a name: two layers of points would be two of these.
-struct Cafes : miniverse::FeatureLayer<geo::Point> {};
-struct Parks : miniverse::FeatureLayer<geo::Polygon> {};
+// A model is a type that is never made; a layer is a name of the program's for a table of it.
+using Cafes = miniverse::Layer<miniverse::FeatureModel<geo::Point>, "cafes">;
+using Parks = miniverse::Layer<miniverse::FeatureModel<geo::Polygon>, "parks">;
 
 int main(int argc, char** argv) {
   try {
-    miniverse::Miniverse world(
-        example::conninfo(argc, argv), miniverse::Layer<Cafes>("miniverse_example_cafes"), miniverse::Layer<Parks>("miniverse_example_parks")
-    );
+    miniverse::Miniverse world(example::conninfo(argc, argv), Cafes("miniverse_example_cafes"), Parks("miniverse_example_parks"));
 
     world.drop_tables();
     world.create_tables();
@@ -39,14 +37,14 @@ int main(int argc, char** argv) {
     // kept, since the database numbers the rows, and a later push of the same dataset replaces it.
     const miniverse::Dataset survey{"town-survey"};
 
-    std::future<void> cafes_written = world.push<Cafes>(
+    std::future<void> cafes_written = world.push<"cafes">(
         survey, {
                     {.id = 1, .geometry = geo::Point(10.004, 50.003), .tags = Json(R"({"name": "The Bandstand", "outdoor_seating": true})")},
                     {.id = 2, .geometry = geo::Point(10.011, 50.002), .tags = Json(R"({"name": "Corner Cup"})")},
                     {.id = 3, .geometry = geo::Point(10.250, 50.100)},  // across town, and without tags
                 }
     );
-    std::future<void> parks_written = world.push<Parks>(
+    std::future<void> parks_written = world.push<"parks">(
         survey, {
                     {
                         .id = 7,
@@ -61,8 +59,8 @@ int main(int argc, char** argv) {
     // What each layer holds in an area: the features that intersect it, in id order. Loaded at once, too.
     const geo::Polygon neighbourhood = example::box(9.990, 49.990, 10.020, 50.010);
 
-    std::future<miniverse::Features<geo::Point>>   cafes_loading = world.load<Cafes>(neighbourhood);
-    std::future<miniverse::Features<geo::Polygon>> parks_loading = world.load<Parks>(neighbourhood);
+    std::future<miniverse::Features<geo::Point>>   cafes_loading = world.load<"cafes">(neighbourhood);
+    std::future<miniverse::Features<geo::Polygon>> parks_loading = world.load<"parks">(neighbourhood);
     const miniverse::Features<geo::Point>          cafes = cafes_loading.get();
     const miniverse::Features<geo::Polygon>        parks = parks_loading.get();
 
@@ -84,11 +82,11 @@ int main(int argc, char** argv) {
     // A second push of the dataset replaces it, all at once: the survey now has two cafes, both with new ids (The Bandstand
     // again, and one that was not there before), and the others are gone. A different dataset would be added beside it instead.
     world
-        .push<Cafes>(
+        .push<"cafes">(
             survey, {{.geometry = geo::Point(10.004, 50.003), .tags = Json(R"({"name": "The Bandstand"})")}, {.geometry = geo::Point(10.006, 50.001)}}
         )
         .get();
-    std::cout << "after the survey is pushed again: " << world.load<Cafes>(neighbourhood).get().size() << " cafes in the neighbourhood\n";
+    std::cout << "after the survey is pushed again: " << world.load<"cafes">(neighbourhood).get().size() << " cafes in the neighbourhood\n";
 
     world.drop_tables();
 

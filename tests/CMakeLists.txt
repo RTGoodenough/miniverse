@@ -20,25 +20,25 @@ include(Catch)
 add_executable(
   miniverse_tests
   compile/layer_test.cpp
-  compile/own_kind_test.cpp
+  compile/own_model_test.cpp
   unit/wkb_test.cpp
   unit/column_type_test.cpp
   unit/layer_test.cpp
-  unit/road_layer_test.cpp
-  unit/feature_layer_test.cpp
+  unit/road_model_test.cpp
+  unit/feature_model_test.cpp
   unit/grid_test.cpp
   unit/raster_test.cpp
   unit/raster_wkb_test.cpp
   unit/raster_reach_test.cpp
   unit/raster_tiles_test.cpp
-  unit/raster_layer_test.cpp
+  unit/raster_model_test.cpp
   unit/reader_test.cpp
   unit/step_thread_test.cpp
   integration/failure_test.cpp
-  integration/feature_layer_test.cpp
+  integration/feature_model_test.cpp
   integration/geometry_test.cpp
   integration/miniverse_test.cpp
-  integration/raster_layer_test.cpp
+  integration/raster_model_test.cpp
   integration/stream_test.cpp
   integration/verify_test.cpp
 )
@@ -104,7 +104,7 @@ endif()
 # Skipped, as the integration tests are, unless MINIVERSE_TEST_DB is set. Each makes and drops its own tables
 # (miniverse_example_*), but they take the integration tests' lock all the same: a raster example pushes with the merge
 # function that a raster test drops.
-foreach(example features road_network elevation own_kind import_vector import_raster import_osm local_files)
+foreach(example features road_network elevation own_model import_vector import_raster import_osm local_files)
   if(TARGET miniverse_example_${example})
     add_test(NAME example.${example} COMMAND ${CMAKE_COMMAND} -DEXAMPLE=$<TARGET_FILE:miniverse_example_${example}> -P
                                              ${CMAKE_CURRENT_SOURCE_DIR}/run_example.cmake)
@@ -123,6 +123,8 @@ function(miniverse_compile_fail case regex)
   add_library(compile_fail_${case} OBJECT EXCLUDE_FROM_ALL compile_fail/cases.cpp)
   target_link_libraries(compile_fail_${case} PRIVATE miniverse::miniverse)
   target_compile_definitions(compile_fail_${case} PRIVATE CASE_${case})
+  # GCC names the failing requirement of a nested concept only when asked; clang does so by default.
+  target_compile_options(compile_fail_${case} PRIVATE $<$<CXX_COMPILER_ID:GNU>:-fconcepts-diagnostics-depth=3>)
   miniverse_checks(compile_fail_${case})
 
   add_test(NAME compile_fail.${case} COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --config $<CONFIG> --target compile_fail_${case})
@@ -132,12 +134,16 @@ endfunction()
 miniverse_compile_fail(LOAD_LAYER_NOT_HELD "this miniverse has no such layer")
 miniverse_compile_fail(STREAM_LAYER_NOT_HELD "this miniverse has no such layer")
 miniverse_compile_fail(PUSH_LAYER_NOT_HELD "this miniverse has no such layer")
-miniverse_compile_fail(DUPLICATE_KIND "a miniverse holds one layer of each kind")
+miniverse_compile_fail(DUPLICATE_NAME "two layers of the miniverse have one name")
+miniverse_compile_fail(DUPLICATE_NAME_ACROSS_MODELS "two layers of the miniverse have one name")
+miniverse_compile_fail(NOT_A_LAYER "IsLayer")
 miniverse_compile_fail(NO_LAYERS "a miniverse holds at least one layer")
 miniverse_compile_fail(PUSH_NEEDS_DATASET "rows belong to a dataset")
-miniverse_compile_fail(PUSH_TAKES_NO_DATASET "this kind has no datasets")
-miniverse_compile_fail(CREATE_TABLES_NEED_SETTINGS "call create_table<Kind>\\(settings\\) for it")
+miniverse_compile_fail(PUSH_TAKES_NO_DATASET "has no datasets")
+miniverse_compile_fail(CREATE_TABLES_NEED_SETTINGS "call create_table<.name.>\\(settings\\) for")
 miniverse_compile_fail(NO_LAYOUT "LAYOUT")
+miniverse_compile_fail(NO_WRITES "model_t::writes")
+miniverse_compile_fail(DATASETS_WITHOUT_COLUMNS "has_column")
 
 # ==============================================================================
 # Formatting

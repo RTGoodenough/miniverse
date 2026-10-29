@@ -17,11 +17,12 @@
 #include "schemacht/postgres/statements.hpp"
 #include "schemacht/postgres/transaction.hpp"
 #include "schemacht/schema/table.hpp"
+#include "schemacht/schema/table_name.hpp"
 #include "schemacht/util/futures.hpp"
 
 /**
  * @file
- * What a kind with datasets adds to a push, and removing and listing datasets: the stamp a push marks its rows with, the lock
+ * What a model with datasets adds to a push, and removing and listing datasets: the stamp a push marks its rows with, the lock
  * that keeps two pushes of one dataset from running at once, the sweep that deletes the dataset's rows a push did not write
  * (and then records the push in the registry), the delete of a dataset whole, and the list of a table's datasets.
  */
@@ -31,25 +32,29 @@ namespace miniverse::detail {
 [[nodiscard]] std::int64_t stamp();
 
 /**
- * @brief Takes an advisory lock on `dataset`'s name in `transaction`, held until it ends, and waits for it: two pushes of one
- * dataset then run one after the other. Run at the same time, each would sweep only what the other had committed before it
- * began, and both exports would stay in the table. Pushes of different datasets run side by side.
+ * @brief Takes an advisory lock on `dataset` in `table` (`writes::Datasets::lock_key`) in `transaction`, held until it ends, and
+ * waits for it: two pushes of one dataset then run one after the other. Run at the same time, each would sweep only what the
+ * other had committed before it began, and both exports would stay in the table. Pushes of different datasets, or of one
+ * dataset's name into different tables, run side by side.
  */
-inline void lock_dataset(schemacht::postgres::Transaction& transaction, const Dataset& dataset) {
-  std::ignore = transaction.execute(schemacht::postgres::unchecked_sql("SELECT pg_advisory_xact_lock(hashtext($1))", dataset.name)).get();
+inline void lock_dataset(schemacht::postgres::Transaction& transaction, const schemacht::schema::TableName& table, const Dataset& dataset) {
+  std::ignore =
+      transaction
+          .execute(schemacht::postgres::unchecked_sql("SELECT pg_advisory_xact_lock(hashtext($1))", writes::Datasets::lock_key(table, dataset)))
+          .get();
 }
 
 /**
- * @return What a push of `dataset` runs before it commits: the kind's sweep, which deletes the dataset's rows in `table` whose
+ * @return What a push of `dataset` runs before it commits: the policy's sweep, which deletes the dataset's rows in `table` whose
  * stamp is not `stamp`, this push's, and then the record of the push in the registry. A row the push wrote again (a
- * `RoadLayer`'s way, by its id) is kept, with the new stamp.
+ * `RoadModel`'s way, by its id) is kept, with the new stamp.
  */
-template <HasDatasets kind_t>
+template <WritesDatasets model_t>
 [[nodiscard]] std::function<void(schemacht::postgres::Transaction&)> sweep_of(
-    const schemacht::schema::Table<typename kind_t::schema_type>& table, const Dataset& dataset, std::int64_t stamp
+    const schemacht::schema::Table<typename model_t::schema_type>& table, const Dataset& dataset, std::int64_t stamp
 ) {
   return [&table, name = dataset.name, stamp](schemacht::postgres::Transaction& transaction) {
-    std::ignore = transaction.execute(kind_t::sweep_statement_type::bind(name, stamp).on(table)).get();
+    std::ignore = transaction.execute(model_t::writes::template sweep<typename model_t::schema_type>::bind(name, stamp).on(table)).get();
     std::ignore = transaction.execute(registry::dataset_pushed(registry::name_of(table.name()), name, stamp)).get();
   };
 }
@@ -59,14 +64,15 @@ template <HasDatasets kind_t>
  * forgetting of the dataset in one transaction, under the dataset's lock, so that it takes turns with a push of the dataset,
  * on a thread started for it. See `Miniverse::remove`.
  */
-template <HasDatasets kind_t>
+template <WritesDatasets model_t>
 [[nodiscard]] std::future<std::uint64_t> remove(
-    schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table, const Dataset& dataset
+    schemacht::postgres::Database& database, const schemacht::schema::Table<typename model_t::schema_type>& table, const Dataset& dataset
 ) {
   return on_a_thread([&database, &table, dataset] {
     schemacht::postgres::Transaction transaction = database.begin().get();
-    lock_dataset(transaction, dataset);
-    const std::uint64_t removed = transaction.execute(kind_t::remove_statement_type::bind(dataset.name).on(table)).get();
+    lock_dataset(transaction, table.name(), dataset);
+    const std::uint64_t removed =
+        transaction.execute(model_t::writes::template remove<typename model_t::schema_type>::bind(dataset.name).on(table)).get();
     std::ignore = transaction.execute(registry::dataset_removed(registry::name_of(table.name()), dataset.name)).get();
     transaction.commit().get();
 
@@ -78,9 +84,9 @@ template <HasDatasets kind_t>
  * @return A future for the datasets of `table`, by name, each with when it was last pushed and its rows counted now, read on
  * a thread started for it. See `Miniverse::datasets`.
  */
-template <HasDatasets kind_t>
+template <WritesDatasets model_t>
 [[nodiscard]] std::future<std::vector<DatasetInfo>> datasets(
-    schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table
+    schemacht::postgres::Database& database, const schemacht::schema::Table<typename model_t::schema_type>& table
 ) {
   return on_a_thread([&database, &table] {
     const std::string name = registry::name_of(table.name());

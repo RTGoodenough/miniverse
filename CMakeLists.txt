@@ -54,11 +54,11 @@ add_library(
   STATIC
   src/geo/raster_wkb.cpp
   src/geo/wkb.cpp
-  src/layer/feature_layer.cpp
-  src/layer/raster/reach.cpp
-  src/layer/raster/tiles.cpp
-  src/layer/raster_layer.cpp
-  src/layer/road_layer.cpp
+  src/model/feature_model.cpp
+  src/model/raster/reach.cpp
+  src/model/raster/tiles.cpp
+  src/model/raster_model.cpp
+  src/model/road_model.cpp
   src/world/datasets.cpp
 )
 

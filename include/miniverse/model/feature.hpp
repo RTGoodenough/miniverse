@@ -8,7 +8,7 @@
 
 /**
  * @file
- * A feature: what a load of a `FeatureLayer` gives, one by one, and what a reader of features hands over.
+ * A feature: what a load of a `FeatureModel` gives, one by one, and what a reader of features hands over.
  */
 namespace miniverse {
 

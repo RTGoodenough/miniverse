@@ -7,17 +7,17 @@
 
 #include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer/feature.hpp"
+#include "miniverse/model/feature.hpp"
 
 /**
  * @file
  * Vector files as features, read with GDAL's OGR: a GeoPackage, a shapefile, GeoJSON, or anything else OGR opens, as the
- * `Features` a `FeatureLayer` is pushed, or read in its place (feature_file.hpp).
+ * `Features` a `FeatureModel` is pushed, or read in its place (feature_file.hpp).
  *
  * @code
- * struct Buildings : miniverse::FeatureLayer<miniverse::geo::MultiPolygon> {};
+ * using Buildings = miniverse::Layer<miniverse::FeatureModel<miniverse::geo::MultiPolygon>, "buildings">;
  *
- * auto parts = world.begin_push<Buildings>(miniverse::Dataset{"buildings.gpkg"}).get();
+ * auto parts = world.begin_push<"buildings">(miniverse::Dataset{"buildings.gpkg"}).get();
  * miniverse::gdal::read_features<miniverse::geo::MultiPolygon>({.path = "buildings.gpkg"}, 10000, [&](auto buildings) {
  *   parts.add(std::move(buildings)).get();  // a chunk at a time, so the file is not held whole
  * });

@@ -29,7 +29,7 @@
 namespace geo = miniverse::geo;
 using schemacht::json::Json;
 
-struct Roads : miniverse::RoadLayer {};
+using Roads = miniverse::Layer<miniverse::RoadModel, "roads">;
 
 // The worker's own structure.
 
@@ -129,12 +129,12 @@ void add_road(RoadNetwork& network, const miniverse::Way& road) {
 
 int main(int argc, char** argv) {
   try {
-    miniverse::Miniverse world(example::conninfo(argc, argv), miniverse::Layer<Roads>("miniverse_example_roads"));
+    miniverse::Miniverse world(example::conninfo(argc, argv), Roads("miniverse_example_roads"));
 
     // The uploader's part, done once, somewhere else: examples/import_osm.cpp fills a road table from an OpenStreetMap file.
     world.drop_tables();
     world.create_tables();
-    world.push<Roads>(miniverse::Dataset{"village"}, village()).get();
+    world.push<"roads">(miniverse::Dataset{"village"}, village()).get();
 
     // The worker's part. When it starts: is the table there, and is it a road table? One that is not fails here, with a
     // `miniverse::TablesDiffer` that says how each table differs.
@@ -149,7 +149,7 @@ int main(int argc, char** argv) {
     std::size_t        chunks = 0;
 
     world
-        .stream<Roads>(
+        .stream<"roads">(
             area,
             [&network, &roads, &chunks](const miniverse::Ways& chunk) {
               for ( const miniverse::Way& road : chunk ) {

@@ -17,8 +17,8 @@
  * @file
  * What a database remembers about its layers, in two tables of `INTERNAL_SCHEMA`: `layers`, which tables are layers and the
  * layout each was made with, for `Miniverse::verify` to tell a table of another layout from one edited by hand; and
- * `datasets`, the datasets each holds and when each was last pushed, for `Miniverse::datasets`. A layer's `kind` is its
- * schema's placeholder name (`features`, `roads`, `raster`), for a reader of the table. The registry's own tables have no
+ * `datasets`, the datasets each holds and when each was last pushed, for `Miniverse::datasets`. The column `kind` of `layers`
+ * holds the model's schema placeholder name (`features`, `roads`, `raster`), for a reader of the table. The registry's own tables have no
  * layout number: their layout is fixed.
  */
 namespace miniverse {
@@ -63,13 +63,13 @@ namespace registry {
   return table.schema_name().empty() ? table.name() : table.schema_name() + "." + table.name();
 }
 
-/** @return The statement that records `table` as a layer of `kind`, made now with `layout`, over any earlier record of it. */
-[[nodiscard]] inline schemacht::postgres::UncheckedSql registered(const std::string& table, std::string_view kind, std::int32_t layout) {
+/** @return The statement that records `table` as a layer of `model`, made now with `layout`, over any earlier record of it. */
+[[nodiscard]] inline schemacht::postgres::UncheckedSql registered(const std::string& table, std::string_view model, std::int32_t layout) {
   return schemacht::postgres::unchecked_sql(
       "INSERT INTO " + std::string(INTERNAL_SCHEMA) +
           ".layers (table_name, kind, layout, created) VALUES ($1, $2, $3, now()) "
           "ON CONFLICT (table_name) DO UPDATE SET kind = EXCLUDED.kind, layout = EXCLUDED.layout, created = EXCLUDED.created",
-      table, std::string(kind), layout
+      table, std::string(model), layout
   );
 }
 
@@ -119,7 +119,7 @@ using DatasetRows = schemacht::query::RawStatement<
     schemacht::schema::Field<std::string, "dataset">, schemacht::schema::Field<std::int64_t, "row_count">>;
 
 /**
- * @return What `verify` says of a layer whose registry row holds `found` (none: no row, or no registry at all) when its kind
+ * @return What `verify` says of a layer whose registry row holds `found` (none: no row, or no registry at all) when its model
  * is at layout `wanted`; nothing if they agree.
  */
 [[nodiscard]] inline std::optional<std::string> layout_problem(std::optional<std::int32_t> found, std::int32_t wanted) {

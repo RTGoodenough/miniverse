@@ -23,13 +23,13 @@
 
 /**
  * @file
- * The checks of a `Miniverse::verify`: each layer's table against the registry's record of it, then its kind's schema and
+ * The checks of a `Miniverse::verify`: each layer's table against the registry's record of it, then its model's schema and
  * settings, or its reader asked for its problems, all at once, settled together as one `TablesDiffer` naming every difference.
  */
 namespace miniverse {
 
 /**
- * @brief What `Miniverse::verify` fails with when a layer's table is not as its kind says, or its reader finds something wrong
+ * @brief What `Miniverse::verify` fails with when a layer's table is not as its model says, or its reader finds something wrong
  * with what it reads: every difference of every layer, as lines of `what()` and one by one in `differences()`. A check that
  * could not be run at all fails with its own error.
  */
@@ -66,7 +66,7 @@ namespace detail {
 /** @brief The checks of a `verify` while they run, a layer each on any thread: what each found, and the future they settle together. */
 class Checks {
  public:
-  /** @param tables The layers' names (`Layer::name`), in the layers' order: what a difference is said of. */
+  /** @param tables Where the layers are (`Layer::source`), in the layers' order: what a difference is said of. */
   Checks(std::vector<std::string> tables, schemacht::util::Settler<void> done)
       : _tables(std::move(tables)), _problems(_tables.size()), _pending(_tables.size()), _done(std::move(done)) {}
 
@@ -131,18 +131,18 @@ class Checks {
 };
 
 /**
- * @brief Reads the settings of `table`, whose columns are the kind's, and tells `checks` why if it can't; if it can,
+ * @brief Reads the settings of `table`, whose columns are the model's, and tells `checks` why if it can't; if it can,
  * `unregistered` (what the registry had to say, if anything) is the one problem.
  */
-template <HasSettings kind_t>
+template <WritesSettings model_t>
 void check_settings(
-    schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table,
+    schemacht::postgres::Database& database, const schemacht::schema::Table<typename model_t::schema_type>& table,
     const std::shared_ptr<Checks>& checks, std::size_t layer_number, std::optional<std::string> unregistered
 ) {
   try {
     database.execute(
-        settings_statement<kind_t>(table.name()),
-        [checks, layer_number, unregistered = std::move(unregistered)](SettingsRows<kind_t> rows, const std::exception_ptr& error) {
+        settings_statement<model_t>(table.name()),
+        [checks, layer_number, unregistered = std::move(unregistered)](SettingsRows<model_t> rows, const std::exception_ptr& error) {
           if ( error ) {
             checks->finish(layer_number, {}, error);
             return;
@@ -152,7 +152,7 @@ void check_settings(
           std::vector<std::string> problems;
           std::exception_ptr       failed;
           try {
-            std::ignore = kind_t::settings_from_rows(std::move(rows));
+            std::ignore = model_t::settings_from_rows(std::move(rows));
             if ( unregistered ) {
               problems.push_back(*unregistered);
             }
@@ -171,18 +171,18 @@ void check_settings(
 }
 
 /**
- * @brief Checks `table`'s columns against its kind's schema, then its settings if the kind has any, and tells `checks`. A
- * table that is as its kind says in both has `unregistered` (what the registry had to say, if anything) as its one problem:
- * a table that is not there, or not the kind's, is told that instead.
+ * @brief Checks `table`'s columns against its model's schema, then its settings if the model has any, and tells `checks`. A
+ * table that is as its model says in both has `unregistered` (what the registry had to say, if anything) as its one problem:
+ * a table that is not there, or not the model's, is told that instead.
  */
-template <LayerKind kind_t>
+template <LayerModel model_t>
 void check_columns(
-    schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table,
+    schemacht::postgres::Database& database, const schemacht::schema::Table<typename model_t::schema_type>& table,
     const std::shared_ptr<Checks>& checks, std::size_t layer_number, std::optional<std::string> unregistered
 ) {
   try {
     database.execute(
-        schemacht::postgres::table_differences_statement<typename kind_t::schema_type>().on(table),
+        schemacht::postgres::table_differences_statement<typename model_t::schema_type>().on(table),
         [&, checks, layer_number, unregistered = std::move(unregistered)](
             const std::vector<schemacht::postgres::TableDifference>& differences, const std::exception_ptr& error
         ) {
@@ -193,9 +193,9 @@ void check_columns(
 
           // Only a table whose columns match is asked for its settings: for one that differs, the differences say enough, and
           // the question may not even be answerable (no raster type, so no `raster_columns`).
-          if constexpr ( HasSettings<kind_t> ) {
+          if constexpr ( WritesSettings<model_t> ) {
             if ( differences.empty() ) {
-              check_settings<kind_t>(database, table, checks, layer_number, unregistered);
+              check_settings<model_t>(database, table, checks, layer_number, unregistered);
               return;
             }
           }
@@ -243,14 +243,14 @@ void check_columns(
 }
 
 /**
- * @brief Checks `table` against the registry's record of it, then against its kind's schema and settings, and tells `checks`:
+ * @brief Checks `table` against the registry's record of it, then against its model's schema and settings, and tells `checks`:
  * a table of another layout is told that alone; one the registry does not know is told what its columns say, or, if they say
  * nothing, that it is not in the registry. `database` and `table` are used after it returns: both must outlive the check, as
  * the miniverse's do.
  */
-template <LayerKind kind_t>
+template <LayerModel model_t>
 void check_table(
-    schemacht::postgres::Database& database, const schemacht::schema::Table<typename kind_t::schema_type>& table,
+    schemacht::postgres::Database& database, const schemacht::schema::Table<typename model_t::schema_type>& table,
     const std::shared_ptr<Checks>& checks, std::size_t layer_number
 ) {
   try {
@@ -260,7 +260,7 @@ void check_table(
           // Exactly one `finish` per layer: a throw out of this callback would leave the checks waiting for it.
           std::optional<std::string> problem;
           try {
-            problem = registry_problem(rows, error, kind_t::LAYOUT);
+            problem = registry_problem(rows, error, model_t::LAYOUT);
           } catch ( ... ) {
             checks->finish(layer_number, {}, std::current_exception());
             return;
@@ -271,7 +271,7 @@ void check_table(
             return;
           }
 
-          check_columns<kind_t>(database, table, checks, layer_number, std::move(problem));
+          check_columns<model_t>(database, table, checks, layer_number, std::move(problem));
         }
     );
   } catch ( ... ) {
@@ -280,8 +280,8 @@ void check_table(
 }
 
 /** @brief Asks `reader` for its problems, on the calling thread, and tells `checks`. */
-template <LayerKind kind_t>
-void check_reader(const std::shared_ptr<const Reader<kind_t>>& reader, const std::shared_ptr<Checks>& checks, std::size_t layer_number) {
+template <LayerModel model_t>
+void check_reader(const std::shared_ptr<const Reader<model_t>>& reader, const std::shared_ptr<Checks>& checks, std::size_t layer_number) {
   std::vector<std::string> problems;
   std::exception_ptr       failed;
   try {

@@ -23,22 +23,22 @@ namespace miniverse::gdal {
 namespace detail {
 
 /**
- * @brief The reader of a vector file as a layer of `kind_t`, behind `feature_file`. A load gives the file's features that
+ * @brief The reader of a vector file as a layer of `model_t`, behind `feature_file`. A load gives the file's features that
  * intersect the location, in the file's order, with their tags as `read_features` writes them. Each load opens the file for
  * itself, so loads run side by side.
  */
-template <FeatureKind kind_t>
-class FeatureFile : public Reader<kind_t> {
+template <ReadsFeatures model_t>
+class FeatureFile : public Reader<model_t> {
  public:
   explicit FeatureFile(VectorSource source) : _source(std::move(source)) {}
 
   [[nodiscard]] std::string name() const override { return "'" + _source.path + "'"; }
 
-  [[nodiscard]] typename kind_t::result_type load(const geo::Polygon& location) const override {
-    typename kind_t::result_type all;
+  [[nodiscard]] typename model_t::result_type load(const geo::Polygon& location) const override {
+    typename model_t::result_type all;
 
     // One chunk, of however many there are.
-    std::ignore = read_features_in<GeometryOf<kind_t>>(_source, location, std::numeric_limits<std::size_t>::max(), [&all](auto chunk) {
+    std::ignore = read_features_in<GeometryOf<model_t>>(_source, location, std::numeric_limits<std::size_t>::max(), [&all](auto chunk) {
       all = std::move(chunk);
 
       return true;
@@ -47,11 +47,11 @@ class FeatureFile : public Reader<kind_t> {
     return all;
   }
 
-  void stream(const geo::Polygon& location, std::size_t chunk_rows, const Reader<kind_t>::OnChunk& on_chunk) const override {
-    std::ignore = read_features_in<GeometryOf<kind_t>>(_source, location, chunk_rows, on_chunk);
+  void stream(const geo::Polygon& location, std::size_t chunk_rows, const Reader<model_t>::OnChunk& on_chunk) const override {
+    std::ignore = read_features_in<GeometryOf<model_t>>(_source, location, chunk_rows, on_chunk);
   }
 
-  [[nodiscard]] std::vector<std::string> problems() const override { return problems_of<GeometryOf<kind_t>>(_source); }
+  [[nodiscard]] std::vector<std::string> problems() const override { return problems_of<GeometryOf<model_t>>(_source); }
 
  private:
   VectorSource _source;
@@ -67,18 +67,21 @@ class FeatureFile : public Reader<kind_t> {
 }  // namespace detail
 
 /**
- * @return The layer of `kind_t` that is `source`, a vector file, read in place of a table:
+ * @return The layer `layer_t`, of a model of features, that is `source`, a vector file, read in place of a table:
  *
  * @code
+ * using Buildings = miniverse::Layer<miniverse::FeatureModel<miniverse::geo::MultiPolygon>, "buildings">;
+ *
  * miniverse::Miniverse world(miniverse::gdal::feature_file<Buildings>({.path = "buildings.gpkg"}));
- * world.load<Buildings>(area).get();  // the file's buildings that intersect the area
+ * world.load<"buildings">(area).get();  // the file's buildings that intersect the area
  * @endcode
  *
  * The file is first opened by a load, or by `Miniverse::verify`, which says what is wrong with it.
  */
-template <FeatureKind kind_t>
-[[nodiscard]] Layer<kind_t> feature_file(VectorSource source) {
-  return Layer<kind_t>(std::make_shared<detail::FeatureFile<kind_t>>(std::move(source)));
+template <IsLayer layer_t>
+  requires ReadsFeatures<typename layer_t::model_type>
+[[nodiscard]] layer_t feature_file(VectorSource source) {
+  return layer_t(std::make_shared<detail::FeatureFile<typename layer_t::model_type>>(std::move(source)));
 }
 
 }  // namespace miniverse::gdal

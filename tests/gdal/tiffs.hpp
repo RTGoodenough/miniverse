@@ -1,7 +1,7 @@
 #pragma once
 
 // GeoTIFFs made with GDAL for the raster tests, on the coarse grid they are read onto: four pixels to a degree, in tiles of
-// one degree, with a kind of that grid and the helpers that number, roughen and order pixels.
+// one degree, with a layer on that grid and the helpers that number, roughen and order pixels.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -27,7 +27,8 @@
 #include "miniverse/geo/concepts/raster.hpp"
 #include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/raster.hpp"
-#include "miniverse/layer/raster_layer.hpp"
+#include "miniverse/layer.hpp"
+#include "miniverse/model/raster_model.hpp"
 
 namespace test {
 
@@ -38,7 +39,7 @@ constexpr std::int16_t FILE_NODATA = -9999;
 
 constexpr miniverse::geo::Grid<std::int16_t> GRID{.pixels_per_degree = 4, .tile_pixels = 4, .nodata = GRID_NODATA};
 
-struct Elevation : miniverse::RasterLayer<std::int16_t> {};
+using Elevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "elevation">;
 
 /** @brief Where a GeoTIFF lies and what it holds. */
 template <miniverse::geo::Pixel pixel_t = std::int16_t>

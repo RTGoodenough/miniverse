@@ -1,6 +1,6 @@
 #pragma once
 
-// What a load or a kind's `to_rows` gives, reduced for a check: the ids of features or ways, and the rows of batches in order.
+// What a load or a model's `to_rows` gives, reduced for a check: the ids of features or ways, and the rows of batches in order.
 
 #include <concepts>
 #include <cstdint>

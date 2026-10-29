@@ -10,23 +10,26 @@
 #include <vector>
 
 #include "commands.hpp"
-#include "kinds.hpp"
 #include "layer_of.hpp"
 #include "miniverse/dataset.hpp"
 #include "miniverse/geo/concepts/raster.hpp"
 #include "miniverse/geo/concepts/wkb.hpp"
+#include "miniverse/model/feature_model.hpp"
+#include "miniverse/model/raster_model.hpp"
+#include "miniverse/model/road_model.hpp"
 #include "miniverse/world.hpp"
+#include "models.hpp"
 
 #if MINIVERSE_TOOL_GDAL
 #include "miniverse/gdal/raster.hpp"
 #include "miniverse/gdal/vector.hpp"
 #include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/raster.hpp"
-#include "miniverse/layer/feature.hpp"
+#include "miniverse/model/feature.hpp"
 #endif
 
 #if MINIVERSE_TOOL_OSM
-#include "miniverse/layer/way.hpp"
+#include "miniverse/model/way.hpp"
 #include "miniverse/osm/ways.hpp"
 #endif
 
@@ -37,11 +40,11 @@ namespace {
 constexpr std::size_t PART_FEATURES = 10'000;
 constexpr std::size_t WINDOW_TILES = 2;
 
-/** @brief Throws if `option`, called `name`, is given: it is not for a table of `kind`. */
+/** @brief Throws if `option`, called `name`, is given: it is not for a table of `model`. */
 template <typename value_t>
-void refuse(const std::optional<value_t>& option, const std::string& name, const std::string& kind) {
+void refuse(const std::optional<value_t>& option, const std::string& name, const std::string& model) {
   if ( option ) {
-    throw std::invalid_argument("--" + name + " is not for a table of " + kind);
+    throw std::invalid_argument("--" + name + " is not for a table of " + model);
   }
 }
 
@@ -62,13 +65,13 @@ struct OneFile {
 };
 
 /**
- * @return The one file of `options`, for a table of `kind`. Its dataset is `options.dataset`, or else the file's name (a
+ * @return The one file of `options`, for a table of `model`. Its dataset is `options.dataset`, or else the file's name (a
  * directory's, for a path that ends in a separator).
  * @throws std::invalid_argument for another number of files, or a dataset of no name.
  */
-[[nodiscard]] OneFile one_file_of(const ImportOptions& options, const std::string& kind) {
+[[nodiscard]] OneFile one_file_of(const ImportOptions& options, const std::string& model) {
   if ( options.files.size() != 1 ) {
-    throw std::invalid_argument("a table of " + kind + " takes one file at a time, not " + std::to_string(options.files.size()));
+    throw std::invalid_argument("a table of " + model + " takes one file at a time, not " + std::to_string(options.files.size()));
   }
 
   const std::string&    path = options.files.front();
@@ -85,21 +88,21 @@ struct OneFile {
 }
 
 template <geo::wkb::Geometry geometry_t>
-void import_into(std::type_identity<Features<geometry_t>> /*kind*/, const Table& table, const ImportOptions& options) {
-  using Kind = Features<geometry_t>;
+void import_into(std::type_identity<miniverse::FeatureModel<geometry_t>> /*model*/, const Table& table, const ImportOptions& options) {
+  using Model = miniverse::FeatureModel<geometry_t>;
 
-  refuse(options.keys, "keys", table.kind);
-  refuse(options.band, "band", table.kind);
-  refuse(options.resampling, "resampling", table.kind);
-  refuse(options.window_tiles, "window-tiles", table.kind);
+  refuse(options.keys, "keys", table.model);
+  refuse(options.band, "band", table.model);
+  refuse(options.resampling, "resampling", table.model);
+  refuse(options.window_tiles, "window-tiles", table.model);
 
 #if MINIVERSE_TOOL_GDAL
-  const OneFile file = one_file_of(options, table.kind);
+  const OneFile file = one_file_of(options, table.model);
 
-  miniverse::Miniverse world(table.conninfo, layer_of<Kind>(table.name));
-  world.verify().get();  // a table of another kind is refused before anything is read
+  miniverse::Miniverse world(table.conninfo, layer_of<Model>(table.name));
+  world.verify().get();  // a table of another model is refused before anything is read
 
-  miniverse::PushInParts<Kind>      parts = world.template begin_push<Kind>(file.dataset).get();
+  miniverse::PushInParts<Model>     parts = world.template begin_push<"table">(file.dataset).get();
   const miniverse::gdal::VectorRead read = miniverse::gdal::read_features<geometry_t>(
       {.path = file.path, .layer = options.layer.value_or(""), .id_field = {}}, file.chunk,
       [&parts](miniverse::Features<geometry_t> chunk) { parts.add(std::move(chunk)).get(); }
@@ -113,20 +116,20 @@ void import_into(std::type_identity<Features<geometry_t>> /*kind*/, const Table&
 #endif
 }
 
-void import_into(std::type_identity<Roads> /*kind*/, const Table& table, const ImportOptions& options) {
-  refuse(options.layer, "layer", table.kind);
-  refuse(options.band, "band", table.kind);
-  refuse(options.resampling, "resampling", table.kind);
-  refuse(options.window_tiles, "window-tiles", table.kind);
+void import_into(std::type_identity<miniverse::RoadModel> /*model*/, const Table& table, const ImportOptions& options) {
+  refuse(options.layer, "layer", table.model);
+  refuse(options.band, "band", table.model);
+  refuse(options.resampling, "resampling", table.model);
+  refuse(options.window_tiles, "window-tiles", table.model);
 
 #if MINIVERSE_TOOL_OSM
-  const OneFile file = one_file_of(options, table.kind);
+  const OneFile file = one_file_of(options, table.model);
 
-  miniverse::Miniverse world(table.conninfo, layer_of<Roads>(table.name));
+  miniverse::Miniverse world(table.conninfo, layer_of<miniverse::RoadModel>(table.name));
   world.verify().get();
 
-  miniverse::PushInParts<Roads> parts = world.begin_push<Roads>(file.dataset).get();
-  const miniverse::osm::WayRead read = miniverse::osm::read_ways(
+  miniverse::PushInParts<miniverse::RoadModel> parts = world.begin_push<"table">(file.dataset).get();
+  const miniverse::osm::WayRead                read = miniverse::osm::read_ways(
       {.path = file.path, .keys = options.keys.value_or(std::vector<std::string>{"highway"})}, file.chunk,
       [&parts](miniverse::Ways chunk) { parts.add(std::move(chunk)).get(); }
   );
@@ -160,13 +163,13 @@ void import_into(std::type_identity<Roads> /*kind*/, const Table& table, const I
 #endif
 
 template <geo::Pixel pixel_t>
-void import_into(std::type_identity<Raster<pixel_t>> /*kind*/, const Table& table, const ImportOptions& options) {
-  using Kind = Raster<pixel_t>;
+void import_into(std::type_identity<miniverse::RasterModel<pixel_t>> /*model*/, const Table& table, const ImportOptions& options) {
+  using Model = miniverse::RasterModel<pixel_t>;
 
-  refuse(options.dataset, "dataset", table.kind + " (a raster table has no datasets: a push merges into it)");
-  refuse(options.layer, "layer", table.kind);
-  refuse(options.keys, "keys", table.kind);
-  refuse(options.chunk, "chunk", table.kind + " (its parts are windows: --window-tiles)");
+  refuse(options.dataset, "dataset", table.model + " (a raster table has no datasets: a push merges into it)");
+  refuse(options.layer, "layer", table.model);
+  refuse(options.keys, "keys", table.model);
+  refuse(options.chunk, "chunk", table.model + " (its parts are windows: --window-tiles)");
 
 #if MINIVERSE_TOOL_GDAL
   if ( options.files.empty() ) {
@@ -178,9 +181,9 @@ void import_into(std::type_identity<Raster<pixel_t>> /*kind*/, const Table& tabl
     resampling = resampling_of(*options.resampling);
   }
 
-  miniverse::Miniverse world(table.conninfo, layer_of<Kind>(table.name));
+  miniverse::Miniverse world(table.conninfo, layer_of<Model>(table.name));
   world.verify().get();
-  const geo::Grid<pixel_t> grid = world.template table_settings<Kind>().get();
+  const geo::Grid<pixel_t> grid = world.template table_settings<"table">().get();
 
   // Each file a push of its own, all of it or none; where files overlap, the later one's data is what the table has.
   for ( const std::string& path : options.files ) {
@@ -189,7 +192,7 @@ void import_into(std::type_identity<Raster<pixel_t>> /*kind*/, const Table& tabl
     source.resampling = resampling.value_or(source.resampling);
 
     try {
-      miniverse::PushInParts<Kind>      parts = world.template begin_push<Kind>().get();
+      miniverse::PushInParts<Model>     parts = world.template begin_push<"table">().get();
       const miniverse::gdal::RasterRead read = miniverse::gdal::read_raster<pixel_t>(
           source, grid, window_tiles, [&parts](geo::Raster<pixel_t> window) { parts.add(std::move(window)).get(); }
       );
@@ -208,7 +211,7 @@ void import_into(std::type_identity<Raster<pixel_t>> /*kind*/, const Table& tabl
 }  // namespace
 
 void import(const Table& table, const ImportOptions& options) {
-  with_kind(table.kind, [&]<typename kind_t>(std::type_identity<kind_t> kind) { import_into(kind, table, options); });
+  with_model(table.model, [&]<typename model_t>(std::type_identity<model_t> model) { import_into(model, table, options); });
 }
 
 }  // namespace tool

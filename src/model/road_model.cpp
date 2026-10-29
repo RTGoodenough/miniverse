@@ -1,4 +1,4 @@
-#include "miniverse/layer/road_layer.hpp"
+#include "miniverse/model/road_model.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -10,17 +10,17 @@
 
 #include "miniverse/dataset.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer/dataset_columns.hpp"
+#include "miniverse/model/dataset_columns.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/table_name.hpp"
 
 namespace miniverse {
 
-std::vector<std::string> RoadLayer::setup_sql(const schemacht::schema::TableName& table) {
-  return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)", dataset::index_sql(table)};
+std::vector<std::string> RoadModel::setup_sql(const schemacht::schema::TableName& table) {
+  return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)"};
 }
 
-std::vector<std::vector<RoadLayer::insert_row_type>> RoadLayer::to_rows(Ways ways, const Dataset& dataset, std::int64_t stamp) {
+std::vector<std::vector<RoadModel::insert_row_type>> RoadModel::to_rows(Ways ways, const Dataset& dataset, std::int64_t stamp) {
   std::vector<std::vector<insert_row_type>> batches;
 
   for ( std::size_t i = 0; i < ways.size(); ++i ) {
@@ -45,7 +45,7 @@ std::vector<std::vector<RoadLayer::insert_row_type>> RoadLayer::to_rows(Ways way
   return batches;
 }
 
-Ways RoadLayer::from_rows(std::vector<load_statement_type::result_type> rows, const geo::Polygon& /*location*/) {
+Ways RoadModel::from_rows(std::vector<load_statement_type::result_type> rows, const geo::Polygon& /*location*/) {
   Ways ways;
 
   ways.reserve(rows.size());

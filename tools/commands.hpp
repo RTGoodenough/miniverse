@@ -10,14 +10,14 @@
  * @file
  * What each of the tool's commands takes and does, on one table of a database. Each writes what it did to standard output,
  * and throws what went wrong: `std::invalid_argument` for arguments it can't take, before it connects. An option for
- * another kind of table than the one named is one of those.
+ * a table of another model than the one named is one of those.
  */
 namespace tool {
 
-/** @brief The table a command acts on: where it is, and the kind of layer it holds (a name of `kind_names`). */
+/** @brief The table a command acts on: where it is, and the model of the layer it holds (a name of `model_names`). */
 struct Table {
   std::string conninfo;  ///< A libpq connection string; empty for libpq's defaults and PG* variables.
-  std::string kind;
+  std::string model;
   std::string name;  ///< `table`, in the connection's search path, or `schema.table`.
 };
 
@@ -26,7 +26,7 @@ struct GridOptions {
   std::optional<std::int32_t> pixels_per_degree;
   std::optional<double>       metres;
   std::optional<std::int32_t> tile_pixels;
-  std::optional<std::string>  nodata;  ///< As written, read as the kind's pixel type.
+  std::optional<std::string>  nodata;  ///< As written, read as the model's pixel type.
 };
 
 /** @brief Makes `table`, with `grid` for a raster table, which needs all of it but one of `pixels_per_degree` and `metres`. */
@@ -44,13 +44,13 @@ struct ImportOptions {
   std::optional<std::size_t>              window_tiles;  ///< Of a raster file: a part's side, in tiles; 2.
 };
 
-/** @brief Checks `table` is as its kind says, then pushes `options.files` into it, a part at a time. */
+/** @brief Checks `table` is as its model says, then pushes `options.files` into it, a part at a time. */
 void import(const Table& table, const ImportOptions& options);
 
 /** @brief Removes the dataset `dataset` from `table`, of features or roads. @throws std::runtime_error if it has no such dataset. */
 void remove(const Table& table, const std::string& dataset);
 
-/** @brief Checks `table` is as its kind says. @throws miniverse::TablesDiffer if it is not. */
+/** @brief Checks `table` is as its model says. @throws miniverse::TablesDiffer if it is not. */
 void verify(const Table& table);
 
 /** @brief Writes the grid that `table`, of a raster, was made with. */

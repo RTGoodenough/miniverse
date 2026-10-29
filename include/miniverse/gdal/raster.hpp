@@ -14,14 +14,14 @@
 /**
  * @file
  * Raster files as rasters on a table's grid, read with GDAL: a GeoTIFF or anything else GDAL opens, warped onto the grid of
- * a `RasterLayer`'s table, for pushing into it or reading in its place (raster_file.hpp).
+ * a `RasterModel`'s table, for pushing into it or reading in its place (raster_file.hpp).
  *
  * @code
- * struct Elevation : miniverse::RasterLayer<std::int16_t> {};
+ * using Elevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "elevation">;
  *
- * const auto grid = world.table_settings<Elevation>().get();  // the grid the table was made with
+ * const auto grid = world.table_settings<"elevation">().get();  // the grid the table was made with
  * miniverse::gdal::read_raster<std::int16_t>({.path = "srtm.tif"}, grid, 4, [&](auto window) {
- *   world.push<Elevation>(std::move(window)).get();  // 4 by 4 tiles at a time, so the file is not held whole
+ *   world.push<"elevation">(std::move(window)).get();  // 4 by 4 tiles at a time, so the file is not held whole
  * });
  * @endcode
  *

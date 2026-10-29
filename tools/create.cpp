@@ -6,12 +6,12 @@
 #include <type_traits>
 
 #include "commands.hpp"
-#include "kinds.hpp"
 #include "layer_of.hpp"
 #include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/geo/concepts/raster.hpp"
 #include "miniverse/geo/grid.hpp"
 #include "miniverse/world.hpp"
+#include "models.hpp"
 
 namespace tool {
 
@@ -53,25 +53,25 @@ template <geo::Pixel pixel_t>
 }  // namespace
 
 void create(const Table& table, const GridOptions& grid) {
-  with_kind(table.kind, [&]<typename kind_t>(std::type_identity<kind_t> /*kind*/) {
-    if constexpr ( miniverse::HasSettings<kind_t> ) {
-      const typename kind_t::settings_type made = grid_of<decltype(kind_t::settings_type::nodata)>(grid);
+  with_model(table.model, [&]<typename model_t>(std::type_identity<model_t> /*model*/) {
+    if constexpr ( miniverse::WritesSettings<model_t> ) {
+      const miniverse::SettingsOf<model_t> made = grid_of<decltype(miniverse::SettingsOf<model_t>::nodata)>(grid);
 
-      miniverse::Miniverse world(table.conninfo, layer_of<kind_t>(table.name));
-      world.template create_table<kind_t>(made);
+      miniverse::Miniverse world(table.conninfo, layer_of<model_t>(table.name));
+      world.template create_table<"table">(made);
 
-      std::cout << "made the table " << table.name << " (" << table.kind << "): " << made.pixels_per_degree << " pixels per degree, about "
+      std::cout << "made the table " << table.name << " (" << table.model << "): " << made.pixels_per_degree << " pixels per degree, about "
                 << made.metres_per_pixel() << " m, in tiles of " << made.tile_pixels << " pixels\n";
 
     } else {
       if ( grid.pixels_per_degree || grid.metres || grid.tile_pixels || grid.nodata ) {
-        throw std::invalid_argument("only a raster table has a grid: " + table.kind + " takes none");
+        throw std::invalid_argument("only a raster table has a grid: " + table.model + " takes none");
       }
 
-      miniverse::Miniverse world(table.conninfo, layer_of<kind_t>(table.name));
-      world.template create_table<kind_t>();
+      miniverse::Miniverse world(table.conninfo, layer_of<model_t>(table.name));
+      world.template create_table<"table">();
 
-      std::cout << "made the table " << table.name << " (" << table.kind << ")\n";
+      std::cout << "made the table " << table.name << " (" << table.model << ")\n";
     }
   });
 }

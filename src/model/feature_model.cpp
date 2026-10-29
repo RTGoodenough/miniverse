@@ -1,4 +1,4 @@
-#include "miniverse/layer/feature_layer.hpp"
+#include "miniverse/model/feature_model.hpp"
 
 #include <boost/geometry/algorithms/num_points.hpp>
 
@@ -11,19 +11,19 @@
 #include "miniverse/dataset.hpp"
 #include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer/dataset_columns.hpp"
+#include "miniverse/model/dataset_columns.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/table_name.hpp"
 
 namespace miniverse {
 
 template <geo::wkb::Geometry geometry_t>
-std::vector<std::string> FeatureLayer<geometry_t>::setup_sql(const schemacht::schema::TableName& table) {
-  return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)", dataset::index_sql(table)};
+std::vector<std::string> FeatureModel<geometry_t>::setup_sql(const schemacht::schema::TableName& table) {
+  return {"CREATE INDEX ON " + table.quoted() + " USING gist (geom)"};
 }
 
 template <geo::wkb::Geometry geometry_t>
-std::vector<std::vector<typename FeatureLayer<geometry_t>::insert_row_type>> FeatureLayer<geometry_t>::to_rows(
+std::vector<std::vector<typename FeatureModel<geometry_t>::insert_row_type>> FeatureModel<geometry_t>::to_rows(
     result_type features, const Dataset& dataset, std::int64_t stamp
 ) {
   std::vector<std::vector<insert_row_type>> batches;
@@ -47,7 +47,7 @@ std::vector<std::vector<typename FeatureLayer<geometry_t>::insert_row_type>> Fea
 
 template <geo::wkb::Geometry geometry_t>
 Features<geometry_t>
-FeatureLayer<geometry_t>::from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& /*location*/) {
+FeatureModel<geometry_t>::from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& /*location*/) {
   Features<geometry_t> features;
 
   features.reserve(rows.size());
@@ -64,10 +64,10 @@ FeatureLayer<geometry_t>::from_rows(std::vector<typename load_statement_type::re
   return features;
 }
 
-template struct FeatureLayer<geo::Point>;
-template struct FeatureLayer<geo::LineString>;
-template struct FeatureLayer<geo::Polygon>;
-template struct FeatureLayer<geo::MultiLineString>;
-template struct FeatureLayer<geo::MultiPolygon>;
+template struct FeatureModel<geo::Point>;
+template struct FeatureModel<geo::LineString>;
+template struct FeatureModel<geo::Polygon>;
+template struct FeatureModel<geo::MultiLineString>;
+template struct FeatureModel<geo::MultiPolygon>;
 
 }  // namespace miniverse

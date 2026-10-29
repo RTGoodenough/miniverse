@@ -29,26 +29,26 @@ namespace detail {
  * step of it failed. A step runs on the thread that calls it and waits for each statement, so the push holds one statement's
  * text at a time; a step that fails rolls the transaction back, and every later step fails with its error.
  */
-template <LayerKind kind_t>
+template <LayerModel model_t>
 struct Push {
-  using Table = schemacht::schema::Table<typename kind_t::schema_type>;
-  using ToRows = std::function<RowBatches<kind_t>(typename kind_t::result_type)>;
+  using Table = schemacht::schema::Table<typename model_t::schema_type>;
+  using ToRows = std::function<RowBatches<model_t>(typename model_t::result_type)>;
   using BeforeCommit = std::function<void(schemacht::postgres::Transaction&)>;
 
   schemacht::postgres::Transaction transaction;
   const Table*                     table = nullptr;
-  ToRows                           to_rows;        ///< A part's data as the kind's batches: with the table's settings, or the dataset and stamp.
-  BeforeCommit                     before_commit;  ///< A dataset's sweep; nothing, for most kinds.
+  ToRows                           to_rows;        ///< A part's data as the model's batches: with the table's settings, or the dataset and stamp.
+  BeforeCommit                     before_commit;  ///< A dataset's sweep; nothing, for most models.
   std::exception_ptr               failed;         ///< Why the push ended, if a step failed: what every later step throws.
 
   /** @brief Writes `data` as rows, one statement per batch, each waited for; a batch is let go of once it is written. */
-  void add(typename kind_t::result_type data) {
+  void add(typename model_t::result_type data) {
     step([&] {
-      RowBatches<kind_t> batches = to_rows(std::move(data));
-      for ( RowsOf<kind_t>& batch : batches ) {
-        const RowsOf<kind_t> rows = std::move(batch);
+      RowBatches<model_t> batches = to_rows(std::move(data));
+      for ( RowsOf<model_t>& batch : batches ) {
+        const RowsOf<model_t> rows = std::move(batch);
 
-        std::ignore = transaction.execute(kind_t::write_statement(rows).on(*table)).get();
+        std::ignore = transaction.execute(model_t::write_statement(rows).on(*table)).get();
       }
     });
   }
@@ -103,7 +103,7 @@ struct Push {
  * loader reads a chunk at a time. Made by `Miniverse::begin_push`.
  *
  * @code
- * auto buildings = world.begin_push<Buildings>(miniverse::Dataset{"buildings.gpkg"}).get();
+ * auto buildings = world.begin_push<"buildings">(miniverse::Dataset{"buildings.gpkg"}).get();
  * miniverse::gdal::read_features<miniverse::geo::MultiPolygon>(source, 10000, [&](auto chunk) {
  *   buildings.add(std::move(chunk)).get();
  * });
@@ -119,17 +119,17 @@ struct Push {
  * waited for before the next, or before the `commit`. Each `add` holds its part until the part is written, so a reader far
  * ahead of the writes holds that many parts; one that waits for the previous `add` before it reads the next holds two.
  * Dropping the push runs what was added, ends its thread, and waits for that. Commit or drop the push before the miniverse
- * ends. One that was moved from fails every call. For a kind with datasets the push replaces its dataset when it commits,
+ * ends. One that was moved from fails every call. For a model with datasets the push replaces its dataset when it commits,
  * so a commit with no parts leaves the dataset empty.
  */
-template <LayerKind kind_t>
+template <LayerModel model_t>
 class PushInParts {
  public:
   /** @brief The handle of `push`, a push that has begun, whose steps run on `thread`. */
-  PushInParts(detail::StepThread thread, std::shared_ptr<detail::Push<kind_t>> push) : _push(std::move(push)), _thread(std::move(thread)) {}
+  PushInParts(detail::StepThread thread, std::shared_ptr<detail::Push<model_t>> push) : _push(std::move(push)), _thread(std::move(thread)) {}
 
   /** @return A future that completes once `data`, a part, is written into the push, or holds the error, which ends the push. */
-  [[nodiscard]] std::future<void> add(kind_t::result_type data) {
+  [[nodiscard]] std::future<void> add(model_t::result_type data) {
     return step([push = _push, data = std::move(data)]() mutable { push->add(std::move(data)); });
   }
 
@@ -139,8 +139,8 @@ class PushInParts {
   }
 
  private:
-  std::shared_ptr<detail::Push<kind_t>> _push;    // null once moved from
-  detail::StepThread                    _thread;  // after the push: its steps hold the push until they have run
+  std::shared_ptr<detail::Push<model_t>> _push;    // null once moved from
+  detail::StepThread                     _thread;  // after the push: its steps hold the push until they have run
 
   /** @return A future for `run`, a step of the push, posted to its thread; it holds the error if there is no push (moved from) or the step was lost. */
   template <std::invocable run_t>

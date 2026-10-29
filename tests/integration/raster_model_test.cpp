@@ -34,8 +34,8 @@ using test::test_db;
 
 namespace {
 
-struct TestElevation : miniverse::RasterLayer<std::int16_t> {};
-struct FineElevation : miniverse::RasterLayer<std::int16_t> {};
+using TestElevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "elevation">;
+using FineElevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "fine_elevation">;
 
 using World = miniverse::Miniverse<TestElevation>;
 using Raster = geo::Raster<std::int16_t>;
@@ -72,10 +72,10 @@ using InsertTiles = schemacht::query::RawStatement<
 [[nodiscard]] test::Fresh<World> with_tiles(const std::string& conninfo, const schemacht::postgres::Database::Options& options = {}) {
   return test::Fresh<World>(
       [](World& world) {
-        world.create_table<TestElevation>(GRID);
+        world.create_table<"elevation">(GRID);
         std::ignore = world.database().execute(InsertTiles::bind()).get();
       },
-      conninfo, options, miniverse::Layer<TestElevation>("miniverse_test_elevation")
+      conninfo, options, TestElevation("miniverse_test_elevation")
   );
 }
 
@@ -136,7 +136,7 @@ using IndexDefinitions = schemacht::query::RawStatement<
 TEST_CASE("integration: an elevation load gives the pixels in the polygon's box, nodata where no tile is", "[integration]") {
   test::Fresh<World> tiled = with_tiles(test_db());
 
-  const Raster heights = tiled.world().load<TestElevation>(polygon("POLYGON((0 0,2 0,2 2,0 2,0 0))")).get();
+  const Raster heights = tiled.world().load<"elevation">(polygon("POLYGON((0 0,2 0,2 2,0 2,0 0))")).get();
 
   CHECK(heights.west == 0);
   CHECK(heights.north == 2);
@@ -160,8 +160,8 @@ TEST_CASE("integration: an elevation load of an area that runs askew reads the t
   const geo::Polygon  triangle = polygon("POLYGON((0.1 0.2,1.8 1.9,0.1 1.9,0.1 0.2))");
   std::vector<Raster> tiles;
 
-  const Raster heights = tiled.world().load<TestElevation>(triangle).get();
-  tiled.world().stream<TestElevation>(triangle, [&tiles](std::vector<Raster> chunk) { tiles.insert(tiles.end(), chunk.begin(), chunk.end()); }).get();
+  const Raster heights = tiled.world().load<"elevation">(triangle).get();
+  tiled.world().stream<"elevation">(triangle, [&tiles](std::vector<Raster> chunk) { tiles.insert(tiles.end(), chunk.begin(), chunk.end()); }).get();
 
   // The pixels of its box all the same, with no data where the tile was not read.
   CHECK(heights.west == 0);
@@ -185,13 +185,13 @@ TEST_CASE("integration: an elevation load of a ring that is not closed fails, as
   geo::Polygon open_ring;
   open_ring.outer() = {{0.1, 0.1}, {1.9, 0.1}, {1.9, 1.9}, {0.1, 1.9}};
 
-  CHECK_THROWS_AS(tiled.world().load<TestElevation>(open_ring).get(), schemacht::postgres::QueryError);
+  CHECK_THROWS_AS(tiled.world().load<"elevation">(open_ring).get(), schemacht::postgres::QueryError);
 }
 
 TEST_CASE("integration: an elevation load inside one tile is widened to whole pixels", "[integration]") {
   test::Fresh<World> tiled = with_tiles(test_db());
 
-  const Raster heights = tiled.world().load<TestElevation>(polygon("POLYGON((0.3 1.3,0.6 1.3,0.6 1.6,0.3 1.6,0.3 1.3))")).get();
+  const Raster heights = tiled.world().load<"elevation">(polygon("POLYGON((0.3 1.3,0.6 1.3,0.6 1.6,0.3 1.6,0.3 1.3))")).get();
 
   CHECK(heights.west == 0.25);
   CHECK(heights.north == 1.75);
@@ -208,7 +208,7 @@ TEST_CASE("integration: an elevation stream hands the tiles over whole, a chunk 
   std::vector<Raster>      tiles;
 
   tiled.world()
-      .stream<TestElevation>(
+      .stream<"elevation">(
           polygon("POLYGON((0 0,2 0,2 2,0 2,0 0))"),
           [&](std::vector<Raster> chunk) {
             chunk_sizes.push_back(chunk.size());
@@ -235,7 +235,7 @@ TEST_CASE("integration: an elevation stream hands the tiles over whole, a chunk 
 TEST_CASE("integration: an elevation load where there are no tiles is empty", "[integration]") {
   test::Fresh<World> tiled = with_tiles(test_db());
 
-  const Raster heights = tiled.world().load<TestElevation>(polygon("POLYGON((30 30,31 30,31 31,30 31,30 30))")).get();
+  const Raster heights = tiled.world().load<"elevation">(polygon("POLYGON((30 30,31 30,31 31,30 31,30 30))")).get();
 
   CHECK(heights.width == 0);
   CHECK(heights.pixels.empty());
@@ -245,9 +245,9 @@ TEST_CASE("integration: an elevation table records its grid where GDAL and miniv
   test::Fresh<World> tiled = with_tiles(test_db());
   World&             world = tiled.world();
 
-  CHECK(world.table_settings<TestElevation>().get() == GRID);
+  CHECK(world.table_settings<"elevation">().get() == GRID);
 
-  const auto columns = world.database().execute(RasterColumns::bind(world.table_name<TestElevation>().name())).get();
+  const auto columns = world.database().execute(RasterColumns::bind(world.table_name<"elevation">().name())).get();
   REQUIRE(columns.size() == 1);
   const auto& row = columns.front();
   CHECK(sch::get<"srid">(row) == 4326);
@@ -271,7 +271,7 @@ TEST_CASE("integration: create_table makes the index on the tiles' outlines that
   test::Fresh<World> tiled = with_tiles(test_db());
   World&             world = tiled.world();
 
-  const auto rows = world.database().execute(IndexDefinitions::bind(world.table_name<TestElevation>().name())).get();
+  const auto rows = world.database().execute(IndexDefinitions::bind(world.table_name<"elevation">().name())).get();
 
   REQUIRE(rows.size() == 2);
   CHECK(sch::get<"indexdef">(rows.at(0)).ends_with("USING btree (tile_id)"));  // the primary key's (_pkey)
@@ -282,7 +282,7 @@ TEST_CASE("integration: create_table has the tiles stored with lz4, which loads 
   test::Fresh<World> tiled = with_tiles(test_db());
   World&             world = tiled.world();
 
-  const auto rows = world.database().execute(ColumnCompression::bind(world.table_name<TestElevation>().quoted())).get();
+  const auto rows = world.database().execute(ColumnCompression::bind(world.table_name<"elevation">().quoted())).get();
 
   REQUIRE(rows.size() == 1);
   CHECK(sch::get<"compression">(rows.at(0)) == "l");  // pg_attribute's letter for lz4; pglz is `p`, and the server's default is empty
@@ -298,9 +298,9 @@ TEST_CASE("integration: a pushed raster is cut into the table's tiles and loaded
     pushed.pixels.push_back(pixel);
   }
 
-  world.push<TestElevation>(pushed).get();
+  world.push<"elevation">(pushed).get();
 
-  CHECK(world.load<TestElevation>(polygon("POLYGON((1 1,2 1,2 2,1 2,1 1))")).get() == pushed);
+  CHECK(world.load<"elevation">(polygon("POLYGON((1 1,2 1,2 2,1 2,1 1))")).get() == pushed);
 }
 
 TEST_CASE("integration: a push onto tiles already there merges: new data wins, and where it has none the old pixel stays", "[integration]") {
@@ -314,10 +314,10 @@ TEST_CASE("integration: a push onto tiles already there merges: new data wins, a
     pushed.pixels.push_back(pixel % 2 == 0 ? std::int16_t{7} : NODATA);
   }
 
-  world.push<TestElevation>(pushed).get();
-  const Raster once = world.load<TestElevation>(polygon("POLYGON((0 1,2 1,2 2,0 2,0 1))")).get();
-  world.push<TestElevation>(pushed).get();
-  const Raster twice = world.load<TestElevation>(polygon("POLYGON((0 1,2 1,2 2,0 2,0 1))")).get();
+  world.push<"elevation">(pushed).get();
+  const Raster once = world.load<"elevation">(polygon("POLYGON((0 1,2 1,2 2,0 2,0 1))")).get();
+  world.push<"elevation">(pushed).get();
+  const Raster twice = world.load<"elevation">(polygon("POLYGON((0 1,2 1,2 2,0 2,0 1))")).get();
 
   REQUIRE(once.width == 8);
   REQUIRE(once.height == 4);
@@ -348,12 +348,12 @@ TEST_CASE("integration: a raster pushed in parts is cut with the table's grid, a
     };
   };
 
-  miniverse::PushInParts<TestElevation> parts = world.begin_push<TestElevation>().get();
+  miniverse::PushInParts<TestElevation::model_type> parts = world.begin_push<"elevation">().get();
   parts.add(degree_from(10, 7)).get();
   parts.add(degree_from(11, 8)).get();
-  const Raster before = world.load<TestElevation>(polygon("POLYGON((10 1,12 1,12 2,10 2,10 1))")).get();
+  const Raster before = world.load<"elevation">(polygon("POLYGON((10 1,12 1,12 2,10 2,10 1))")).get();
   parts.commit().get();
-  const Raster after = world.load<TestElevation>(polygon("POLYGON((10 1,12 1,12 2,10 2,10 1))")).get();
+  const Raster after = world.load<"elevation">(polygon("POLYGON((10 1,12 1,12 2,10 2,10 1))")).get();
 
   CHECK(before.width == 0);  // no tiles there yet, for anyone else
   REQUIRE(after.width == 8);
@@ -372,9 +372,9 @@ TEST_CASE("integration: a push merges through the shared function by its full na
   Raster pushed{.west = 0, .north = 2, .pixel_width = 0.25, .pixel_height = 0.25, .width = 4, .height = 4, .nodata = NODATA, .pixels = {}};
   pushed.pixels.assign(16, 7);
 
-  world.push<TestElevation>(pushed).get();
+  world.push<"elevation">(pushed).get();
 
-  CHECK(world.load<TestElevation>(polygon("POLYGON((0 1,1 1,1 2,0 2,0 1))")).get() == pushed);
+  CHECK(world.load<"elevation">(polygon("POLYGON((0 1,1 1,1 2,0 2,0 1))")).get() == pushed);
 }
 
 TEST_CASE("integration: a raster not on the table's grid is not pushed", "[integration]") {
@@ -382,7 +382,7 @@ TEST_CASE("integration: a raster not on the table's grid is not pushed", "[integ
 
   Raster coarse{.west = 1, .north = 2, .pixel_width = 0.5, .pixel_height = 0.5, .width = 1, .height = 1, .nodata = NODATA, .pixels = {1}};
 
-  CHECK_THROWS_AS(tiled.world().push<TestElevation>(std::move(coarse)).get(), std::invalid_argument);
+  CHECK_THROWS_AS(tiled.world().push<"elevation">(std::move(coarse)).get(), std::invalid_argument);
 }
 
 TEST_CASE("integration: an elevation load is answered by the index on the tiles' outlines", "[integration]") {
@@ -392,7 +392,7 @@ TEST_CASE("integration: an elevation load is answered by the index on the tiles'
   std::ignore = world.database().execute(SeqScanOff::bind()).get();
 
   const geo::Polygon area = polygon("POLYGON((0 0,1 0,1 1,0 1,0 0))");
-  const std::string sql(TestElevation::load_statement_type::bind(area).on(miniverse::Layer<TestElevation>("miniverse_test_elevation").table()).sql());
+  const std::string  sql(TestElevation::model_type::load_statement_type::bind(area).on(TestElevation("miniverse_test_elevation").table()).sql());
 
   const std::string plan = plan_of(world.database(), sql, schemacht::ColumnType<geo::Polygon>::format(area));
 
@@ -409,13 +409,13 @@ TEST_CASE("integration: a push of several new tiles writes them all", "[integrat
     pushed.pixels.push_back(pixel);
   }
 
-  world.push<TestElevation>(pushed).get();
+  world.push<"elevation">(pushed).get();
 
-  CHECK(world.load<TestElevation>(polygon("POLYGON((10 1,13 1,13 2,10 2,10 1))")).get() == pushed);
+  CHECK(world.load<"elevation">(polygon("POLYGON((10 1,13 1,13 2,10 2,10 1))")).get() == pushed);
 }
 
 TEST_CASE("integration: a push onto a raster table with no grid in its constraints fails through its future", "[integration]") {
-  miniverse::Miniverse world(test_db(), miniverse::Layer<TestElevation>("miniverse_test_bare"));
+  miniverse::Miniverse world(test_db(), TestElevation("miniverse_test_bare"));
   world.drop_tables();
   std::ignore = world.database()
                     .execute(schemacht::postgres::unchecked_sql("CREATE TABLE miniverse_test_bare (tile_id bigint PRIMARY KEY, rast raster)"))
@@ -424,17 +424,17 @@ TEST_CASE("integration: a push onto a raster table with no grid in its constrain
   Raster pushed{.west = 10, .north = 2, .pixel_width = 0.25, .pixel_height = 0.25, .width = 4, .height = 4, .nodata = NODATA, .pixels = {}};
   pushed.pixels.assign(16, 1);
 
-  CHECK_THROWS_WITH(world.push<TestElevation>(std::move(pushed)).get(), Catch::Matchers::ContainsSubstring("no grid in its raster constraints"));
-  CHECK_THROWS_WITH(world.begin_push<TestElevation>().get(), Catch::Matchers::ContainsSubstring("no grid in its raster constraints"));
+  CHECK_THROWS_WITH(world.push<"elevation">(std::move(pushed)).get(), Catch::Matchers::ContainsSubstring("no grid in its raster constraints"));
+  CHECK_THROWS_WITH(world.begin_push<"elevation">().get(), Catch::Matchers::ContainsSubstring("no grid in its raster constraints"));
 
   world.drop_tables();
 }
 
 TEST_CASE("integration: on a grid whose arithmetic rounds, the world's last column and row of tiles can be written", "[integration]") {
   // 1/3600 has no exact double, so the far edge of the last tile computes a rounding step past 180 and -90.
-  miniverse::Miniverse world(test_db(), miniverse::Layer<FineElevation>("miniverse_test_elevation_fine"));
+  miniverse::Miniverse world(test_db(), FineElevation("miniverse_test_elevation_fine"));
   world.drop_tables();
-  world.create_table<FineElevation>({.pixels_per_degree = 3600, .tile_pixels = 1200, .nodata = NODATA});
+  world.create_table<"fine_elevation">({.pixels_per_degree = 3600, .tile_pixels = 1200, .nodata = NODATA});
 
   // The world's south-east pixel.
   const double pixel = 1.0 / 3600;
@@ -449,10 +449,10 @@ TEST_CASE("integration: on a grid whose arithmetic rounds, the world's last colu
       .pixels = {42}
   };
 
-  world.push<FineElevation>(corner).get();
+  world.push<"fine_elevation">(corner).get();
 
   const geo::Polygon around = polygon("POLYGON((179.9999 -89.9999,179.99999 -89.9999,179.99999 -89.99999,179.9999 -89.99999,179.9999 -89.9999))");
-  CHECK(world.load<FineElevation>(around).get().pixels.back() == 42);
+  CHECK(world.load<"fine_elevation">(around).get().pixels.back() == 42);
 
   world.drop_tables();
 }
@@ -461,8 +461,8 @@ TEST_CASE("integration: two raster tables made at the same time are both made", 
   // Two writers starting together, each with its own pool and its own table: both make the shared schema and replace the
   // shared merge function, which PostgreSQL does not let two transactions do at once.
   constexpr int        ROUNDS = 10;
-  miniverse::Miniverse one(test_db(), miniverse::Layer<TestElevation>("miniverse_test_elevation_one"));
-  miniverse::Miniverse other(test_db(), miniverse::Layer<FineElevation>("miniverse_test_elevation_other"));
+  miniverse::Miniverse one(test_db(), TestElevation("miniverse_test_elevation_one"));
+  miniverse::Miniverse other(test_db(), FineElevation("miniverse_test_elevation_other"));
 
   for ( int round = 0; round < ROUNDS; ++round ) {
     one.drop_tables();
@@ -470,8 +470,8 @@ TEST_CASE("integration: two raster tables made at the same time are both made", 
     // As in a new database: the schema is not there yet, so both make it.
     std::ignore = one.database().execute(schemacht::postgres::unchecked_sql("DROP SCHEMA IF EXISTS miniverse_internal CASCADE")).get();
 
-    std::future<void> making_one = std::async(std::launch::async, [&] { one.create_table<TestElevation>(GRID); });
-    std::future<void> making_other = std::async(std::launch::async, [&] { other.create_table<FineElevation>(GRID); });
+    std::future<void> making_one = std::async(std::launch::async, [&] { one.create_table<"elevation">(GRID); });
+    std::future<void> making_other = std::async(std::launch::async, [&] { other.create_table<"fine_elevation">(GRID); });
 
     CHECK_NOTHROW(making_one.get());
     CHECK_NOTHROW(making_other.get());

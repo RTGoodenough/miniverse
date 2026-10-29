@@ -9,7 +9,7 @@
 namespace miniverse {
 
 /**
- * @brief An export of a region, named by the pusher (`Dataset{"massachusetts-260124"}`): what a push of a vector kind writes
+ * @brief An export of a region, named by the pusher (`Dataset{"massachusetts-260124"}`): what a push of a vector model writes
  * under, what a later push under the same name replaces, and what `Miniverse::remove` deletes. The name is free text that
  * means nothing to the store but sameness: refresh a region under the name it was first pushed under, and keep a name to
  * the same ground over time.

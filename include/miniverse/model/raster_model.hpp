@@ -13,7 +13,8 @@
 #include "miniverse/geo/raster.hpp"
 #include "miniverse/geo/types.hpp"
 #include "miniverse/internal_schema.hpp"
-#include "miniverse/layer/raster/tiles.hpp"
+#include "miniverse/model/raster/tiles.hpp"
+#include "miniverse/model/writes.hpp"
 #include "schemacht/postgres/statements.hpp"
 #include "schemacht/query/predicate.hpp"
 #include "schemacht/query/prepared.hpp"
@@ -25,7 +26,7 @@
 
 /**
  * @file
- * The layer kind of rasters on a grid: its table's columns, constraints and merge function, and its rows made from a raster
+ * The model of rasters on a grid: its table's columns, constraints and merge function, and its rows made from a raster
  * and back. The pixel arithmetic is raster/tiles.hpp, and which tiles a location has is raster/reach.hpp.
  */
 namespace miniverse {
@@ -57,17 +58,17 @@ struct MergeRaster {
 }  // namespace raster
 
 /**
- * @brief The layer kind of rasters of one band of `pixel_t`, such as elevation: one row per tile of the table's grid
+ * @brief The model of rasters of one band of `pixel_t`, such as elevation: one row per tile of the table's grid
  * (`geo::Grid`, its settings), which every source is warped onto. A load gives the pixels in the bounding box of the location
  * (`raster::window`), from the tiles the location reaches into (`raster::Reach`): where the box holds a tile the location does
  * not reach, as the box of an area that runs askew does, the pixels are nodata, though the table may have data there.
  *
  * @code
- * struct Elevation : miniverse::RasterLayer<std::int16_t> {};
+ * using Elevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "elevation">;
  *
- * miniverse::Miniverse world(conninfo, miniverse::Layer<Elevation>("elevation"));
- * world.create_table<Elevation>({.pixels_per_degree = 3600, .tile_pixels = 256, .nodata = -32768});  // once
- * miniverse::geo::Raster<std::int16_t> heights = world.load<Elevation>(area).get();
+ * miniverse::Miniverse world(conninfo, Elevation("srtm"));
+ * world.create_table<"elevation">({.pixels_per_degree = 3600, .tile_pixels = 256, .nodata = -32768});  // once
+ * miniverse::geo::Raster<std::int16_t> heights = world.load<"elevation">(area).get();
  * @endcode
  *
   * The grid is chosen when the table is made and kept in its raster constraints, which `raster_columns` reads. So GDAL and QGIS
@@ -78,13 +79,13 @@ struct MergeRaster {
  * where reals hardly do: for heights, 16-bit whole metres.
  */
 template <geo::Pixel pixel_t>
-struct RasterLayer {
+struct RasterModel {
   static constexpr std::int32_t LAYOUT = 1;  ///< The first layout recorded.
 
   using result_type = geo::Raster<pixel_t>;
   /// What a streamed load hands its callback: some of the tiles, each a raster of its own, since a window needs them all.
   using chunk_type = std::vector<geo::Raster<pixel_t>>;
-  using settings_type = geo::Grid<pixel_t>;
+  using writes = miniverse::writes::WithSettings<geo::Grid<pixel_t>>;
   /// The table's layout. Its name, `raster`, is only a placeholder: a layer names its own table (`Layer`).
   using schema_type = schemacht::schema::Schema<"raster", raster::TileId, raster::Rast<pixel_t>>;
   using row_type = schema_type::row_type;
@@ -127,7 +128,7 @@ struct RasterLayer {
    *   `pixel_t`, the nodata value, in-db bands, and the grid's whole span as extent.
    * @throws std::invalid_argument if `grid` is not a grid: see `geo::Grid`.
    */
-  [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table, const settings_type& grid);
+  [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table, const geo::Grid<pixel_t>& grid);
 
   /**
       * @return `raster` cut into the tiles of `grid`, the table's, it covers (`raster::cut`), in batches of
@@ -135,7 +136,7 @@ struct RasterLayer {
    * @throws std::invalid_argument as `raster::cut`: `grid` is not a grid, or `raster` is not on it, or reaches past the world,
    * or its pixels are not `width * height`, or a pixel with data has the grid's nodata value.
    */
-  [[nodiscard]] static std::vector<std::vector<row_type>> to_rows(result_type raster, const settings_type& grid);
+  [[nodiscard]] static std::vector<std::vector<row_type>> to_rows(result_type raster, const geo::Grid<pixel_t>& grid);
 
   /** @return The write of `rows`: each tile is inserted, or merged onto the one already there (`raster::MergeRaster`). */
   [[nodiscard]] static schemacht::postgres::SchemaStatement<schema_type, std::tuple<>> write_statement(const std::vector<row_type>& rows) {
@@ -156,16 +157,16 @@ struct RasterLayer {
    * @throws std::runtime_error if the table has no grid in its constraints (it was not made by `create_table`), or its pixels
    * are not 1/n degree for a whole number n, or its nodata value is not a `pixel_t`.
    */
-  [[nodiscard]] static settings_type settings_from_rows(std::vector<typename settings_statement_type::row_type> rows);
+  [[nodiscard]] static geo::Grid<pixel_t> settings_from_rows(std::vector<typename settings_statement_type::row_type> rows);
 };
 
-extern template struct RasterLayer<std::int8_t>;
-extern template struct RasterLayer<std::uint8_t>;
-extern template struct RasterLayer<std::int16_t>;
-extern template struct RasterLayer<std::uint16_t>;
-extern template struct RasterLayer<std::int32_t>;
-extern template struct RasterLayer<std::uint32_t>;
-extern template struct RasterLayer<float>;
-extern template struct RasterLayer<double>;
+extern template struct RasterModel<std::int8_t>;
+extern template struct RasterModel<std::uint8_t>;
+extern template struct RasterModel<std::int16_t>;
+extern template struct RasterModel<std::uint16_t>;
+extern template struct RasterModel<std::int32_t>;
+extern template struct RasterModel<std::uint32_t>;
+extern template struct RasterModel<float>;
+extern template struct RasterModel<double>;
 
 }  // namespace miniverse

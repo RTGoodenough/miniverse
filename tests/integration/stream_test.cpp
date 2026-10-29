@@ -28,7 +28,7 @@ using test::test_db;
 
 namespace {
 
-struct Shops : miniverse::FeatureLayer<geo::Point> {};
+using Shops = miniverse::Layer<miniverse::FeatureModel<geo::Point>, "shops">;
 
 using World = miniverse::Miniverse<Shops>;
 using Chunk = miniverse::Features<geo::Point>;
@@ -47,9 +47,9 @@ const geo::Polygon NOWHERE = bg::from_wkt<geo::Polygon>("POLYGON((30 30,31 30,31
           shops.push_back({.id = id, .geometry = geo::Point(static_cast<double>(id) / 2, 1)});
         }
         shops.push_back({.id = 6, .geometry = geo::Point(50, 50)});
-        world.push<Shops>(miniverse::Dataset{"shops"}, std::move(shops)).get();
+        world.push<"shops">(miniverse::Dataset{"shops"}, std::move(shops)).get();
       },
-      conninfo, options, miniverse::Layer<Shops>("miniverse_test_stream_shops")
+      conninfo, options, Shops("miniverse_test_stream_shops")
   );
 }
 
@@ -72,7 +72,7 @@ TEST_CASE("integration: a stream hands a load over a chunk at a time, in the loa
   test::Fresh<World> stocked = with_shops(test_db());
   Seen               seen;
 
-  stocked.world().stream<Shops>(NEAR_ORIGIN, [&](const Chunk& chunk) { seen.take(chunk); }, {.chunk_rows = 2}).get();
+  stocked.world().stream<"shops">(NEAR_ORIGIN, [&](const Chunk& chunk) { seen.take(chunk); }, {.chunk_rows = 2}).get();
 
   CHECK(seen.chunk_sizes == std::vector<std::size_t>{2, 2, 1});  // the last chunk is what is left
   CHECK(seen.ids == std::vector<std::int64_t>{1, 2, 3, 4, 5});   // not the shop far away
@@ -81,12 +81,12 @@ TEST_CASE("integration: a stream hands a load over a chunk at a time, in the loa
 TEST_CASE("integration: a stream's chunks are the pool's own size unless it says otherwise", "[integration]") {
   test::Fresh<World> by_default = with_shops(test_db());
   Seen               whole;
-  by_default.world().stream<Shops>(NEAR_ORIGIN, [&](const Chunk& chunk) { whole.take(chunk); }).get();
+  by_default.world().stream<"shops">(NEAR_ORIGIN, [&](const Chunk& chunk) { whole.take(chunk); }).get();
 
   // A pool made to read two rows at a time: its streams hand over chunks of two.
   test::Fresh<World> in_twos = with_shops(test_db(), {.pool = {}, .read = {.chunk_rows = 2}});
   Seen               pairs;
-  in_twos.world().stream<Shops>(NEAR_ORIGIN, [&](const Chunk& chunk) { pairs.take(chunk); }).get();
+  in_twos.world().stream<"shops">(NEAR_ORIGIN, [&](const Chunk& chunk) { pairs.take(chunk); }).get();
 
   CHECK(whole.chunk_sizes == std::vector<std::size_t>{5});  // far fewer than a pool reads at a time by default
   CHECK(pairs.chunk_sizes == std::vector<std::size_t>{2, 2, 1});
@@ -97,7 +97,7 @@ TEST_CASE("integration: a stream's callback stops the load by returning false", 
   Seen               seen;
 
   stocked.world()
-      .stream<Shops>(
+      .stream<"shops">(
           NEAR_ORIGIN,
           [&](const Chunk& chunk) {
             seen.take(chunk);
@@ -116,7 +116,7 @@ TEST_CASE("integration: what a stream's callback throws is the load's error", "[
   test::Fresh<World> stocked = with_shops(test_db());
   Seen               seen;
 
-  auto done = stocked.world().stream<Shops>(
+  auto done = stocked.world().stream<"shops">(
       NEAR_ORIGIN,
       [&](const Chunk& chunk) {
         seen.take(chunk);
@@ -134,7 +134,7 @@ TEST_CASE("integration: what a stream's callback throws at the last chunk is the
   Seen               seen;
 
   // A callback with a count of its own: the third chunk is the one row left over, handed over as the load ends.
-  auto done = stocked.world().stream<Shops>(
+  auto done = stocked.world().stream<"shops">(
       NEAR_ORIGIN,
       [&seen, chunks = std::size_t{0}](const Chunk& chunk) mutable {
         seen.take(chunk);
@@ -153,7 +153,7 @@ TEST_CASE("integration: a stream where there is nothing never calls its callback
   test::Fresh<World> stocked = with_shops(test_db());
   Seen               seen;
 
-  stocked.world().stream<Shops>(NOWHERE, [&](const Chunk& chunk) { seen.take(chunk); }).get();
+  stocked.world().stream<"shops">(NOWHERE, [&](const Chunk& chunk) { seen.take(chunk); }).get();
 
   CHECK(seen.chunk_sizes.empty());
 }
@@ -163,7 +163,7 @@ TEST_CASE("integration: a stream that fails reports why through its future", "[i
   Seen               seen;
   stocked.world().drop_tables();
 
-  auto done = stocked.world().stream<Shops>(NEAR_ORIGIN, [&](const Chunk& chunk) { seen.take(chunk); });
+  auto done = stocked.world().stream<"shops">(NEAR_ORIGIN, [&](const Chunk& chunk) { seen.take(chunk); });
 
   CHECK_THROWS_AS(done.get(), schemacht::postgres::QueryError);  // the table is gone
   CHECK(seen.chunk_sizes.empty());

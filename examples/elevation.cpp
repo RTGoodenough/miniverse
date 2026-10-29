@@ -26,7 +26,7 @@
 
 namespace geo = miniverse::geo;
 
-struct Elevation : miniverse::RasterLayer<std::int16_t> {};  // heights in whole metres
+using Elevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "elevation">;  // heights in whole metres
 
 using Heights = geo::Raster<std::int16_t>;
 
@@ -65,28 +65,28 @@ constexpr std::int16_t NODATA = -32768;
 
 int main(int argc, char** argv) {
   try {
-    miniverse::Miniverse world(example::conninfo(argc, argv), miniverse::Layer<Elevation>("miniverse_example_elevation"));
+    miniverse::Miniverse world(example::conninfo(argc, argv), Elevation("miniverse_example_elevation"));
 
     // The grid is chosen once, here: 120 pixels to a degree (30 arc seconds), in tiles of half a degree. The table keeps it.
     world.drop_tables();
-    world.create_table<Elevation>({.pixels_per_degree = 120, .tile_pixels = 60, .nodata = NODATA});
+    world.create_table<"elevation">({.pixels_per_degree = 120, .tile_pixels = 60, .nodata = NODATA});
 
     // A writer asks the table for its grid, and makes its raster on it. (examples/import_raster.cpp has GDAL warp a file onto it.)
-    const geo::Grid<std::int16_t> grid = world.table_settings<Elevation>().get();
+    const geo::Grid<std::int16_t> grid = world.table_settings<"elevation">().get();
 
     // A survey of 2 by 1 degrees: a ridge that rises to 3000 m in the middle. The push cuts it into the grid's 4 by 2 tiles.
     Heights ridge = surveyed(grid, 7, 47, 2, 1, [](std::size_t column) {
       return static_cast<std::int16_t>(3000 - (25 * std::abs(static_cast<int>(column) - 120)));
     });
-    world.push<Elevation>(std::move(ridge)).get();
+    world.push<"elevation">(std::move(ridge)).get();
 
     // A later survey of half a degree of it, with data only in its western half: the lake there, at 372 m. A push is merged
     // onto the tiles already there: where it has data it wins, and where it has none the old pixel stays.
     Heights lake = surveyed(grid, 7.5, 46.75, 0.5, 0.25, [](std::size_t column) { return column < 30 ? std::int16_t{372} : NODATA; });
-    world.push<Elevation>(std::move(lake)).get();
+    world.push<"elevation">(std::move(lake)).get();
 
     // A load gives the pixels in an area's box as one raster, stitched from the tiles the area reaches into.
-    const Heights heights = world.load<Elevation>(example::box(7.4, 46.4, 8.1, 46.9)).get();
+    const Heights heights = world.load<"elevation">(example::box(7.4, 46.4, 8.1, 46.9)).get();
 
     std::cout << heights.width << " by " << heights.height << " pixels from longitude " << heights.west << ", latitude " << heights.north << '\n';
 
@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
     std::int16_t highest = NODATA;
 
     world
-        .stream<Elevation>(
+        .stream<"elevation">(
             example::box(7.1, 46.1, 8.9, 46.9),
             [&tiles, &highest](const std::vector<Heights>& chunk) {
               for ( const Heights& tile : chunk ) {

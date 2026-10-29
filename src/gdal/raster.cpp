@@ -23,7 +23,7 @@
 #include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/raster.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer/raster/reach.hpp"
+#include "miniverse/model/raster/reach.hpp"
 
 namespace miniverse::gdal {
 

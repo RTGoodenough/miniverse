@@ -8,7 +8,7 @@
 
 /**
  * @file
- * A way: what a load of a `RoadLayer` gives, one by one, and what a reader of ways hands over.
+ * A way: what a load of a `RoadModel` gives, one by one, and what a reader of ways hands over.
  */
 namespace miniverse {
 

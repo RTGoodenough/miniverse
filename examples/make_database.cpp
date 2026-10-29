@@ -42,8 +42,8 @@
 namespace geo = miniverse::geo;
 namespace postgres = schemacht::postgres;
 
-struct Roads : miniverse::RoadLayer {};
-struct Elevation : miniverse::RasterLayer<std::int16_t> {};  // heights in whole metres
+using Roads = miniverse::Layer<miniverse::RoadModel, "roads">;
+using Elevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "elevation">;  // heights in whole metres
 
 using World = miniverse::Miniverse<Roads, Elevation>;
 
@@ -116,7 +116,8 @@ auto about(const std::string& what, read_t read) {
 
 /** @brief Writes the roads and paths of the OpenStreetMap file at `path`, all of them or none. */
 void write_roads(World& world, const std::string& path) {
-  miniverse::PushInParts<Roads> roads = world.begin_push<Roads>(miniverse::Dataset{std::filesystem::path(path).filename().string()}).get();
+  miniverse::PushInParts<Roads::model_type> roads =
+      world.begin_push<"roads">(miniverse::Dataset{std::filesystem::path(path).filename().string()}).get();
 
   const miniverse::osm::WayRead read = about("the OpenStreetMap file '" + path + "'", [&] {
     return miniverse::osm::read_ways({.path = path, .keys = {"highway"}}, 10'000, [&roads](miniverse::Ways chunk) {
@@ -155,11 +156,11 @@ std::vector<std::filesystem::path> geotiffs_of(const std::string& directory) {
  * by a few pixels, the later one's data is what the table has.
  */
 void write_heights(World& world, const std::vector<std::filesystem::path>& files) {
-  const geo::Grid<std::int16_t> grid = world.table_settings<Elevation>().get();
+  const geo::Grid<std::int16_t> grid = world.table_settings<"elevation">().get();
 
   std::size_t written = 0;
   for ( const std::filesystem::path& file : files ) {
-    miniverse::PushInParts<Elevation> heights = world.begin_push<Elevation>().get();
+    miniverse::PushInParts<Elevation::model_type> heights = world.begin_push<"elevation">().get();
 
     // Windows of 2 by 2 tiles, 1024 pixels a side.
     const miniverse::gdal::RasterRead read = about("the GeoTIFF '" + file.string() + "'", [&] {
@@ -195,15 +196,15 @@ int main(int argc, char** argv) {
     }
     const std::vector<std::filesystem::path> geotiffs = geotiffs_of(args[4]);
 
-    World world(make_database(args[1], args[2]), miniverse::Layer<Roads>("roads"), miniverse::Layer<Elevation>("elevation"));
+    World world(make_database(args[1], args[2]), Roads("roads"), Elevation("elevation"));
 
     std::ignore = world.database().execute(postgres::unchecked_sql("CREATE EXTENSION IF NOT EXISTS postgis")).get();
     std::ignore = world.database().execute(postgres::unchecked_sql("CREATE EXTENSION IF NOT EXISTS postgis_raster")).get();
 
     // The elevation table's grid, chosen once: 3600 pixels to a degree, about 31 m, which is what a survey of one arc second
     // has, so its pixels are the table's. Tiles of 512 pixels, about 16 km a side.
-    world.create_table<Roads>();
-    world.create_table<Elevation>({.pixels_per_degree = 3600, .tile_pixels = 512, .nodata = -32768});
+    world.create_table<"roads">();
+    world.create_table<"elevation">({.pixels_per_degree = 3600, .tile_pixels = 512, .nodata = -32768});
 
     write_roads(world, roads_file);
     write_heights(world, geotiffs);

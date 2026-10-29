@@ -5,7 +5,7 @@
 #include <memory>
 
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer/way.hpp"
+#include "miniverse/model/way.hpp"
 
 /**
  * @file

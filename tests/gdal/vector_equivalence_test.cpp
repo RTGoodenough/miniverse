@@ -68,23 +68,23 @@ template <geo::wkb::Geometry geometry_t>
  * @brief Checks that the file at each of `sources` gives, for each of `locations`, the features a table gives that was
  * pushed the first of them: the same ones, with the same geometries, in whatever order.
  */
-template <gdal::FeatureKind kind_t>
+template <miniverse::IsLayer layer_t>
 void check_loads_as_a_table(const std::string& table, const std::vector<gdal::VectorSource>& sources, const std::vector<geo::Polygon>& locations) {
-  using Geometry = gdal::GeometryOf<kind_t>;
+  using Geometry = gdal::GeometryOf<typename layer_t::model_type>;
 
-  miniverse::Miniverse<kind_t> tables(test_db(), miniverse::Layer<kind_t>(table));
+  miniverse::Miniverse<layer_t> tables(test_db(), layer_t(table));
   tables.drop_tables();
   tables.create_tables();
-  tables.template push<kind_t>(DATASET, gdal::read_features<Geometry>(sources.front())).get();
+  tables.template push<layer_t::NAME>(DATASET, gdal::read_features<Geometry>(sources.front())).get();
 
   for ( const gdal::VectorSource& source : sources ) {
-    miniverse::Miniverse<kind_t> files(gdal::feature_file<kind_t>(source));
+    miniverse::Miniverse<layer_t> files(gdal::feature_file<layer_t>(source));
 
     for ( std::size_t i = 0; i < locations.size(); ++i ) {
       INFO(source.path << ", location " << i << ": " << bg::to_wkt(locations.at(i)));
       // The same features, whatever order each side gives them in: the table's ids are its own, the file's are not kept, and a
       // filtered read of a file may come in its index's order.
-      CHECK(wkts(files.template load<kind_t>(locations.at(i)).get()) == wkts(tables.template load<kind_t>(locations.at(i)).get()));
+      CHECK(wkts(files.template load<layer_t::NAME>(locations.at(i)).get()) == wkts(tables.template load<layer_t::NAME>(locations.at(i)).get()));
     }
   }
 
@@ -99,15 +99,15 @@ TEST_CASE("integration: a GeoPackage pushed a chunk at a time, as parts of one d
   to_geopackage(files.write("buildings.geojson", BUILDINGS), geopackage);
   const gdal::VectorSource source{.path = geopackage, .layer = {}, .id_field = "osm_id"};
 
-  miniverse::Miniverse world(test_db(), miniverse::Layer<Buildings>("miniverse_test_gdal_buildings"));
+  miniverse::Miniverse world(test_db(), Buildings("miniverse_test_gdal_buildings"));
   world.drop_tables();
   world.create_tables();
 
   // Parts of one push: a push per chunk would replace the dataset with each chunk, and leave the last alone.
-  miniverse::PushInParts<Buildings> parts = world.begin_push<Buildings>(DATASET).get();
-  const gdal::VectorRead            read = gdal::read_features<geo::MultiPolygon>(source, 1, [&](auto chunk) { parts.add(std::move(chunk)).get(); });
+  miniverse::PushInParts<Buildings::model_type> parts = world.begin_push<"buildings">(DATASET).get();
+  const gdal::VectorRead read = gdal::read_features<geo::MultiPolygon>(source, 1, [&](auto chunk) { parts.add(std::move(chunk)).get(); });
   parts.commit().get();
-  const auto loaded = world.load<Buildings>(bg::from_wkt<geo::Polygon>("POLYGON((-1 -1,30 -1,30 30,-1 30,-1 -1))")).get();
+  const auto loaded = world.load<"buildings">(bg::from_wkt<geo::Polygon>("POLYGON((-1 -1,30 -1,30 30,-1 30,-1 -1))")).get();
   const auto in_file = gdal::read_features<geo::MultiPolygon>(source);
 
   CHECK(read.features == 2);
@@ -128,13 +128,13 @@ TEST_CASE("integration: a file pushed in parts is written whole, or not at all",
   const gdal::VectorSource source{.path = path, .layer = {}, .id_field = {}};
   const auto               everywhere = bg::from_wkt<geo::Polygon>("POLYGON((-1 -1,30 -1,30 30,-1 30,-1 -1))");
 
-  miniverse::Miniverse world(test_db(), miniverse::Layer<Buildings>("miniverse_test_gdal_buildings"));
+  miniverse::Miniverse world(test_db(), Buildings("miniverse_test_gdal_buildings"));
   world.drop_tables();
   world.create_tables();
 
   // A chunk to a part. The first time the reader stops after its first chunk, as a file damaged half way would: nothing is written.
   {
-    auto        parts = world.begin_push<Buildings>(DATASET).get();
+    auto        parts = world.begin_push<"buildings">(DATASET).get();
     std::size_t chunks = 0;
     CHECK_THROWS_WITH(
         gdal::read_features<geo::MultiPolygon>(
@@ -149,12 +149,12 @@ TEST_CASE("integration: a file pushed in parts is written whole, or not at all",
         ContainsSubstring("ends here")
     );
   }
-  const auto after_half = world.load<Buildings>(everywhere).get();
+  const auto after_half = world.load<"buildings">(everywhere).get();
 
-  auto parts = world.begin_push<Buildings>(DATASET).get();
+  auto parts = world.begin_push<"buildings">(DATASET).get();
   std::ignore = gdal::read_features<geo::MultiPolygon>(source, 1, [&](auto chunk) { parts.add(std::move(chunk)).get(); });
   parts.commit().get();
-  const auto after_all = world.load<Buildings>(everywhere).get();
+  const auto after_all = world.load<"buildings">(everywhere).get();
 
   CHECK(after_half.empty());
   CHECK(after_all.size() == 2);

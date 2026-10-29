@@ -17,7 +17,7 @@
 #include <vector>
 
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer/way.hpp"
+#include "miniverse/model/way.hpp"
 #include "miniverse/osm/ways_in_memory.hpp"
 
 namespace miniverse::osm::detail {

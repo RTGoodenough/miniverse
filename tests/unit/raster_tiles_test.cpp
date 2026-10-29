@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "miniverse/geo/raster.hpp"
-#include "miniverse/layer/raster/tiles.hpp"
+#include "miniverse/model/raster/tiles.hpp"
 #include "support/geometry.hpp"
 #include "support/rasters.hpp"
 

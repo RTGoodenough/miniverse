@@ -17,7 +17,7 @@ endfunction()
 miniverse_example(features miniverse::miniverse)
 miniverse_example(road_network miniverse::miniverse)
 miniverse_example(elevation miniverse::miniverse)
-miniverse_example(own_kind miniverse::miniverse)
+miniverse_example(own_model miniverse::miniverse)
 
 if(TARGET miniverse_gdal)
   miniverse_example(import_vector miniverse::gdal)

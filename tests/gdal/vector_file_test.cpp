@@ -42,10 +42,10 @@ TEST_CASE("gdal: a file as a layer is loaded, streamed and verified with no data
   std::vector<std::size_t> sizes;
 
   world.verify().get();
-  const auto buildings = world.load<Buildings>(near_origin).get();
-  const auto shops = world.load<Shops>(near_origin).get();
+  const auto buildings = world.load<"buildings">(near_origin).get();
+  const auto shops = world.load<"shops">(near_origin).get();
   world
-      .stream<Buildings>(
+      .stream<"buildings">(
           near_origin, [&sizes](const miniverse::Features<geo::MultiPolygon>& chunk) { sizes.push_back(chunk.size()); }, {.chunk_rows = 2}
       )
       .get();
@@ -74,5 +74,5 @@ TEST_CASE("gdal: verify says what keeps a file from being a layer", "[gdal]") {
     CHECK_THAT(differ.differences().at(2), ContainsSubstring("no_system.csv") && ContainsSubstring("names no coordinate system"));
   }
 
-  CHECK_THROWS_WITH(world.load<Shops>(polygon("POLYGON((0 0,1 0,1 1,0 0))")).get(), ContainsSubstring("can't be opened"));
+  CHECK_THROWS_WITH(world.load<"shops">(polygon("POLYGON((0 0,1 0,1 1,0 0))")).get(), ContainsSubstring("can't be opened"));
 }

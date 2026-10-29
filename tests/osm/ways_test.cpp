@@ -93,7 +93,7 @@ const miniverse::Dataset TOWN_DATASET{"town"};
 
 using test::ids;
 
-struct Roads : miniverse::RoadLayer {};
+using Roads = miniverse::Layer<miniverse::RoadModel, "roads">;
 
 // Ways to tell locations apart by, not in the order of their ids: a square walked round (4), a vee (1), a short way far
 // off (3), and a slant whose box overlaps the vee's but which passes it by (2).
@@ -223,15 +223,15 @@ TEST_CASE("integration: a PBF file pushed a chunk at a time, as parts of one dat
   convert(files.write("town.osm", TOWN), pbf);
   const osm::WaySource source{.path = pbf, .keys = {"highway"}};
 
-  miniverse::Miniverse world(test_db(), miniverse::Layer<Roads>("miniverse_test_osm_roads"));
+  miniverse::Miniverse world(test_db(), Roads("miniverse_test_osm_roads"));
   world.drop_tables();
   world.create_tables();
 
   // Parts of one push: a push per chunk would replace the dataset with each chunk, and leave the last alone.
-  miniverse::PushInParts<Roads> parts = world.begin_push<Roads>(TOWN_DATASET).get();
-  const osm::WayRead            read = osm::read_ways(source, 1, [&](miniverse::Ways chunk) { parts.add(std::move(chunk)).get(); });
+  miniverse::PushInParts<Roads::model_type> parts = world.begin_push<"roads">(TOWN_DATASET).get();
+  const osm::WayRead                        read = osm::read_ways(source, 1, [&](miniverse::Ways chunk) { parts.add(std::move(chunk)).get(); });
   parts.commit().get();
-  const miniverse::Ways loaded = world.load<Roads>(bg::from_wkt<geo::Polygon>("POLYGON((-1 -1,12 -1,12 12,-1 12,-1 -1))")).get();
+  const miniverse::Ways loaded = world.load<"roads">(bg::from_wkt<geo::Polygon>("POLYGON((-1 -1,12 -1,12 12,-1 12,-1 -1))")).get();
   const miniverse::Ways in_file = osm::read_ways(source);
 
   CHECK(read.ways == 2);
@@ -250,7 +250,7 @@ TEST_CASE("integration: a PBF file pushed a chunk at a time, as parts of one dat
 TEST_CASE("osm: a file as a layer loads the ways that intersect a location, in the file's order, with no database", "[osm]") {
   const Files          files;
   miniverse::Miniverse world(osm::road_file<Roads>({.path = files.write("streets.osm", STREETS), .keys = {"highway"}}));
-  const auto           in = [&world](const std::string& wkt) { return ids(world.load<Roads>(polygon(wkt)).get()); };
+  const auto           in = [&world](const std::string& wkt) { return ids(world.load<"roads">(polygon(wkt)).get()); };
 
   world.verify().get();
 
@@ -268,7 +268,7 @@ TEST_CASE("osm: a road file is streamed a chunk at a time, and is read when its 
   std::vector<std::size_t> sizes;
 
   world
-      .stream<Roads>(
+      .stream<"roads">(
           polygon("POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1))"), [&sizes](const miniverse::Ways& chunk) { sizes.push_back(chunk.size()); },
           {.chunk_rows = 3}
       )
@@ -276,7 +276,7 @@ TEST_CASE("osm: a road file is streamed a chunk at a time, and is read when its 
 
   CHECK(sizes == std::vector<std::size_t>{3, 1});
   CHECK_THROWS_AS(osm::road_file<Roads>({.path = files.path_of("missing.osm.pbf"), .keys = {}}), std::runtime_error);
-  CHECK_THROWS_AS(world.push<Roads>(TOWN_DATASET, {}).get(), std::logic_error);
+  CHECK_THROWS_AS(world.push<"roads">(TOWN_DATASET, {}).get(), std::logic_error);
 }
 
 TEST_CASE("osm: a road file's stream stops when its callback wants no more, and hands over no empty chunk", "[osm]") {
@@ -287,7 +287,7 @@ TEST_CASE("osm: a road file's stream stops when its callback wants no more, and 
   std::vector<std::vector<std::int64_t>> halves;
 
   world
-      .stream<Roads>(
+      .stream<"roads">(
           everywhere,
           [&stopped](const miniverse::Ways& chunk) {
             stopped.push_back(ids(chunk));
@@ -297,7 +297,7 @@ TEST_CASE("osm: a road file's stream stops when its callback wants no more, and 
           {.chunk_rows = 1}
       )
       .get();
-  world.stream<Roads>(everywhere, [&halves](const miniverse::Ways& chunk) { halves.push_back(ids(chunk)); }, {.chunk_rows = 2}).get();
+  world.stream<"roads">(everywhere, [&halves](const miniverse::Ways& chunk) { halves.push_back(ids(chunk)); }, {.chunk_rows = 2}).get();
 
   CHECK(stopped == std::vector<std::vector<std::int64_t>>{{4}});
   CHECK(halves == std::vector<std::vector<std::int64_t>>{{4, 1}, {3, 2}});  // four ways in twos: no third chunk of none
@@ -312,7 +312,7 @@ TEST_CASE("osm: ways held in memory are found from several threads at once", "[o
   std::vector<std::future<miniverse::Ways>> loads;
   loads.reserve(16);
   for ( int i = 0; i < 16; ++i ) {
-    loads.push_back(world.load<Roads>(i % 2 == 0 ? near_vee : everywhere));
+    loads.push_back(world.load<"roads">(i % 2 == 0 ? near_vee : everywhere));
   }
 
   for ( std::size_t i = 0; i < loads.size(); ++i ) {
@@ -325,22 +325,24 @@ TEST_CASE("osm: ways given in the program are a layer too, and one of no points 
   ways.push_back({.id = 1, .node_ids = {1, 2}, .coordinates = {{0, 0}, {1, 1}}});
   ways.push_back({.id = 2});                                                               // no points at all
   ways.push_back({.id = 3, .node_ids = {3, 3}, .coordinates = {{0.5, 0.2}, {0.5, 0.2}}});  // no length: a point
-  miniverse::Miniverse world{miniverse::Layer<Roads>(std::make_shared<osm::RoadFile<Roads>>("three ways", std::move(ways)))};
+  miniverse::Miniverse world{Roads(std::make_shared<osm::RoadFile<Roads::model_type>>("three ways", std::move(ways)))};
 
-  CHECK(ids(world.load<Roads>(polygon("POLYGON((-1 -1,2 -1,2 2,-1 2,-1 -1))")).get()) == std::vector<std::int64_t>{1, 3});
-  CHECK(ids(world.load<Roads>(polygon("POLYGON((0.4 0.1,0.6 0.1,0.6 0.2,0.4 0.2,0.4 0.1))")).get()) == std::vector<std::int64_t>{3});  // on its edge
-  CHECK(world.load<Roads>(geo::Polygon{}).get().empty());
-  CHECK_THROWS_WITH(world.push<Roads>(TOWN_DATASET, {}).get(), ContainsSubstring("three ways"));
+  CHECK(ids(world.load<"roads">(polygon("POLYGON((-1 -1,2 -1,2 2,-1 2,-1 -1))")).get()) == std::vector<std::int64_t>{1, 3});
+  CHECK(
+      ids(world.load<"roads">(polygon("POLYGON((0.4 0.1,0.6 0.1,0.6 0.2,0.4 0.2,0.4 0.1))")).get()) == std::vector<std::int64_t>{3}
+  );  // on its edge
+  CHECK(world.load<"roads">(geo::Polygon{}).get().empty());
+  CHECK_THROWS_WITH(world.push<"roads">(TOWN_DATASET, {}).get(), ContainsSubstring("three ways"));
 }
 
 TEST_CASE("integration: a road file loads as the table it was pushed into", "[osm][integration]") {
   const Files          files;
   const osm::WaySource source{.path = files.write("streets.osm", STREETS), .keys = {"highway"}};
-  miniverse::Miniverse tables(test_db(), miniverse::Layer<Roads>("miniverse_test_osm_roads"));
+  miniverse::Miniverse tables(test_db(), Roads("miniverse_test_osm_roads"));
   miniverse::Miniverse from_file(osm::road_file<Roads>(source));
   tables.drop_tables();
   tables.create_tables();
-  tables.push<Roads>(TOWN_DATASET, osm::read_ways(source)).get();
+  tables.push<"roads">(TOWN_DATASET, osm::read_ways(source)).get();
 
   for ( const std::string wkt : {
             "POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1))",
@@ -359,8 +361,8 @@ TEST_CASE("integration: a road file loads as the table it was pushed into", "[os
     INFO(wkt);
     // The same ways: the table gives them in id order, the file in its own.
     const auto      by_id = [](const miniverse::Way& one, const miniverse::Way& other) { return one.id < other.id; };
-    miniverse::Ways in_table = tables.load<Roads>(polygon(wkt)).get();
-    miniverse::Ways in_file = from_file.load<Roads>(polygon(wkt)).get();
+    miniverse::Ways in_table = tables.load<"roads">(polygon(wkt)).get();
+    miniverse::Ways in_file = from_file.load<"roads">(polygon(wkt)).get();
     std::ranges::sort(in_file, by_id);
 
     REQUIRE(in_file.size() == in_table.size());
@@ -375,10 +377,10 @@ TEST_CASE("integration: a road file loads as the table it was pushed into", "[os
   // layer at once, and by PostGIS when it comes to test a way against it.
   geo::Polygon open_ring;
   open_ring.outer() = {{-1, -1}, {9, -1}, {9, 9}, {-1, 9}};
-  CHECK(tables.load<Roads>(geo::Polygon{}).get().empty());
-  CHECK(from_file.load<Roads>(geo::Polygon{}).get().empty());
-  CHECK_THROWS_AS(from_file.load<Roads>(open_ring).get(), std::invalid_argument);
-  CHECK_THROWS_AS(tables.load<Roads>(open_ring).get(), schemacht::postgres::QueryError);
+  CHECK(tables.load<"roads">(geo::Polygon{}).get().empty());
+  CHECK(from_file.load<"roads">(geo::Polygon{}).get().empty());
+  CHECK_THROWS_AS(from_file.load<"roads">(open_ring).get(), std::invalid_argument);
+  CHECK_THROWS_AS(tables.load<"roads">(open_ring).get(), schemacht::postgres::QueryError);
 
   tables.drop_tables();
 }

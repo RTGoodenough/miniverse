@@ -1,4 +1,4 @@
-#include "miniverse/layer/raster_layer.hpp"
+#include "miniverse/model/raster_model.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -16,8 +16,8 @@
 #include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/raster.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer/raster/reach.hpp"
-#include "miniverse/layer/raster/tiles.hpp"
+#include "miniverse/model/raster/reach.hpp"
+#include "miniverse/model/raster/tiles.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/table_name.hpp"
 
@@ -47,7 +47,7 @@ constexpr std::string_view MERGE_FUNCTION_DEFINITION =
 }  // namespace
 
 template <geo::Pixel pixel_t>
-std::vector<std::string> RasterLayer<pixel_t>::setup_sql(const schemacht::schema::TableName& table, const settings_type& grid) {
+std::vector<std::string> RasterModel<pixel_t>::setup_sql(const schemacht::schema::TableName& table, const geo::Grid<pixel_t>& grid) {
   geo::check_grid(grid);
 
   const std::int64_t ppd = grid.pixels_per_degree;
@@ -99,7 +99,7 @@ std::vector<std::string> RasterLayer<pixel_t>::setup_sql(const schemacht::schema
 }
 
 template <geo::Pixel pixel_t>
-std::vector<std::vector<typename RasterLayer<pixel_t>::row_type>> RasterLayer<pixel_t>::to_rows(result_type raster, const settings_type& grid) {
+std::vector<std::vector<typename RasterModel<pixel_t>::row_type>> RasterModel<pixel_t>::to_rows(result_type raster, const geo::Grid<pixel_t>& grid) {
   std::vector<raster::Tile<pixel_t>> tiles = raster::cut(raster, grid);
 
   const std::size_t tile_bytes = static_cast<std::size_t>(grid.tile_pixels) * static_cast<std::size_t>(grid.tile_pixels) * sizeof(pixel_t);
@@ -119,12 +119,12 @@ std::vector<std::vector<typename RasterLayer<pixel_t>::row_type>> RasterLayer<pi
 }
 
 template <geo::Pixel pixel_t>
-geo::Raster<pixel_t> RasterLayer<pixel_t>::from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location) {
+geo::Raster<pixel_t> RasterModel<pixel_t>::from_rows(std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location) {
   return raster::window(chunk_from_rows(std::move(rows), location), location);
 }
 
 template <geo::Pixel pixel_t>
-std::vector<geo::Raster<pixel_t>> RasterLayer<pixel_t>::chunk_from_rows(
+std::vector<geo::Raster<pixel_t>> RasterModel<pixel_t>::chunk_from_rows(
     std::vector<typename load_statement_type::result_type> rows, const geo::Polygon& location
 ) {
   const raster::Reach reach(location);
@@ -142,7 +142,7 @@ std::vector<geo::Raster<pixel_t>> RasterLayer<pixel_t>::chunk_from_rows(
 }
 
 template <geo::Pixel pixel_t>
-geo::Grid<pixel_t> RasterLayer<pixel_t>::settings_from_rows(std::vector<typename settings_statement_type::row_type> rows) {
+geo::Grid<pixel_t> RasterModel<pixel_t>::settings_from_rows(std::vector<typename settings_statement_type::row_type> rows) {
   if ( rows.size() != 1 ) {
     throw std::runtime_error("the table has no grid in its raster constraints: make it with Miniverse::create_table");
   }
@@ -169,13 +169,13 @@ geo::Grid<pixel_t> RasterLayer<pixel_t>::settings_from_rows(std::vector<typename
   };
 }
 
-template struct RasterLayer<std::int8_t>;
-template struct RasterLayer<std::uint8_t>;
-template struct RasterLayer<std::int16_t>;
-template struct RasterLayer<std::uint16_t>;
-template struct RasterLayer<std::int32_t>;
-template struct RasterLayer<std::uint32_t>;
-template struct RasterLayer<float>;
-template struct RasterLayer<double>;
+template struct RasterModel<std::int8_t>;
+template struct RasterModel<std::uint8_t>;
+template struct RasterModel<std::int16_t>;
+template struct RasterModel<std::uint16_t>;
+template struct RasterModel<std::int32_t>;
+template struct RasterModel<std::uint32_t>;
+template struct RasterModel<float>;
+template struct RasterModel<double>;
 
 }  // namespace miniverse

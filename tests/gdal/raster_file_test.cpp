@@ -40,17 +40,17 @@ TEST_CASE("gdal raster: a file as a layer loads the box's pixels on the grid, an
   std::vector<std::size_t> chunks;
 
   world.verify().get();
-  const Raster whole = world.load<Elevation>(polygon("POLYGON((1 1,3 1,3 3,1 3,1 1))")).get();
-  const Raster part = world.load<Elevation>(polygon("POLYGON((1.3 2.3,1.6 2.3,1.6 2.6,1.3 2.6,1.3 2.3))")).get();
-  const Raster past = world.load<Elevation>(polygon("POLYGON((2.5 2.5,3.5 2.5,3.5 3.5,2.5 3.5,2.5 2.5))")).get();
+  const Raster whole = world.load<"elevation">(polygon("POLYGON((1 1,3 1,3 3,1 3,1 1))")).get();
+  const Raster part = world.load<"elevation">(polygon("POLYGON((1.3 2.3,1.6 2.3,1.6 2.6,1.3 2.6,1.3 2.3))")).get();
+  const Raster past = world.load<"elevation">(polygon("POLYGON((2.5 2.5,3.5 2.5,3.5 3.5,2.5 3.5,2.5 2.5))")).get();
   world
-      .stream<Elevation>(
+      .stream<"elevation">(
           polygon("POLYGON((0 0,5 0,5 5,0 5,0 0))"), [&chunks](const std::vector<Raster>& tiles) { chunks.push_back(tiles.size()); },
           {.chunk_rows = 3}
       )
       .get();
 
-  CHECK(world.table_settings<Elevation>().get() == GRID);
+  CHECK(world.table_settings<"elevation">().get() == GRID);
   CHECK(whole.pixels == numbered(8, 8));
 
   // Widened to whole pixels: from 1.25 to 1.75 across, and from 2.75 down to 2.25.
@@ -68,13 +68,13 @@ TEST_CASE("gdal raster: a file as a layer loads the box's pixels on the grid, an
   CHECK(past.at(2, 2) == GRID_NODATA);
 
   CHECK(chunks == std::vector<std::size_t>{3, 1});
-  CHECK(world.load<Elevation>(polygon("POLYGON((40 40,41 40,41 41,40 41,40 40))")).get() == Raster{});
+  CHECK(world.load<"elevation">(polygon("POLYGON((40 40,41 40,41 41,40 41,40 40))")).get() == Raster{});
 
   // A triangle in the north west of the file: the south-east tile is in its box, and is not read.
   const geo::Polygon  triangle = polygon("POLYGON((1.1 1.2,2.8 2.9,1.1 2.9,1.1 1.2))");
   std::vector<Raster> reached;
-  world.stream<Elevation>(triangle, [&reached](std::vector<Raster> tiles) { reached.insert(reached.end(), tiles.begin(), tiles.end()); }).get();
-  const Raster askew = world.load<Elevation>(triangle).get();
+  world.stream<"elevation">(triangle, [&reached](std::vector<Raster> tiles) { reached.insert(reached.end(), tiles.begin(), tiles.end()); }).get();
+  const Raster askew = world.load<"elevation">(triangle).get();
 
   CHECK(reached.size() == 3);
   CHECK(askew.value_at({1.6, 2.4}) == 202);           // column 2, row 2 of the file
@@ -93,9 +93,9 @@ TEST_CASE("gdal raster: verify says what keeps a file from being a layer", "[gda
     CHECK_THAT(differ.differences().front(), ContainsSubstring("missing.tif") && ContainsSubstring("can't be opened"));
   }
 
-  CHECK_THROWS_WITH(world.load<Elevation>(polygon("POLYGON((0 0,1 0,1 1,0 0))")).get(), ContainsSubstring("can't be opened"));
+  CHECK_THROWS_WITH(world.load<"elevation">(polygon("POLYGON((0 0,1 0,1 1,0 0))")).get(), ContainsSubstring("can't be opened"));
   CHECK_THROWS_AS(
-      world.stream<Elevation>(polygon("POLYGON((0 0,1 0,1 1,0 0))"), [](const std::vector<Raster>& /*tiles*/) {}, {.chunk_rows = 0}).get(),
+      world.stream<"elevation">(polygon("POLYGON((0 0,1 0,1 1,0 0))"), [](const std::vector<Raster>& /*tiles*/) {}, {.chunk_rows = 0}).get(),
       std::invalid_argument
   );
 }

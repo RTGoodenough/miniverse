@@ -27,8 +27,8 @@
 
 namespace geo = miniverse::geo;
 
-struct Roads : miniverse::RoadLayer {};
-struct Elevation : miniverse::RasterLayer<std::int16_t> {};  // heights in whole metres
+using Roads = miniverse::Layer<miniverse::RoadModel, "roads">;
+using Elevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "elevation">;  // heights in whole metres
 
 using World = miniverse::Miniverse<Roads, Elevation>;
 using Heights = geo::Raster<std::int16_t>;
@@ -44,10 +44,10 @@ struct Survey {
 
 /** @return What `world` holds in `area`. The worker's part: nothing here knows whether a layer is a table or a file. */
 [[nodiscard]] Survey survey(World& world, const geo::Polygon& area) {
-  world.verify().get();  // the tables are the kinds' own, and the raster file opens
+  world.verify().get();  // the tables are the models' own, and the raster file opens
 
-  std::future<miniverse::Ways> roads_loading = world.load<Roads>(area);
-  std::future<Heights>         heights_loading = world.load<Elevation>(area);
+  std::future<miniverse::Ways> roads_loading = world.load<"roads">(area);
+  std::future<Heights>         heights_loading = world.load<"elevation">(area);
   const miniverse::Ways        roads = roads_loading.get();
   const Heights                heights = heights_loading.get();
 
@@ -76,15 +76,12 @@ int main(int argc, char** argv) {
               << " m\n";
 
     // A world of tables, which an uploader fills from the same files.
-    World tables(
-        example::conninfo(argc, argv), miniverse::Layer<Roads>("miniverse_example_local_roads"),
-        miniverse::Layer<Elevation>("miniverse_example_local_heights")
-    );
+    World tables(example::conninfo(argc, argv), Roads("miniverse_example_local_roads"), Elevation("miniverse_example_local_heights"));
     tables.drop_tables();
-    tables.create_table<Roads>();
-    tables.create_table<Elevation>(grid);
-    tables.push<Roads>(miniverse::Dataset{"streets"}, miniverse::osm::read_ways(streets)).get();
-    tables.push<Elevation>(miniverse::gdal::read_raster<std::int16_t>(heights, grid)).get();
+    tables.create_table<"roads">();
+    tables.create_table<"elevation">(grid);
+    tables.push<"roads">(miniverse::Dataset{"streets"}, miniverse::osm::read_ways(streets)).get();
+    tables.push<"elevation">(miniverse::gdal::read_raster<std::int16_t>(heights, grid)).get();
     const Survey from_tables = survey(tables, area);
 
     std::cout << "from tables: " << from_tables.roads << " roads of " << from_tables.road_nodes << " nodes, the highest ground "

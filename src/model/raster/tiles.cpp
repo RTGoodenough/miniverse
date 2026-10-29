@@ -1,4 +1,4 @@
-#include "miniverse/layer/raster/tiles.hpp"
+#include "miniverse/model/raster/tiles.hpp"
 
 #include <boost/geometry/algorithms/envelope.hpp>  // IWYU pragma: keep
 #include <boost/geometry/geometries/box.hpp>

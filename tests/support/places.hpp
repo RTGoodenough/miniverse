@@ -1,8 +1,8 @@
 #pragma once
 
-// A layer kind written by hand, as a user would: places, as points, loaded by polygon. Its conversions are only declared,
-// since the concepts check their signatures, not their bodies. It needs only the geo headers, not the built-in kinds:
-// tests/compile/own_kind_test.cpp makes a miniverse of it with world.hpp alone.
+// A model written by hand, as a user would: places, as points, loaded by polygon. Its conversions are only declared,
+// since the concepts check their signatures, not their bodies. It needs only the geo headers, not the built-in models:
+// tests/compile/own_model_test.cpp makes a miniverse of it with world.hpp alone.
 
 #include <cstdint>
 #include <string>
@@ -12,6 +12,7 @@
 #include "miniverse/geo/column_types.hpp"
 #include "miniverse/geo/operations.hpp"
 #include "miniverse/geo/types.hpp"
+#include "miniverse/model/writes.hpp"
 #include "schemacht/postgres/statements.hpp"
 #include "schemacht/query/predicate.hpp"
 #include "schemacht/query/prepared.hpp"
@@ -32,6 +33,7 @@ constexpr auto PLACES_IN =
 struct Places {
   static constexpr std::int32_t LAYOUT = 1;
 
+  using writes = miniverse::writes::Plain;
   using result_type = std::vector<miniverse::geo::Point>;
   using schema_type = PlacesSchema;
   using load_statement_type = schemacht::query::Prepared<PLACES_IN>;

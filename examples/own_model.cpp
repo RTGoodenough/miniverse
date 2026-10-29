@@ -1,10 +1,10 @@
-// A kind of layer of your own: a table with the columns you choose, and the structure it is loaded into.
+// A model of your own: a table with the columns you choose, and the structure it is loaded into.
 //
-// `FeatureLayer` keeps what a feature is in its tags. A kind written by hand has typed columns instead, its own query, and
+// `FeatureModel` keeps what a feature is in its tags. A model written by hand has typed columns instead, its own query, and
 // its own result: here towns, with a name and a population, loaded the largest first. It is loaded and pushed like the
-// built-in kinds, which are written the same way (include/miniverse/concepts/miniverse.hpp says what a kind needs).
+// built-in models, which are written the same way (include/miniverse/concepts/miniverse.hpp says what a model needs).
 //
-// Run with a libpq connection string to a database with PostGIS: miniverse_example_own_kind "host=localhost dbname=gis user=gis"
+// Run with a libpq connection string to a database with PostGIS: miniverse_example_own_model "host=localhost dbname=gis user=gis"
 // It creates the table miniverse_example_towns, and drops it when it is done.
 
 #include <cstdint>
@@ -31,10 +31,11 @@ struct Town {
   geo::Point   centre;
 };
 
-/** @brief The layer kind of towns: one row each, loaded by where its centre is, the largest first. */
-struct Towns {
+/** @brief The model of towns: one row each, loaded by where its centre is, the largest first. */
+struct TownModel {
   static constexpr std::int32_t LAYOUT = 1;  // raised when the table's layout changes
 
+  using writes = miniverse::writes::Plain;  // a push writes its rows; a town already there is updated (write_statement)
   using result_type = std::vector<Town>;
 
   // Each column is NOT NULL. The schema's name, `towns`, is only a placeholder: the layer names its table.
@@ -86,15 +87,17 @@ struct Towns {
   }
 };
 
+using Towns = miniverse::Layer<TownModel, "towns">;
+
 int main(int argc, char** argv) {
   try {
-    miniverse::Miniverse world(example::conninfo(argc, argv), miniverse::Layer<Towns>("miniverse_example_towns"));
+    miniverse::Miniverse world(example::conninfo(argc, argv), Towns("miniverse_example_towns"));
 
     world.drop_tables();
     world.create_tables();
 
     world
-        .push<Towns>({
+        .push<"towns">({
             {.id = 1, .name = "Ashford", .population = 12'400, .centre = geo::Point(10.10, 50.20)},
             {.id = 2, .name = "Brook", .population = 870, .centre = geo::Point(10.30, 50.25)},
             {.id = 3, .name = "Castleton", .population = 48'000, .centre = geo::Point(10.60, 50.10)},
@@ -102,11 +105,11 @@ int main(int argc, char** argv) {
         })
         .get();
 
-    // This kind's write is an upsert, so a second push of a town replaces it.
-    world.push<Towns>({{.id = 2, .name = "Brook", .population = 910, .centre = geo::Point(10.30, 50.25)}}).get();
+    // This model's write is an upsert, so a second push of a town replaces it.
+    world.push<"towns">({{.id = 2, .name = "Brook", .population = 910, .centre = geo::Point(10.30, 50.25)}}).get();
 
     std::cout << "the towns of the area, the largest first:\n";
-    for ( const Town& town : world.load<Towns>(example::box(10, 50, 11, 51)).get() ) {
+    for ( const Town& town : world.load<"towns">(example::box(10, 50, 11, 51)).get() ) {
       std::cout << "  " << town.name << ": " << town.population << '\n';
     }
 

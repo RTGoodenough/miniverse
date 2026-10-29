@@ -1,13 +1,13 @@
-// miniverse: makes, fills and checks the tables of a miniverse database from the command line, for the built-in kinds of
-// layer. A program with layers of its own kinds uses the library instead.
+// miniverse: makes, fills and checks the tables of a miniverse database from the command line, for the built-in models. A
+// program with models of its own uses the library instead.
 //
-//   miniverse create   --kind KIND TABLE [--pixels-per-degree N | --metres M] [--tile-pixels N] [--nodata V]
-//   miniverse import   --kind KIND TABLE FILE... [--dataset NAME] [--layer NAME] [--keys KEY,...] [--chunk N]
+//   miniverse create   --model MODEL TABLE [--pixels-per-degree N | --metres M] [--tile-pixels N] [--nodata V]
+//   miniverse import   --model MODEL TABLE FILE... [--dataset NAME] [--layer NAME] [--keys KEY,...] [--chunk N]
 //                      [--band N] [--resampling NAME] [--window-tiles N]
-//   miniverse remove   --kind KIND TABLE DATASET
-//   miniverse verify   --kind KIND TABLE
-//   miniverse settings --kind KIND TABLE
-//   miniverse datasets --kind KIND TABLE
+//   miniverse remove   --model MODEL TABLE DATASET
+//   miniverse verify   --model MODEL TABLE
+//   miniverse settings --model MODEL TABLE
+//   miniverse datasets --model MODEL TABLE
 //
 // `--db` gives the libpq connection string; without it, libpq's defaults and the PG* variables say where. TABLE is `table`
 // or `schema.table`. It exits with 0 when the command is done, 1 when it failed, and 2 for arguments it can't take, before
@@ -22,16 +22,16 @@
 #include <string>
 
 #include "commands.hpp"
-#include "kinds.hpp"
+#include "models.hpp"
 
 namespace {
 
 constexpr int FAILED = 1;
 constexpr int CANT_TAKE = 2;
 
-/** @brief Adds the options every command takes to `command`: the kind of table, and its name. */
+/** @brief Adds the options every command takes to `command`: the table's model, and its name. */
 void add_table(CLI::App& command, tool::Table& table) {
-  command.add_option("--kind", table.kind, "What the table holds")->required()->check(CLI::IsMember(tool::kind_names()));
+  command.add_option("--model", table.model, "What the table holds")->required()->check(CLI::IsMember(tool::model_names()));
   command.add_option("table", table.name, "The table: table, or schema.table")->required();
 }
 
@@ -39,7 +39,7 @@ void add_table(CLI::App& command, tool::Table& table) {
 
 int main(int argc, char** argv) {
   try {
-    CLI::App app("Makes, fills and checks the tables of a miniverse database, for the built-in kinds of layer.", "miniverse");
+    CLI::App app("Makes, fills and checks the tables of a miniverse database, for the built-in models.", "miniverse");
     app.require_subcommand(1);
     app.fallthrough();  // --db before or after the command
 
@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
     add_table(*remove, table);
     remove->add_option("dataset", dataset, "The dataset")->required();
 
-    CLI::App* verify = app.add_subcommand("verify", "Check a table is as its kind says");
+    CLI::App* verify = app.add_subcommand("verify", "Check a table is as its model says");
     add_table(*verify, table);
 
     CLI::App* settings = app.add_subcommand("settings", "Show the grid a raster table was made with");

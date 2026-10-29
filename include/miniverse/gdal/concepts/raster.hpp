@@ -10,23 +10,23 @@
 
 /**
  * @file
- * Which layer kinds a raster file can be read as, in place of a table (raster_file.hpp): those whose load gives a
+ * Which models a raster file can be read as, in place of a table (raster_file.hpp): those whose load gives a
  * `geo::Raster` on a `geo::Grid`.
  */
 namespace miniverse::gdal {
 
-/** @brief The pixel type of the rasters a load of `kind_t` gives. */
-template <typename kind_t>
-using PixelOf = decltype(kind_t::settings_type::nodata);
+/** @brief The pixel type of the rasters a load of `model_t` gives. */
+template <typename model_t>
+using PixelOf = decltype(SettingsOf<model_t>::nodata);
 
 /**
- * @brief Whether `kind_t` is a layer kind of rasters on a grid: a load gives a `geo::Raster`, a streamed load its tiles, and
- * its settings are a `geo::Grid`. Every `RasterLayer` is one.
+ * @brief Whether `model_t` is a model of rasters on a grid: a load gives a `geo::Raster`, a streamed load its tiles, and
+ * its settings are a `geo::Grid`. Every `RasterModel` is one.
  */
-template <typename kind_t>
-concept RasterKind = LayerKind<kind_t> && HasSettings<kind_t> && HasOwnChunks<kind_t> && requires { typename PixelOf<kind_t>; } &&
-                     geo::Pixel<PixelOf<kind_t>> && std::same_as<typename kind_t::settings_type, geo::Grid<PixelOf<kind_t>>> &&
-                     std::same_as<typename kind_t::result_type, geo::Raster<PixelOf<kind_t>>> &&
-                     std::same_as<typename kind_t::chunk_type, std::vector<geo::Raster<PixelOf<kind_t>>>>;
+template <typename model_t>
+concept ReadsRasters = LayerModel<model_t> && WritesSettings<model_t> && HasOwnChunks<model_t> && requires { typename PixelOf<model_t>; } &&
+                       geo::Pixel<PixelOf<model_t>> && std::same_as<SettingsOf<model_t>, geo::Grid<PixelOf<model_t>>> &&
+                       std::same_as<typename model_t::result_type, geo::Raster<PixelOf<model_t>>> &&
+                       std::same_as<typename model_t::chunk_type, std::vector<geo::Raster<PixelOf<model_t>>>>;
 
 }  // namespace miniverse::gdal

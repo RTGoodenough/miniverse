@@ -18,17 +18,17 @@
 #include "miniverse/osm/ways.hpp"
 #include "support.hpp"
 
-struct Roads : miniverse::RoadLayer {};
+using Roads = miniverse::Layer<miniverse::RoadModel, "roads">;
 
 int main(int argc, char** argv) {
   try {
-    miniverse::Miniverse world(example::conninfo(argc, argv), miniverse::Layer<Roads>("miniverse_example_osm_roads"));
+    miniverse::Miniverse world(example::conninfo(argc, argv), Roads("miniverse_example_osm_roads"));
 
     world.drop_tables();
     world.create_tables();
 
     // Each chunk is waited for before the next is read, so one chunk is held at a time.
-    miniverse::PushInParts<Roads> roads = world.begin_push<Roads>(miniverse::Dataset{"town.osm.pbf"}).get();
+    miniverse::PushInParts<Roads::model_type> roads = world.begin_push<"roads">(miniverse::Dataset{"town.osm.pbf"}).get();
 
     // The ways with a `highway` tag, which are OpenStreetMap's roads and paths.
     const miniverse::osm::WayRead read =
@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     std::cout << read.ways << " roads written, " << read.without_nodes << " left out\n";
 
     // Each has its id, its tags as the file has them, its line, and the ids of its nodes, which roads that meet share.
-    for ( const miniverse::Way& road : world.load<Roads>(example::box(9.99, 49.99, 10.01, 50.01)).get() ) {
+    for ( const miniverse::Way& road : world.load<"roads">(example::box(9.99, 49.99, 10.01, 50.01)).get() ) {
       std::cout << "  way " << road.id << ", " << road.node_ids.size() << " nodes: " << road.tags.text() << '\n';
     }
 

@@ -1,6 +1,6 @@
 #pragma once
 
-// GeoJSON and CSV written as text for the vector tests, a GeoPackage GDAL makes from one, and the feature kinds they are read as.
+// GeoJSON and CSV written as text for the vector tests, a GeoPackage GDAL makes from one, and the feature models they are read as.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -12,7 +12,8 @@
 #include <vector>
 
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer/feature_layer.hpp"
+#include "miniverse/layer.hpp"
+#include "miniverse/model/feature_model.hpp"
 
 namespace test {
 
@@ -84,9 +85,9 @@ inline void to_geopackage(const std::string& from, const std::string& to) {
   GDALClose(source);
 }
 
-struct Buildings : miniverse::FeatureLayer<miniverse::geo::MultiPolygon> {};
-struct Shops : miniverse::FeatureLayer<miniverse::geo::Point> {};
-struct Paths : miniverse::FeatureLayer<miniverse::geo::LineString> {};
+using Buildings = miniverse::Layer<miniverse::FeatureModel<miniverse::geo::MultiPolygon>, "buildings">;
+using Shops = miniverse::Layer<miniverse::FeatureModel<miniverse::geo::Point>, "shops">;
+using Paths = miniverse::Layer<miniverse::FeatureModel<miniverse::geo::LineString>, "paths">;
 
 // Areas to tell locations apart by: a square with a hole; two triangles far from each other; a square whose ring runs
 // clockwise, as a shapefile's do; a small square; and one that only touches the corner of a location below.
