@@ -1,10 +1,13 @@
 #pragma once
 
+#include <chrono>
+#include <cstdint>
 #include <string>
 
 /**
  * @file
- * The unit a producer pushes and replaces: an export of a region, named by whoever pushes it. A load never sees it.
+ * The unit a producer pushes and replaces: an export of a region, named by whoever pushes it, and what a table's list of
+ * them says of one. A load never sees it.
  */
 namespace miniverse {
 
@@ -18,6 +21,15 @@ struct Dataset {
   std::string name;  ///< Free text: see above.
 
   [[nodiscard]] bool operator==(const Dataset&) const = default;
+};
+
+/** @brief A dataset of a layer, as `Miniverse::datasets` lists them. */
+struct DatasetInfo {
+  std::string                           name;
+  std::chrono::system_clock::time_point pushed;    ///< When the push that last wrote it committed, by the server's clock.
+  std::uint64_t                         rows = 0;  ///< Counted when listed.
+
+  [[nodiscard]] bool operator==(const DatasetInfo&) const = default;
 };
 
 }  // namespace miniverse

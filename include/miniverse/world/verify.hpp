@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "miniverse/concepts/miniverse.hpp"
+#include "miniverse/tables_differ.hpp"
 #include "miniverse/world/registry.hpp"
 #include "miniverse/world/settings.hpp"
 #include "schemacht/postgres/async_client.hpp"
@@ -20,42 +21,9 @@
 /**
  * @file
  * The check of a layer's table for `Miniverse::verify`: against the registry's record of it, then its model's schema and
- * settings; and what a `verify` fails with, every layer's problems as one `TablesDiffer`.
+ * settings. What a `verify` fails with is tables_differ.hpp.
  */
 namespace miniverse {
-
-/**
- * @brief What `Miniverse::verify` fails with when a layer's table is not as its model says, or its reader finds something wrong
- * with what it reads: every difference of every layer, as lines of `what()` and one by one in `differences()`. A check that
- * could not be run at all fails with its own error.
- */
-class TablesDiffer : public std::runtime_error {
- public:
-  /** @param differences Each the table's name, or what a reader reads, then a colon and what differs; in the layers' order. */
-  explicit TablesDiffer(std::vector<std::string> differences) : std::runtime_error(message_of(differences)), _differences(std::move(differences)) {}
-
-  /** @return The differences given, in the layers' order. */
-  [[nodiscard]] const std::vector<std::string>& differences() const noexcept { return _differences; }
-
- private:
-  std::vector<std::string> _differences;
-
-  [[nodiscard]] static std::string message_of(const std::vector<std::string>& differences) {
-    std::string message = "the miniverse's tables are not as its layers say:";
-    for ( const std::string& difference : differences ) {
-      message += "\n  " + difference;
-    }
-
-    return message;
-  }
-
- public:
-  TablesDiffer(const TablesDiffer&) = default;
-  TablesDiffer(TablesDiffer&&) noexcept = default;
-  TablesDiffer& operator=(const TablesDiffer&) = default;
-  TablesDiffer& operator=(TablesDiffer&&) noexcept = default;
-  ~TablesDiffer() override = default;
-};
 
 namespace detail {
 

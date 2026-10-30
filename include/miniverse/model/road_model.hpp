@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <tuple>
 #include <vector>
 
 #include "miniverse/dataset.hpp"
@@ -100,7 +99,7 @@ struct RoadModel {
    * @return The write of `rows`: a way whose id is not in the table is a new row; one whose id is there updates that row
    * (dataset, nodes, line, tags and stamp). Two ways of one id in one statement fail it.
    */
-  [[nodiscard]] static schemacht::postgres::SchemaStatement<schema_type, std::tuple<>> write_statement(const std::vector<insert_row_type>& rows) {
+  [[nodiscard]] static auto write_statement(const std::vector<insert_row_type>& rows) {
     return schemacht::postgres::upsert_statement<schema_type>(rows);
   }
 

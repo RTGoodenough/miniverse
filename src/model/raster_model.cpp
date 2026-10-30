@@ -142,7 +142,7 @@ std::vector<geo::Raster<pixel_t>> RasterModel<pixel_t>::chunk_from_rows(
 }
 
 template <geo::Pixel pixel_t>
-geo::Grid<pixel_t> RasterModel<pixel_t>::settings_from_rows(std::vector<typename settings_statement_type::row_type> rows) {
+geo::Grid<pixel_t> RasterModel<pixel_t>::settings_from_rows(SettingsRows<RasterModel> rows) {
   if ( rows.size() != 1 ) {
     throw std::runtime_error("the table has no grid in its raster constraints: make it with Miniverse::create_table");
   }

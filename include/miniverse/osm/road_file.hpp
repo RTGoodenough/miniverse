@@ -21,8 +21,9 @@ namespace miniverse::osm {
 
 /**
  * @brief The reader of ways held in memory as a layer of `model_t`: what `road_file` makes from a file's ways, and a program can
- * make from ways of its own. A load gives the ways that intersect the location, in the order they were given, with their tags
- * as given. `Miniverse::verify` has nothing to check once it is made.
+ * make from ways of its own, which is why it is public where the GDAL file readers are not. A load gives the ways that
+ * intersect the location, in the order they were given, with their tags as given. `Miniverse::verify` has nothing to check
+ * once it is made.
  */
 template <ReadsWays model_t>
 class RoadFile : public Reader<model_t> {

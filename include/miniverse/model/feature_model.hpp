@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include <tuple>
 #include <vector>
 
 #include "miniverse/dataset.hpp"
@@ -104,7 +103,7 @@ struct FeatureModel {
   [[nodiscard]] static std::vector<std::vector<insert_row_type>> to_rows(result_type features, const Dataset& dataset, std::int64_t stamp);
 
   /** @return The insert of `rows`, each a new row. */
-  [[nodiscard]] static schemacht::postgres::SchemaStatement<schema_type, std::tuple<>> write_statement(const std::vector<insert_row_type>& rows) {
+  [[nodiscard]] static auto write_statement(const std::vector<insert_row_type>& rows) {
     return schemacht::postgres::insert_statement<schema_type>(rows);
   }
 

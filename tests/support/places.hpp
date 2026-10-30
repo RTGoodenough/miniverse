@@ -6,7 +6,6 @@
 
 #include <cstdint>
 #include <string>
-#include <tuple>
 #include <vector>
 
 #include "miniverse/geo/column_types.hpp"
@@ -38,9 +37,9 @@ struct Places {
   using schema_type = PlacesSchema;
   using load_statement_type = schemacht::query::Prepared<PLACES_IN>;
 
-  static std::vector<std::string>                                        setup_sql(const schemacht::schema::TableName& table);
-  static std::vector<std::vector<schema_type::row_type>>                 to_rows(result_type places);
-  static schemacht::postgres::SchemaStatement<schema_type, std::tuple<>> write_statement(const std::vector<schema_type::row_type>& rows);
+  static std::vector<std::string>                        setup_sql(const schemacht::schema::TableName& table);
+  static std::vector<std::vector<schema_type::row_type>> to_rows(result_type places);
+  static auto write_statement(const std::vector<schema_type::row_type>& rows) { return schemacht::postgres::insert_statement<schema_type>(rows); }
   static result_type from_rows(std::vector<load_statement_type::result_type> rows, const miniverse::geo::Polygon& location);
 };
 

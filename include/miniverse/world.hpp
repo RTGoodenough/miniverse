@@ -17,7 +17,8 @@
 #include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/dataset.hpp"  // IWYU pragma: export
 #include "miniverse/geo/types.hpp"
-#include "miniverse/layer.hpp"  // IWYU pragma: export
+#include "miniverse/layer.hpp"          // IWYU pragma: export
+#include "miniverse/tables_differ.hpp"  // IWYU pragma: export
 #include "miniverse/world/async.hpp"
 #include "miniverse/world/datasets.hpp"
 #include "miniverse/world/load.hpp"
@@ -25,7 +26,7 @@
 #include "miniverse/world/push_in_parts.hpp"  // IWYU pragma: export
 #include "miniverse/world/settings.hpp"
 #include "miniverse/world/tables.hpp"
-#include "miniverse/world/verify.hpp"  // IWYU pragma: export
+#include "miniverse/world/verify.hpp"
 #include "schemacht/postgres/database.hpp"
 #include "schemacht/schema/table_name.hpp"
 #include "schemacht/util/compile_time.hpp"

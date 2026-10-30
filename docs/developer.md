@@ -11,9 +11,10 @@ include/miniverse/
   internal_schema.hpp    the schema the library keeps for itself in a database
   world/                 one idea each: load.hpp (loads and streams), push.hpp, push_in_parts.hpp (PushInParts and the
                          push it runs), step_thread.hpp (the thread a push in parts runs on), datasets.hpp (stamp, lock,
-                         sweep, remove, list), verify.hpp (TablesDiffer, the checks), tables.hpp (make, drop), registry.hpp
+                         sweep, remove, list), verify.hpp (the checks), tables.hpp (make, drop), registry.hpp
                          (what a database remembers about its layers: layouts and datasets), settings.hpp, async.hpp
-  dataset.hpp            Dataset: the export a vector push writes under and replaces
+  dataset.hpp            Dataset: the export a vector push writes under and replaces; DatasetInfo, one as listed
+  tables_differ.hpp      TablesDiffer: what verify fails with
   layer.hpp              Layer<Model, "name">: a model under a name, in a table named at run time or read by a reader; IsLayer
   reader.hpp             Reader<Model>
   location.hpp           check_location: what a reader's load holds a polygon to, as a table's would refuse

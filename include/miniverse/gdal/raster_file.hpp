@@ -25,9 +25,9 @@ namespace miniverse::gdal {
 namespace detail {
 
 /**
- * @brief The reader of a raster file as a layer of `model_t`, behind `raster_file`. A load gives the pixels in the location's box
- * on the layer's grid, as a table the file was pushed into gives them. Each load opens the file for itself, so loads run side
- * by side.
+ * @brief The reader of a raster file as a layer of `model_t`, behind `raster_file`, which is the only way to one, as for a
+ * `FeatureFile`. A load gives the pixels in the location's box on the layer's grid, as a table the file was pushed into gives
+ * them. Each load opens the file for itself, so loads run side by side.
  */
 template <ReadsRasters model_t>
 class RasterFile : public Reader<model_t> {

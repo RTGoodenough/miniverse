@@ -23,7 +23,8 @@ namespace miniverse::gdal {
 namespace detail {
 
 /**
- * @brief The reader of a vector file as a layer of `model_t`, behind `feature_file`. A load gives the file's features that
+ * @brief The reader of a vector file as a layer of `model_t`, behind `feature_file`, which is the only way to one: a program
+ * has no features of its own to give it, as it has ways for an `osm::RoadFile`. A load gives the file's features that
  * intersect the location, in the file's order, with their tags as `read_features` writes them. Each load opens the file for
  * itself, so loads run side by side.
  */

@@ -26,15 +26,6 @@
  */
 namespace miniverse {
 
-/** @brief A dataset of a layer, as `Miniverse::datasets` lists them. */
-struct DatasetInfo {
-  std::string                           name;
-  std::chrono::system_clock::time_point pushed;    ///< When the push that last wrote it committed, by the server's clock.
-  std::uint64_t                         rows = 0;  ///< Counted when listed.
-
-  [[nodiscard]] bool operator==(const DatasetInfo&) const = default;
-};
-
 namespace registry {
 
 /** @brief The name of the table argument 0 resolves to, `schema.table`, as the registry keys it: SQL to put around `$1`. */

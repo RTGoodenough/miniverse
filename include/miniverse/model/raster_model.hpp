@@ -7,6 +7,7 @@
 #include <tuple>
 #include <vector>
 
+#include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/geo/column_types.hpp"
 #include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/operations.hpp"
@@ -158,7 +159,7 @@ struct RasterModel {
    * @throws std::runtime_error if the table has no grid in its constraints (it was not made by `create_table`), or its pixels
    * are not 1/n degree for a whole number n, or its nodata value is not a `pixel_t`.
    */
-  [[nodiscard]] static geo::Grid<pixel_t> settings_from_rows(std::vector<typename settings_statement_type::row_type> rows);
+  [[nodiscard]] static geo::Grid<pixel_t> settings_from_rows(SettingsRows<RasterModel> rows);
 };
 
 extern template struct RasterModel<std::int8_t>;
