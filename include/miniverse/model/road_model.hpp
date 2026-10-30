@@ -27,7 +27,7 @@
  */
 namespace miniverse {
 
-/** @brief A road table's own columns; the dataset's are in dataset_columns.hpp. */
+/** @brief A road table's own columns; the dataset's are in writes.hpp. */
 namespace road {
 
 /** @brief The way's own id, the source's (OpenStreetMap's way id): the table's key (see `RoadModel`). */
@@ -87,7 +87,7 @@ struct RoadModel {
   /** @brief A statement's worth of ways: a way is some hundreds of bytes to a few kilobytes as text. */
   static constexpr std::size_t WAYS_PER_STATEMENT = 5000;
 
-  /** @return The GiST index on `geom`, unnamed: PostgreSQL names it. The dataset index is `writes::Datasets`'s. */
+  /** @return The GiST index on `geom`, unnamed: PostgreSQL names it. The dataset index is the library's (world/datasets.hpp). */
   [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table);
 
   /**

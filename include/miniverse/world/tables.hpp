@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "miniverse/concepts/miniverse.hpp"
+#include "miniverse/world/datasets.hpp"
 #include "miniverse/world/registry.hpp"
 #include "schemacht/postgres/database.hpp"
 #include "schemacht/postgres/statements.hpp"
@@ -27,7 +28,7 @@ inline void make_registry(schemacht::postgres::Transaction& transaction) {
 }
 
 /**
- * @brief Makes `table` as the model's schema says, runs `setup` on it, then what its `writes` adds (a dataset index), and
+ * @brief Makes `table` as the model's schema says, runs `setup` on it, then the dataset index for a model with datasets, and
  * records it in the registry with the model's layout, in one transaction, and waits for it. Each statement is waited for in
  * turn, so the error is the failing statement's own; a throw drops the transaction, which rolls it back.
  */
@@ -36,7 +37,7 @@ void make_table(
     schemacht::postgres::Database& database, const schemacht::schema::Table<typename model_t::schema_type>& table, std::vector<std::string> setup
 ) {
   if constexpr ( WritesDatasets<model_t> ) {
-    for ( std::string& sql : model_t::writes::setup_sql(table.name()) ) {
+    for ( std::string& sql : dataset_index_sql(table.name()) ) {
       setup.push_back(std::move(sql));
     }
   }

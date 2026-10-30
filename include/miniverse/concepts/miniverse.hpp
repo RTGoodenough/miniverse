@@ -9,7 +9,6 @@
 
 #include "miniverse/dataset.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/model/dataset_columns.hpp"
 #include "miniverse/model/writes.hpp"
 #include "schemacht/postgres/concepts/statements.hpp"
 #include "schemacht/schema/table.hpp"
@@ -36,7 +35,7 @@
  *     `settings_from_rows(rows)`, which read the settings back from the table before `to_rows(result, settings)`.
  *   - `writes::Datasets` (a `FeatureModel` or `RoadModel`): `dataset::Name` and `dataset::Pushed` among the schema's columns,
  *     `setup_sql(table)`, and `to_rows(result, dataset, stamp)`, which marks each row with the dataset's name and the push's
- *     stamp. The sweep and the remove of a dataset, and the dataset index, are the policy's own.
+ *     stamp. The sweep and the remove of a dataset, and the dataset index, are the library's (world/datasets.hpp).
  * - `setup_sql(table, ...)`: statements run once the table is made, such as its spatial index, written with `table.quoted()`.
  * - `from_rows(rows, location)`: the load's rows as a `result_type`; `to_rows(result, ...)`: the other way, in batches of one
  *   statement each. The model sizes the batches: some tens of megabytes of text at most, since a push holds one at a time.
@@ -99,18 +98,9 @@ concept WritesDatasets = std::same_as<typename model_t::writes, writes::Datasets
                          model_t::schema_type::template has_column<dataset::Pushed::COLUMN_NAME>() &&
                          std::same_as<typename model_t::schema_type::template field_by_name<dataset::Name::COLUMN_NAME>, dataset::Name> &&
                          std::same_as<typename model_t::schema_type::template field_by_name<dataset::Pushed::COLUMN_NAME>, dataset::Pushed> &&
-                         requires(
-                             const schemacht::schema::TableName& table, model_t::result_type data, const Dataset& dataset, std::int64_t stamp,
-                             const schemacht::schema::Table<typename model_t::schema_type>& schema_table
-                         ) {
+                         requires(const schemacht::schema::TableName& table, model_t::result_type data, const Dataset& dataset, std::int64_t stamp) {
                            { model_t::setup_sql(table) } -> std::same_as<std::vector<std::string>>;
                            { model_t::to_rows(std::move(data), dataset, stamp) } -> std::same_as<RowBatches<model_t>>;
-                           {
-                             model_t::writes::template sweep<typename model_t::schema_type>::bind(dataset.name, stamp).on(schema_table)
-                           } -> schemacht::postgres::CommandStatement;
-                           {
-                             model_t::writes::template remove<typename model_t::schema_type>::bind(dataset.name).on(schema_table)
-                           } -> schemacht::postgres::CommandStatement;
                          };
 
 /** @brief Whether `model_t` says what a streamed chunk of it is, other than a `result_type`: see the top of this file. */

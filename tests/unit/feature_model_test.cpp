@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "miniverse/miniverse.hpp"
+#include "miniverse/world/datasets.hpp"
 #include "schemacht/json/json.hpp"
 #include "schemacht/schema/field.hpp"
 #include "support/checks.hpp"
@@ -60,13 +61,13 @@ TEST_CASE("feature model: its statements are aimed at its table, in its geometry
       R"(SELECT "feature_id", "geom", "tags" FROM "osm_buildings" WHERE ST_Intersects("geom", $1::geometry(Polygon,4326)) ORDER BY "feature_id")"
   );
   CHECK(Buildings::model_type::setup_sql(layer.table().name()) == std::vector<std::string>{R"(CREATE INDEX ON "osm_buildings" USING gist (geom))"});
-  CHECK(Buildings::model_type::writes::setup_sql(layer.table().name()) == std::vector<std::string>{R"(CREATE INDEX ON "osm_buildings" (dataset))"});
+  CHECK(miniverse::detail::dataset_index_sql(layer.table().name()) == std::vector<std::string>{R"(CREATE INDEX ON "osm_buildings" (dataset))"});
   CHECK(
-      std::string(Buildings::model_type::writes::sweep<Buildings::model_type::schema_type>::bind(DATASET.name, STAMP).on(layer.table()).sql()) ==
+      std::string(miniverse::detail::sweep_statement<Buildings::model_type>(layer.table(), DATASET.name, STAMP).sql()) ==
       R"(DELETE FROM "osm_buildings" WHERE "dataset" = $1 AND "pushed" <> $2)"
   );
   CHECK(
-      std::string(Buildings::model_type::writes::remove<Buildings::model_type::schema_type>::bind(DATASET.name).on(layer.table()).sql()) ==
+      std::string(miniverse::detail::remove_statement<Buildings::model_type>(layer.table(), DATASET.name).sql()) ==
       R"(DELETE FROM "osm_buildings" WHERE "dataset" = $1)"
   );
 }

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "miniverse/miniverse.hpp"
+#include "miniverse/world/datasets.hpp"
 
 namespace bg = boost::geometry;
 namespace geo = miniverse::geo;
@@ -59,15 +60,14 @@ TEST_CASE("layer: a road layer's statements are aimed at its table", "[layer]") 
       R"(SELECT "way_id", "node_ids", "geom", "tags" FROM "osm_roads" WHERE ST_Intersects("geom", $1::geometry(Polygon,4326)) ORDER BY "way_id")"
   );
   CHECK(Roads::model_type::setup_sql(layer.table().name()) == std::vector<std::string>{R"(CREATE INDEX ON "osm_roads" USING gist (geom))"});
-  CHECK(Roads::model_type::writes::setup_sql(layer.table().name()) == std::vector<std::string>{R"(CREATE INDEX ON "osm_roads" (dataset))"});
+  CHECK(miniverse::detail::dataset_index_sql(layer.table().name()) == std::vector<std::string>{R"(CREATE INDEX ON "osm_roads" (dataset))"});
   CHECK(
-      std::string(
-          Roads::model_type::writes::sweep<Roads::model_type::schema_type>::bind(std::string("town"), std::int64_t{7}).on(layer.table()).sql()
-      ) == R"(DELETE FROM "osm_roads" WHERE "dataset" = $1 AND "pushed" <> $2)"
+      std::string(miniverse::detail::sweep_statement<Roads::model_type>(layer.table(), std::string("town"), std::int64_t{7}).sql()) ==
+      R"(DELETE FROM "osm_roads" WHERE "dataset" = $1 AND "pushed" <> $2)"
   );
   CHECK(
-      std::string(Roads::model_type::writes::remove<Roads::model_type::schema_type>::bind(std::string("town")).on(layer.table()).sql()) ==
+      std::string(miniverse::detail::remove_statement<Roads::model_type>(layer.table(), std::string("town")).sql()) ==
       R"(DELETE FROM "osm_roads" WHERE "dataset" = $1)"
   );
-  CHECK(Roads::model_type::writes::lock_key(layer.table().name(), miniverse::Dataset{"town"}) == R"("osm_roads"/town)");
+  CHECK(miniverse::detail::lock_key(layer.table().name(), miniverse::Dataset{"town"}) == R"("osm_roads"/town)");
 }

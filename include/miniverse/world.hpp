@@ -144,11 +144,10 @@ class Miniverse {
   [[nodiscard]] std::future<typename ModelOf<name>::result_type> load(const geo::Polygon& location) {
     using model_t = ModelOf<name>;
 
-    if ( const auto& reader = layer<name>().reader(); reader ) {
-      return detail::load<model_t>(reader, location);
-    }
-
-    return detail::load<model_t>(database(), layer<name>().table(), location);
+    return on_layer<name>(
+        [&](auto& database, const auto& table) { return detail::load<model_t>(database, table, location); },
+        [&](const auto& reader) { return detail::load<model_t>(reader, location); }
+    );
   }
 
   /**
@@ -168,11 +167,10 @@ class Miniverse {
   [[nodiscard]] std::future<void> stream(const geo::Polygon& location, callback_t on_chunk, const schemacht::postgres::ReadOptions& read) {
     using model_t = ModelOf<name>;
 
-    if ( const auto& reader = layer<name>().reader(); reader ) {
-      return detail::stream<model_t>(reader, location, std::move(on_chunk), read.chunk_rows);
-    }
-
-    return detail::stream<model_t>(database(), layer<name>().table(), location, std::move(on_chunk), read);
+    return on_layer<name>(
+        [&](auto& database, const auto& table) { return detail::stream<model_t>(database, table, location, std::move(on_chunk), read); },
+        [&](const auto& reader) { return detail::stream<model_t>(reader, location, std::move(on_chunk), read.chunk_rows); }
+    );
   }
 
   /**
@@ -194,11 +192,10 @@ class Miniverse {
   [[nodiscard]] std::future<SettingsOf<ModelOf<name>>> table_settings() {
     using model_t = ModelOf<name>;
 
-    if ( const auto& reader = layer<name>().reader(); reader ) {
-      return detail::reader_settings<model_t>(reader);
-    }
-
-    return detail::table_settings<model_t>(database(), layer<name>().table());
+    return on_layer<name>(
+        [](auto& database, const auto& table) { return detail::table_settings<model_t>(database, table); },
+        [](const auto& reader) { return detail::reader_settings<model_t>(reader); }
+    );
   }
 
   /**
@@ -449,6 +446,16 @@ class Miniverse {
     return std::get<typename detail::LayerNamed<name, layer_ts...>::type>(_layers);
   }
 
+  /** @return What `on_reader(reader)` gives for the layer `name` if it has a reader, else `on_table(database, table)`. */
+  template <schemacht::util::CTString name, typename on_table_t, typename on_reader_t>
+  [[nodiscard]] auto on_layer(on_table_t on_table, on_reader_t on_reader) {
+    if ( const auto reader = layer<name>().reader() ) {
+      return on_reader(reader);
+    }
+
+    return on_table(database(), layer<name>().table());
+  }
+
   /**
    * @return The table of the layer `name`, for a call that writes it or lists its datasets.
    * @throws std::logic_error if the layer has a reader: it is only read.
@@ -470,8 +477,8 @@ class Miniverse {
   void check(const layer_t& layer, std::vector<std::string>& differences) {
     using model_t = typename layer_t::model_type;
 
-    const std::vector<std::string> problems =
-        layer.reader() ? layer.reader()->problems() : detail::table_problems<model_t>(database(), layer.table());
+    const auto                     reader = layer.reader();
+    const std::vector<std::string> problems = reader ? reader->problems() : detail::table_problems<model_t>(database(), layer.table());
     for ( const std::string& problem : problems ) {
       differences.push_back(layer.source() + ": " + problem);
     }

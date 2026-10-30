@@ -11,7 +11,7 @@
 #include "miniverse/dataset.hpp"
 #include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/model/dataset_columns.hpp"
+#include "miniverse/model/writes.hpp"
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/table_name.hpp"
 

@@ -28,7 +28,7 @@
  */
 namespace miniverse {
 
-/** @brief A feature table's own columns; the dataset's are in dataset_columns.hpp. */
+/** @brief A feature table's own columns; the dataset's are in writes.hpp. */
 namespace feature {
 
 /** @brief The feature's id, numbered by the database as rows are written. */
@@ -94,7 +94,7 @@ struct FeatureModel {
    */
   static constexpr std::size_t POINTS_PER_STATEMENT = std::size_t{1} << 20U;
 
-  /** @return The GiST index on `geom`, unnamed: PostgreSQL names it. The dataset index is `writes::Datasets`'s. */
+  /** @return The GiST index on `geom`, unnamed: PostgreSQL names it. The dataset index is the library's (world/datasets.hpp). */
   [[nodiscard]] static std::vector<std::string> setup_sql(const schemacht::schema::TableName& table);
 
   /**

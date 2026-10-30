@@ -2,11 +2,11 @@
 
 #include <concepts>
 #include <memory>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 
 #include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/reader.hpp"  // IWYU pragma: export
@@ -54,61 +54,60 @@ class Layer {
    * @throws std::invalid_argument if `table` is not a valid table name (lowercase letters, digits and underscores, not starting
    * with a digit, at most 63 bytes).
    */
-  explicit Layer(std::string_view table) : _table(std::in_place, table) {}
+  explicit Layer(std::string_view table) : _source(std::in_place_type<Table>, table) {}
 
   /**
    * @brief The layer stored in the table `table` of the PostgreSQL schema `schema_name`.
    * @throws std::invalid_argument if either is not a valid name, as above.
    */
-  Layer(std::string_view schema_name, std::string_view table) : _table(std::in_place, schema_name, table) {}
+  Layer(std::string_view schema_name, std::string_view table) : _source(std::in_place_type<Table>, schema_name, table) {}
 
   /**
    * @brief The layer read by `reader`, which the layer's copies and the loads that run share.
    * @throws std::invalid_argument if there is no reader.
    */
-  explicit Layer(std::shared_ptr<const Reader<model_t>> reader) : _reader(std::move(reader)) {
-    if ( ! _reader ) {
+  explicit Layer(std::shared_ptr<const Reader<model_t>> reader) : _source(std::move(reader)) {
+    if ( ! std::get<ReaderPtr>(_source) ) {
       throw std::invalid_argument("a layer is a table or has a reader: " + std::string(NAME.view()) + " was given no reader");
     }
   }
 
   /** @return Whether the layer is stored in a table; else it has a reader. */
-  [[nodiscard]] bool is_table() const noexcept { return _table.has_value(); }
+  [[nodiscard]] bool is_table() const noexcept { return std::holds_alternative<Table>(_source); }
 
   /**
    * @return The layer's table, which the model's statements are aimed at (`.on(table)`); its name is `table().name()`.
    * @throws std::logic_error if the layer is not a table.
    */
   [[nodiscard]] const schemacht::schema::Table<typename model_t::schema_type>& table() const {
-    if ( ! _table ) {
-      throw std::logic_error("the layer " + std::string(NAME.view()) + ", read from " + source() + ", is not a table");
+    if ( const Table* table = std::get_if<Table>(&_source) ) {
+      return *table;
     }
 
-    return *_table;
-  }
-
-  /**
-   * @return Where the layer is, for a message: its table as a statement writes it (`"gis"."roads"`), or what its reader reads.
-   * @throws std::logic_error if the layer has neither, which only one that was moved from can lack.
-   */
-  [[nodiscard]] std::string source() const {
-    if ( _table ) {
-      return _table->name().quoted();
-    }
-
-    if ( ! _reader ) {
-      throw std::logic_error("the layer " + std::string(NAME.view()) + " has no table and no reader");
-    }
-
-    return _reader->name();
+    throw std::logic_error("the layer " + std::string(NAME.view()) + ", read from " + source() + ", is not a table");
   }
 
   /** @return The layer's reader; none, if the layer is a table. */
-  [[nodiscard]] const std::shared_ptr<const Reader<model_t>>& reader() const noexcept { return _reader; }
+  [[nodiscard]] std::shared_ptr<const Reader<model_t>> reader() const noexcept {
+    const ReaderPtr* reader = std::get_if<ReaderPtr>(&_source);
+
+    return reader ? *reader : nullptr;
+  }
+
+  /** @return Where the layer is, for a message: its table as a statement writes it (`"gis"."roads"`), or what its reader reads. */
+  [[nodiscard]] std::string source() const {
+    if ( const Table* table = std::get_if<Table>(&_source) ) {
+      return table->name().quoted();
+    }
+
+    return std::get<ReaderPtr>(_source)->name();
+  }
 
  private:
-  std::optional<schemacht::schema::Table<typename model_t::schema_type>> _table;
-  std::shared_ptr<const Reader<model_t>>                                 _reader;
+  using Table = schemacht::schema::Table<typename model_t::schema_type>;
+  using ReaderPtr = std::shared_ptr<const Reader<model_t>>;
+
+  std::variant<Table, ReaderPtr> _source;
 
  public:
   Layer(const Layer&) = default;
