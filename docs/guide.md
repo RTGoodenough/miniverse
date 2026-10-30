@@ -164,8 +164,8 @@ tile is megabytes, so ask for a few at a time.
 world.verify().get();
 ```
 
-`verify` first asks the registry which layout each layer's table was made with. A table made with another layout than
-its model is at now, or one the registry does not know (made before layouts were recorded, or by hand), is named with
+`verify` first asks the registry which model and layout each layer's table was made with. A table made for the model
+with another layout than it is at now, or one the registry does not know (made before layouts were recorded, or by hand), is named with
 what to do: make it again and import its data. A table of the right layout is then compared with its model: the
 columns, their types, which may be null, the primary key, and that no other column would need filling. A model with
 settings must also have them in the table. The layers are checked one after another, on a thread started for the call,

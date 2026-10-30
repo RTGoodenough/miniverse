@@ -28,17 +28,19 @@ namespace miniverse {
 namespace detail {
 
 /**
- * @return The layout the registry records the layer table `name` as made with; nothing for a table it does not know, or a
+ * @return What the registry records the layer table `name` as made for and with; nothing for a table it does not know, or a
  * database with no registry, or with one of an older build. Waits for the answer.
  */
-[[nodiscard]] inline std::optional<std::int32_t> recorded_layout(schemacht::postgres::Database& database, const std::string& name) {
+[[nodiscard]] inline std::optional<registry::Recorded> recorded(schemacht::postgres::Database& database, const std::string& name) {
   try {
-    const registry::LayerLayoutRows rows = database.execute(registry::LayerLayout::bind(name)).get();
+    auto rows = database.execute(registry::LayerRecord::bind(name)).get();
     if ( rows.empty() ) {
       return std::nullopt;
     }
 
-    return schemacht::schema::get<"layout">(rows.front());
+    return registry::Recorded{
+        .kind = std::move(schemacht::schema::get<"kind">(rows.front())), .layout = schemacht::schema::get<"layout">(rows.front())
+    };
   } catch ( const schemacht::postgres::QueryError& failed ) {
     // undefined_table: a database with no registry; undefined_function: a registry of an older build, without `layer_name`.
     if ( failed.sqlstate() != "42P01" && failed.sqlstate() != "42883" ) {
@@ -51,19 +53,20 @@ namespace detail {
 
 /**
  * @return What is wrong with `table` for a layer of `model_t`, each in words, in the order found; nothing if it is as the model
- * says and the registry records it. One recorded with another layout is told that alone. Else its columns are compared with
- * the model's schema, and, when they match and the model has settings, the settings are read: the differences, or what the
- * settings lack, say enough, so only a table that is otherwise right is told that the registry does not know it. Waits for
- * each statement in turn: for a thread of the call's own.
+ * says and the registry records it. One recorded for this model with another layout is told that alone. Else its columns are
+ * compared with the model's schema (a table recorded for another model differs there), and, when they match and the model
+ * has settings, the settings are read: the differences, or what the settings lack, say enough, so only a table that is
+ * otherwise right is told that the registry does not know it. Waits for each statement in turn: for a thread of the call's
+ * own.
  * @throws schemacht::postgres::QueryError, or whatever a statement fails with, when a check could not run.
  */
 template <LayerModel model_t>
 [[nodiscard]] std::vector<std::string> table_problems(
     schemacht::postgres::Database& database, const schemacht::schema::Table<typename model_t::schema_type>& table
 ) {
-  const std::optional<std::int32_t> recorded = recorded_layout(database, registry::name_of(table.name()));
-  const std::optional<std::string>  unrecorded = registry::layout_problem(recorded, model_t::LAYOUT);
-  if ( unrecorded && recorded ) {
+  const std::optional<registry::Recorded> record = recorded(database, registry::name_of(table.name()));
+  const std::optional<std::string> unrecorded = registry::layout_problem(record ? std::optional(record->layout) : std::nullopt, model_t::LAYOUT);
+  if ( unrecorded && record && record->kind == model_t::schema_type::TABLE_NAME ) {
     return {*unrecorded};
   }
 

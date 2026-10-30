@@ -114,13 +114,16 @@ using Present = schemacht::query::RawStatement<
     schemacht::util::concat_ctstrings<"SELECT to_regprocedure('", INTERNAL_SCHEMA_NAME, ".layer_name(text)') IS NOT NULL AS present">(),
     schemacht::query::RawArguments<>, schemacht::schema::Field<bool, "present">>;
 
-/** @brief The layout the layer table named by argument 0 was made with: one row, or none for a table not in the registry. */
-using LayerLayout = schemacht::query::RawStatement<
-    schemacht::util::concat_ctstrings<"SELECT layout FROM ", INTERNAL_SCHEMA_NAME, ".layers WHERE table_name = ", LAYER_NAME_OF_ARGUMENT>(),
-    schemacht::query::RawArguments<std::string>, schemacht::schema::Field<std::int32_t, "layout">>;
+/** @brief The model (`kind`, its schema's placeholder name) and layout the layer table named by argument 0 was made with: one row, or none for a table not in the registry. */
+using LayerRecord = schemacht::query::RawStatement<
+    schemacht::util::concat_ctstrings<"SELECT kind, layout FROM ", INTERNAL_SCHEMA_NAME, ".layers WHERE table_name = ", LAYER_NAME_OF_ARGUMENT>(),
+    schemacht::query::RawArguments<std::string>, schemacht::schema::Field<std::string, "kind">, schemacht::schema::Field<std::int32_t, "layout">>;
 
-/** @brief The rows `LayerLayout` gives: one, or none. */
-using LayerLayoutRows = std::vector<LayerLayout::row_type>;
+/** @brief What the registry records of a layer table: the model it was made for, and the layout. */
+struct Recorded {
+  std::string  kind;
+  std::int32_t layout = 0;
+};
 
 /** @brief The datasets of the layer table named by argument 0, by name, each with when it was last pushed. */
 using DatasetsPushed = schemacht::query::RawStatement<

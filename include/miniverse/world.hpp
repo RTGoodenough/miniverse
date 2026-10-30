@@ -310,7 +310,8 @@ class Miniverse {
    * @return A future that completes if every layer's table is in the registry as made with its model's layout (`LAYOUT`) and
    * matches its model's schema, as schemacht's `table_differences_statement` compares them (columns, types, nullability,
    * primary key, and no other column an insert would have to fill); for a model with settings the table must also hold
-   * settings to read. A table of another layout, or none recorded, is named with what to do: make it again. It holds a
+   * settings to read. A table recorded for the model with another layout, or none recorded, is named with what to do: make it
+   * again. It holds a
    * `TablesDiffer` naming every difference of every layer instead, or the error of a check that could not run (a PostgreSQL
    * older than 17: a `QueryError`). The layers are checked one after another, on a thread started for the call. For a
    * program to call when it starts.
