@@ -235,11 +235,11 @@ TEST_CASE("reader: a layer with a reader is only read", "[reader]") {
   Miniverse world(fixed<Shops>(shops()), Elevation(std::make_shared<NoHeights>()));
 
   CHECK_THROWS_WITH(
-      world.push<"shops">(miniverse::Dataset{"market"}, {{.id = 7, .geometry = geo::Point(1, 1)}}).get(), ContainsSubstring("fixed points")
+      std::ignore = world.push<"shops">(miniverse::Dataset{"market"}, {{.id = 7, .geometry = geo::Point(1, 1)}}), ContainsSubstring("fixed points")
   );
-  CHECK_THROWS_AS(world.begin_push<"shops">(miniverse::Dataset{"market"}).get(), std::logic_error);
-  CHECK_THROWS_AS(world.push<"elevation">({}).get(), std::logic_error);
-  CHECK_THROWS_AS(world.begin_push<"elevation">().get(), std::logic_error);
+  CHECK_THROWS_AS(std::ignore = world.begin_push<"shops">(miniverse::Dataset{"market"}), std::logic_error);
+  CHECK_THROWS_AS(std::ignore = world.push<"elevation">({}), std::logic_error);
+  CHECK_THROWS_AS(std::ignore = world.begin_push<"elevation">(), std::logic_error);
   CHECK(ids(world.load<"shops">(NEAR_ORIGIN).get()).size() == 5);
 }
 
@@ -283,7 +283,7 @@ TEST_CASE("integration: a miniverse holds tables and readers side by side", "[in
   CHECK(ids(near_shops.get()) == std::vector<std::int64_t>{1, 2, 3, 4, 5});
   CHECK(ids(near_stalls.get()) == std::vector<std::int64_t>{9});
   CHECK_NOTHROW(world.verify().get());
-  CHECK_THROWS_AS(world.push<"stalls">(miniverse::Dataset{"market"}, {}).get(), std::logic_error);
+  CHECK_THROWS_AS(std::ignore = world.push<"stalls">(miniverse::Dataset{"market"}, {}), std::logic_error);
 
   world.drop_tables();
 }

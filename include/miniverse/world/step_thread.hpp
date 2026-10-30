@@ -36,7 +36,7 @@ class StepThread {
   /**
    * @return A future that completes once `step` has run, after the steps posted before it, or holds what it threw.
    * @throws std::bad_alloc if the step could not be queued, and then the same from every later post: the step is lost, and the
-   * thread takes no step that would run after it.
+   * thread takes no step that would run after it, so a commit never runs after a part that was lost.
    */
   template <std::invocable step_t>
   [[nodiscard]] std::future<void> post(step_t step) {

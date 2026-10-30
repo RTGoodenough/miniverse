@@ -404,8 +404,8 @@ TEST_CASE("integration: a push in parts that was moved from takes no more calls"
   miniverse::PushInParts<TestRoads::model_type> second = std::move(first);
   second.add({way(10, {1, 2}, "LINESTRING(50.1 50.1,50.2 50.2)", "{}")}).get();
 
-  CHECK_THROWS_AS(first.add({}).get(), std::logic_error);  // NOLINT(bugprone-use-after-move) -- what is under test
-  CHECK_THROWS_AS(first.commit().get(), std::logic_error);
+  CHECK_THROWS_AS(std::ignore = first.add({}), std::logic_error);  // NOLINT(bugprone-use-after-move) -- what is under test
+  CHECK_THROWS_AS(std::ignore = first.commit(), std::logic_error);
   second.commit().get();
   CHECK(ids(world.load<"roads">(FAR_EAST).get()) == std::vector<std::int64_t>{10});
 }

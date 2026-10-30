@@ -132,7 +132,9 @@ takes the `Database` and the layer's `Table`, the reader side the `Reader`. What
 
 Thread boundaries: a stream's conversions and callbacks run on the pool's threads. A load, `table_settings`, a push, a
 `remove`, `datasets` and `verify` run on a thread started for the call, where the model makes its result or its rows;
-their futures wait for that thread when dropped. The parts of a push in parts run on the push's own thread, started with the push and joined when the
+their futures wait for that thread when dropped. Errors the work finds arrive through the future; a call that cannot
+start (no thread, no memory) or makes no sense (a write to a reader layer, a push in parts that was moved from) throws,
+as schemacht's calls do, so there is no code for handing an error back in a future that was never started. The parts of a push in parts run on the push's own thread, started with the push and joined when the
 handle is dropped. What runs on the caller's thread and waits: the constructor
 (it opens the pool), `create_table` and `drop_tables`, `osm::road_file` (it reads the file), `Reader::settings` and
 `Reader::problems`, and the `.get()` calls the caller makes.

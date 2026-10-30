@@ -26,6 +26,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -276,7 +277,7 @@ TEST_CASE("osm: a road file is streamed a chunk at a time, and is read when its 
 
   CHECK(sizes == std::vector<std::size_t>{3, 1});
   CHECK_THROWS_AS(osm::road_file<Roads>({.path = files.path_of("missing.osm.pbf"), .keys = {}}), std::runtime_error);
-  CHECK_THROWS_AS(world.push<"roads">(TOWN_DATASET, {}).get(), std::logic_error);
+  CHECK_THROWS_AS(std::ignore = world.push<"roads">(TOWN_DATASET, {}), std::logic_error);
 }
 
 TEST_CASE("osm: a road file's stream stops when its callback wants no more, and hands over no empty chunk", "[osm]") {

@@ -119,7 +119,7 @@ struct Push {
  * waited for before the next, or before the `commit`. Each `add` holds its part until the part is written, so a reader far
  * ahead of the writes holds that many parts; one that waits for the previous `add` before it reads the next holds two.
  * Dropping the push runs what was added, ends its thread, and waits for that. Commit or drop the push before the miniverse
- * ends. One that was moved from fails every call. For a model with datasets the push replaces its dataset when it commits,
+ * ends. One that was moved from throws `std::logic_error` from every call. For a model with datasets the push replaces its dataset when it commits,
  * so a commit with no parts leaves the dataset empty.
  */
 template <LayerModel model_t>
@@ -128,12 +128,18 @@ class PushInParts {
   /** @brief The handle of `push`, a push that has begun, whose steps run on `thread`. */
   PushInParts(detail::StepThread thread, std::shared_ptr<detail::Push<model_t>> push) : _push(std::move(push)), _thread(std::move(thread)) {}
 
-  /** @return A future that completes once `data`, a part, is written into the push, or holds the error, which ends the push. */
+  /**
+   * @return A future that completes once `data`, a part, is written into the push, or holds the error, which ends the push.
+   * @throws std::logic_error if the push was moved from; `std::bad_alloc` if the part could not be queued, which loses it.
+   */
   [[nodiscard]] std::future<void> add(model_t::result_type data) {
     return step([push = _push, data = std::move(data)]() mutable { push->add(std::move(data)); });
   }
 
-  /** @return A future that completes once every part added is there for everyone, or holds the error (nothing is then written). */
+  /**
+   * @return A future that completes once every part added is there for everyone, or holds the error (nothing is then written).
+   * @throws std::logic_error if the push was moved from; `std::bad_alloc` after a part was lost, so that it never commits without it.
+   */
   [[nodiscard]] std::future<void> commit() {
     return step([push = _push] { push->commit(); });
   }
@@ -142,18 +148,17 @@ class PushInParts {
   std::shared_ptr<detail::Push<model_t>> _push;    // null once moved from
   detail::StepThread                     _thread;  // after the push: its steps hold the push until they have run
 
-  /** @return A future for `run`, a step of the push, posted to its thread; it holds the error if there is no push (moved from) or the step was lost. */
+  /**
+   * @return A future for `run`, a step of the push, posted to its thread.
+   * @throws std::logic_error if there is no push: it was moved from. Else what `StepThread::post` throws.
+   */
   template <std::invocable run_t>
   [[nodiscard]] std::future<void> step(run_t run) {
     if ( ! _push ) {
-      return detail::failed<void>(std::make_exception_ptr(std::logic_error("this push in parts was moved from: it is the other one now")));
+      throw std::logic_error("this push in parts was moved from: it is the other one now");
     }
 
-    try {
-      return _thread.post(std::move(run));
-    } catch ( ... ) {
-      return detail::failed<void>(std::current_exception());
-    }
+    return _thread.post(std::move(run));
   }
 
  public:

@@ -4,7 +4,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <exception>
 #include <future>
 #include <iterator>
 #include <optional>
@@ -49,8 +48,9 @@
  *
  * The layers are the template's arguments, each a model under a name, so asking for a name the miniverse does not hold does not
  * compile. Each layer names its table when the miniverse is made. One pool of connections (a schemacht `postgres::Database`)
- * serves every layer. The calls that read and write data return a `std::future`, and their errors arrive through it, not from
- * the call; the constructor, `create_table` and `drop_tables` wait and throw. The miniverse must outlive the futures it hands
+ * serves every layer. The calls that read and write data return a `std::future`, and what they find wrong arrives through
+ * it, not from the call; a call that cannot start, or makes no sense (a write to a layer that is only read), throws. The
+ * constructor, `create_table` and `drop_tables` wait and throw. The miniverse must outlive the futures it hands
  * out. A layer made from a `Reader` (reader.hpp) is read from a file, or from data of the program's own, by the same calls; a
  * miniverse of readers alone is made without a connection string.
  *
@@ -215,36 +215,29 @@ class Miniverse {
    * win, nodata keeps the old pixel), and overlapping pushes merge in the order they commit, the later winning where both have
    * data. A layer of a model with datasets is pushed with one: `push<"name">(dataset, data)`.
    *
-   * A layer with a reader is only read: the future holds a `std::logic_error`.
+   * @throws std::logic_error if the layer has a reader: it is only read.
    */
   template <schemacht::util::CTString name>
   [[nodiscard]] std::future<void> push(typename ModelOf<name>::result_type data) {
     using model_t = ModelOf<name>;
     static_assert(! WritesDatasets<model_t>, "this layer's rows belong to a dataset: push<\"name\">(Dataset{\"name\"}, data) replaces it");
 
-    if ( ! layer<name>().is_table() ) {
-      return only_read<name, void>();
-    }
-
-    return detail::push<model_t>(database(), layer<name>().table(), std::move(data));
+    return detail::push<model_t>(database(), written<name>(), std::move(data));
   }
 
   /**
    * @return A future for a push of the layer `name` that takes its data in parts, all written or none (`PushInParts`). On a
    * thread started for the call, the table's settings are read if the model has any, the transaction is begun, and the push's
-   * own thread, which its parts then run on, is started. It holds the error instead if any of that fails, or the layer has a
-   * reader (`std::logic_error`). Commit or drop the push before the miniverse ends.
+   * own thread, which its parts then run on, is started. It holds the error instead if any of that fails. Commit or drop the
+   * push before the miniverse ends.
+   * @throws std::logic_error if the layer has a reader: it is only read.
    */
   template <schemacht::util::CTString name>
   [[nodiscard]] std::future<PushInParts<ModelOf<name>>> begin_push() {
     using model_t = ModelOf<name>;
     static_assert(! WritesDatasets<model_t>, "this layer's rows belong to a dataset: begin_push<\"name\">(Dataset{\"name\"}) replaces it");
 
-    if ( ! layer<name>().is_table() ) {
-      return only_read<name, PushInParts<model_t>>();
-    }
-
-    return detail::begin_push<model_t>(database(), layer<name>().table());
+    return detail::begin_push<model_t>(database(), written<name>());
   }
 
   /**
@@ -255,7 +248,7 @@ class Miniverse {
    * pushes of one dataset into one table take turns; pushes of different datasets, or into different tables, run side by
    * side. What a dataset is, and what it asks of the data, is in `Dataset` and the model's own doc.
    *
-   * A layer with a reader is only read: the future holds a `std::logic_error`.
+   * @throws std::logic_error if the layer has a reader: it is only read.
    */
   template <schemacht::util::CTString name>
   [[nodiscard]] std::future<void> push(const Dataset& dataset, typename ModelOf<name>::result_type data) {
@@ -263,11 +256,7 @@ class Miniverse {
     static_assert(WritesDatasets<model_t>, "this layer's model has no datasets: push<\"name\">(data) writes it");
 
     if constexpr ( WritesDatasets<model_t> ) {
-      if ( ! layer<name>().is_table() ) {
-        return only_read<name, void>();
-      }
-
-      return detail::push<model_t>(database(), layer<name>().table(), dataset, std::move(data));
+      return detail::push<model_t>(database(), written<name>(), dataset, std::move(data));
     }
   }
 
@@ -275,8 +264,8 @@ class Miniverse {
    * @return A future for a push of `dataset` into the layer `name` that takes its data in parts (`PushInParts`). The dataset is
    * replaced when the push commits, as `push(dataset, data)` replaces it; a commit with no parts leaves it empty. On a thread
    * started for the call, the transaction is begun, the dataset locked, and the push's own thread, which its parts then run
-   * on, is started. It holds the error instead if any of that fails, or the layer has a reader (`std::logic_error`). Commit
-   * or drop the push before the miniverse ends.
+   * on, is started. It holds the error instead if any of that fails. Commit or drop the push before the miniverse ends.
+   * @throws std::logic_error if the layer has a reader: it is only read.
    */
   template <schemacht::util::CTString name>
   [[nodiscard]] std::future<PushInParts<ModelOf<name>>> begin_push(const Dataset& dataset) {
@@ -284,18 +273,15 @@ class Miniverse {
     static_assert(WritesDatasets<model_t>, "this layer's model has no datasets: begin_push<\"name\">() writes it");
 
     if constexpr ( WritesDatasets<model_t> ) {
-      if ( ! layer<name>().is_table() ) {
-        return only_read<name, PushInParts<model_t>>();
-      }
-
-      return detail::begin_push<model_t>(database(), layer<name>().table(), dataset);
+      return detail::begin_push<model_t>(database(), written<name>(), dataset);
     }
   }
 
   /**
    * @return A future for how many rows of `dataset` were deleted from the layer `name`'s table, or the error: 0 for a
    * name no push wrote, which is not an error here, for the program to judge. A remove takes turns with a push of the
-   * dataset. A layer with a reader is only read: the future holds a `std::logic_error`.
+   * dataset.
+   * @throws std::logic_error if the layer has a reader: it is only read.
    */
   template <schemacht::util::CTString name>
   [[nodiscard]] std::future<std::uint64_t> remove(const Dataset& dataset) {
@@ -303,17 +289,14 @@ class Miniverse {
     static_assert(WritesDatasets<model_t>, "this layer's model has no datasets to remove");
 
     if constexpr ( WritesDatasets<model_t> ) {
-      if ( ! layer<name>().is_table() ) {
-        return only_read<name, std::uint64_t>();
-      }
-
-      return detail::remove<model_t>(database(), layer<name>().table(), dataset);
+      return detail::remove<model_t>(database(), written<name>(), dataset);
     }
   }
 
   /**
    * @return A future for the datasets of the layer `name`'s table, by name: each with when it was last pushed and how many
-   * rows it holds now, or the error. A layer with a reader is only read: the future holds a `std::logic_error`.
+   * rows it holds now, or the error.
+   * @throws std::logic_error if the layer has a reader: it is only read.
    */
   template <schemacht::util::CTString name>
   [[nodiscard]] std::future<std::vector<DatasetInfo>> datasets() {
@@ -321,11 +304,7 @@ class Miniverse {
     static_assert(WritesDatasets<model_t>, "this layer's model has no datasets to list");
 
     if constexpr ( WritesDatasets<model_t> ) {
-      if ( ! layer<name>().is_table() ) {
-        return only_read<name, std::vector<DatasetInfo>>();
-      }
-
-      return detail::datasets<model_t>(database(), layer<name>().table());
+      return detail::datasets<model_t>(database(), written<name>());
     }
   }
 
@@ -470,20 +449,20 @@ class Miniverse {
     return std::get<typename detail::LayerNamed<name, layer_ts...>::type>(_layers);
   }
 
-  /** @return A future that holds why the layer `name`, which has a reader, can't be written. */
-  template <schemacht::util::CTString name, schemacht::util::FutureValue result_t>
-  [[nodiscard]] std::future<result_t> only_read() const {
-    std::promise<result_t> failed;
-    try {
+  /**
+   * @return The table of the layer `name`, for a call that writes it or lists its datasets.
+   * @throws std::logic_error if the layer has a reader: it is only read.
+   */
+  template <schemacht::util::CTString name>
+  [[nodiscard]] const auto& written() const {
+    if ( ! layer<name>().is_table() ) {
       throw std::logic_error(
           "the layer " + std::string(name.view()) + ", read from " + layer<name>().source() +
           ", is only read: it has no table to write, or datasets to list"
       );
-    } catch ( ... ) {
-      failed.set_exception(std::current_exception());  // also if the message itself could not be made
     }
 
-    return failed.get_future();
+    return layer<name>().table();
   }
 
   /** @brief Checks `layer` for `verify`, its table against its model or its reader asked for its problems, and adds what it finds to `differences`. */

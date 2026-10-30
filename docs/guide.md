@@ -346,8 +346,8 @@ The readers are in `miniverse/gdal/feature_file.hpp`, `miniverse/gdal/raster_fil
 built-in models or the `Miniverse` itself: include `miniverse/miniverse.hpp` (or `world.hpp`, with models of your own)
 beside them.
 
-`load`, `stream`, `verify` and `table_settings` work the same on these layers; `push`, `begin_push` and `remove` fail with
-a `std::logic_error`, since a file is only read; `create_table` and `drop_tables` skip them, so one setup serves a world of
+`load`, `stream`, `verify` and `table_settings` work the same on these layers; `push`, `begin_push`, `remove` and `datasets`
+throw a `std::logic_error` at the call, since a file is only read; `create_table` and `drop_tables` skip them, so one setup serves a world of
 tables and a world of files. A load of a reader runs on a thread started for it, so loads of several file layers run at
 once; the future of such a load waits for that thread if it is dropped before it is done.
 
@@ -451,8 +451,10 @@ tool built without one says so.
 ## Errors and threads
 
 - Errors from the database and from a model's conversions arrive through the future of the call. `verify` fails with
-  `TablesDiffer`; a push to a file layer with `std::logic_error`; a wrong argument (a grid that is none, a chunk of zero
-  rows) with `std::invalid_argument`; GDAL and libosmium errors as `std::runtime_error` with the library's message.
+  `TablesDiffer`; a wrong argument (a grid that is none, a chunk of zero rows) with `std::invalid_argument`; GDAL and
+  libosmium errors as `std::runtime_error` with the library's message. A call that cannot start, or makes no sense,
+  throws instead: a write to a file layer and a call on a push in parts that was moved from throw `std::logic_error`, a
+  call with no thread or no memory to run on `std::system_error` or `std::bad_alloc`.
 - Stream callbacks run on the pool's threads (on the load's own thread for a file layer), one call at a time. Every other
   call that returns a future (`load`, `table_settings`, `push`, `begin_push`, `remove`, `datasets`, `verify`) runs on a
   thread started for the call: the call returns at once, and its future waits for that thread if it is dropped before it
