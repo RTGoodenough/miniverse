@@ -7,7 +7,6 @@
 #include <exception>
 #include <future>
 #include <iterator>
-#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -54,6 +53,12 @@
  * the call; the constructor, `create_table` and `drop_tables` wait and throw. The miniverse must outlive the futures it hands
  * out. A layer made from a `Reader` (reader.hpp) is read from a file, or from data of the program's own, by the same calls; a
  * miniverse of readers alone is made without a connection string.
+ *
+ * Threads: `load`, `table_settings`, `push`, `begin_push`, `remove`, `datasets` and `verify` each run on a thread started
+ * for the call, which the future waits for if it is dropped before it is done; a `stream` of a table runs its callback on the
+ * pool's worker threads, a `stream` of a reader on a thread started for the call. The parts of a push in parts run on the
+ * push's own thread (`PushInParts`). The constructor, `create_table` and `drop_tables` run on the calling thread and wait.
+ * The pool itself is schemacht's: one reactor thread and two workers.
  *
  * `Miniverse` is a front: it holds the layers and the pool, and tells a table from a reader. What a call does is in world/,
  * one idea per header.
@@ -132,7 +137,8 @@ class Miniverse {
    * @return A future for what the layer `name` holds in `location`, a polygon in WGS 84 longitude and latitude (what that is,
    * the model says: for a `RoadModel`, the ways that intersect it). It holds the error instead if the load failed.
    *
-   * A layer with a reader is read on a thread started for the load; the future waits for that thread if it is dropped.
+   * The load runs on a thread started for it: the table's statement is waited for there and the model makes the result of
+   * the rows there, or the reader reads there. The future waits for that thread if it is dropped.
    */
   template <schemacht::util::CTString name>
   [[nodiscard]] std::future<typename ModelOf<name>::result_type> load(const geo::Polygon& location) {
@@ -329,18 +335,19 @@ class Miniverse {
    * primary key, and no other column an insert would have to fill); for a model with settings the table must also hold
    * settings to read. A table of another layout, or none recorded, is named with what to do: make it again. It holds a
    * `TablesDiffer` naming every difference of every layer instead, or the error of a check that could not run (a PostgreSQL
-   * older than 17: a `QueryError`). Every layer is checked at once. For a program to call when it starts.
+   * older than 17: a `QueryError`). The layers are checked one after another, on a thread started for the call. For a
+   * program to call when it starts.
    *
    * Not checked: indexes, other constraints, the raster merge function (`raster::MergeRaster`), and the role's privileges. A
-   * layer with a reader is checked by `Reader::problems`, on the calling thread; what it finds is in the `TablesDiffer` too.
+   * layer with a reader is checked by `Reader::problems`; what it finds is in the `TablesDiffer` too.
    */
   [[nodiscard]] std::future<void> verify() {
-    return schemacht::util::future_from<void>([&](const schemacht::util::Settler<void>& done) {
-      detail::guarded(done, [&] {
-        const auto  checks = std::make_shared<detail::Checks>(std::vector<std::string>{std::get<layer_ts>(_layers).source()...}, done);
-        std::size_t layer_number = 0;
-        (check(std::get<layer_ts>(_layers), checks, layer_number++), ...);
-      });
+    return detail::on_a_thread([this] {
+      std::vector<std::string> differences;
+      (check(std::get<layer_ts>(_layers), differences), ...);
+      if ( ! differences.empty() ) {
+        throw TablesDiffer(std::move(differences));
+      }
     });
   }
 
@@ -479,17 +486,16 @@ class Miniverse {
     return failed.get_future();
   }
 
-  /** @brief Checks `layer` for `verify`: its table against its model, or its reader asked for its problems. */
+  /** @brief Checks `layer` for `verify`, its table against its model or its reader asked for its problems, and adds what it finds to `differences`. */
   template <IsLayer layer_t>
-  void check(const layer_t& layer, const std::shared_ptr<detail::Checks>& checks, std::size_t layer_number) {
+  void check(const layer_t& layer, std::vector<std::string>& differences) {
     using model_t = typename layer_t::model_type;
 
-    if ( const auto& reader = layer.reader(); reader ) {
-      detail::check_reader<model_t>(reader, checks, layer_number);
-      return;
+    const std::vector<std::string> problems =
+        layer.reader() ? layer.reader()->problems() : detail::table_problems<model_t>(database(), layer.table());
+    for ( const std::string& problem : problems ) {
+      differences.push_back(layer.source() + ": " + problem);
     }
-
-    detail::check_table<model_t>(database(), layer.table(), checks, layer_number);
   }
 
   template <schemacht::util::CTString name>

@@ -25,14 +25,12 @@ template <WritesSettings model_t>
   return model_t::settings_statement_type::bind(table.quoted());
 }
 
-/** @return A future for the settings `table` was made with, read from `database`. */
+/** @return A future for the settings `table` was made with, read from `database` on a thread started for it. */
 template <WritesSettings model_t>
 [[nodiscard]] std::future<SettingsOf<model_t>> table_settings(
     schemacht::postgres::Database& database, const schemacht::schema::Table<typename model_t::schema_type>& table
 ) {
-  return execute_as<SettingsOf<model_t>>(
-      database, [&] { return settings_statement<model_t>(table.name()); }, [](auto rows) { return model_t::settings_from_rows(std::move(rows)); }
-  );
+  return on_a_thread([&database, &table] { return model_t::settings_from_rows(database.execute(settings_statement<model_t>(table.name())).get()); });
 }
 
 /** @return A future for `reader`'s settings, asked on the calling thread. */

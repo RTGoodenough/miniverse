@@ -19,8 +19,8 @@
 
 /**
  * @file
- * Loads and streams of a layer: from its table, by the model's load statement on the pool, or from its reader, on a thread
- * started for the load. What `Miniverse::load` and `stream` do once they know which the layer is.
+ * Loads and streams of a layer: from its table, by the model's load statement, or from its reader; a load on a thread started
+ * for it, a table's stream on the pool's workers. What `Miniverse::load` and `stream` do once they know which the layer is.
  */
 namespace miniverse::detail {
 
@@ -34,15 +34,17 @@ template <LayerModel model_t>
   }
 }
 
-/** @return A future for what `table` holds in `location`, by the model's load statement on `database`. See `Miniverse::load`. */
+/**
+ * @return A future for what `table` holds in `location`: the model's load statement, run on `database` and waited for on a
+ * thread started for the load, where the model makes the result of the rows. See `Miniverse::load`.
+ */
 template <LayerModel model_t>
 [[nodiscard]] std::future<typename model_t::result_type> load(
     schemacht::postgres::Database& database, const schemacht::schema::Table<typename model_t::schema_type>& table, const geo::Polygon& location
 ) {
-  return execute_as<typename model_t::result_type>(
-      database, [&] { return model_t::load_statement_type::bind(location).on(table); },
-      [location](auto rows) { return model_t::from_rows(std::move(rows), location); }
-  );
+  return on_a_thread([&database, &table, location] {
+    return model_t::from_rows(database.execute(model_t::load_statement_type::bind(location).on(table)).get(), location);
+  });
 }
 
 /** @return A future for what `reader` holds in `location`, read on a thread started for it. See `Miniverse::load`. */

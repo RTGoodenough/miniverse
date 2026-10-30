@@ -102,9 +102,12 @@ column: `col<"geom">().apply<geo::Intersects>(arg<0>())`.
 reader, and calls a function template in `world/`, in `namespace miniverse::detail`, typed on the model: the table side
 takes the `Database` and the layer's `Table`, the reader side the `Reader`. What follows is what those do.
 
-- **load:** `Miniverse::load<"name">` binds the model's load statement to the location, runs it on the pool, and hands the
-  rows to `from_rows` on a pool thread. The future carries the result or the error. For a layer with a reader, the
-  reader's `load` runs on a thread started for the call (`on_a_thread`, in `world/async.hpp`). Both in `world/load.hpp`.
+- **load:** `Miniverse::load<"name">` binds the model's load statement to the location, runs it on the pool and waits for
+  the rows on a thread started for the call (`on_a_thread`, in `world/async.hpp`), where `from_rows` makes the result.
+  The future carries the result or the error. For a layer with a reader, the reader's `load` runs on such a thread too.
+  Both in `world/load.hpp`. Every call of several statements, or whose rows take work, is written this way: straight
+  line, a `.get()` per statement, on a thread of its own; the pool's workers run only completions, which must not wait
+  on a future of the same pool, so a stream alone runs on them.
 - **stream:** the statement runs in schemacht's chunked mode (`ReadOptions::chunk_rows`); each chunk of rows goes through
   `from_rows` or `chunk_from_rows` and to the callback, one call at a time, on a pool thread. A callback returning
   `false` cancels the statement.
@@ -121,15 +124,15 @@ takes the `Database` and the layer's `Table`, the reader side the `Reader`. What
   pushes of one dataset into one table run in turn; the rows carry the dataset and the stamp; before the commit the
   policy's sweep deletes the dataset's rows whose stamp is another push's, and the registry records the push. A failure
   anywhere rolls the whole back. `remove` runs the policy's remove statement in a transaction under the same lock.
-- **verify:** schemacht's `table_differences_statement` for each table, all at once; the settings statement for models
-  with settings; `Reader::problems` for readers. The results are gathered by `Checks` in `world/verify.hpp` and settled
-  together.
+- **verify:** on a thread started for the call, each layer in turn: the registry's record of the table, then schemacht's
+  `table_differences_statement`, then the settings statement for a model with settings (`table_problems` in
+  `world/verify.hpp`); `Reader::problems` for a reader. What they find is thrown as one `TablesDiffer`.
 - **create_table:** `CREATE TABLE` from the schema and the model's `setup_sql`, in one transaction, waited for
   (`world/tables.hpp`).
 
-Thread boundaries: a load's and a stream's conversions and the stream callbacks run on the pool's threads. A push and a
-reader's load run on a thread started for the call, where the model makes the rows; their futures wait for that thread
-when dropped. The parts of a push in parts run on the push's own thread, started with the push and joined when the
+Thread boundaries: a stream's conversions and callbacks run on the pool's threads. A load, `table_settings`, a push, a
+`remove`, `datasets` and `verify` run on a thread started for the call, where the model makes its result or its rows;
+their futures wait for that thread when dropped. The parts of a push in parts run on the push's own thread, started with the push and joined when the
 handle is dropped. What runs on the caller's thread and waits: the constructor
 (it opens the pool), `create_table` and `drop_tables`, `osm::road_file` (it reads the file), `Reader::settings` and
 `Reader::problems`, and the `.get()` calls the caller makes.

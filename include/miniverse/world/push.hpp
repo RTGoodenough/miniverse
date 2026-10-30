@@ -97,6 +97,10 @@ template <WritesDatasets model_t>
 /**
  * @return A future for a push in parts of the push `begin` gives: on a thread started for the call, the push is begun and the
  * thread its parts then run on is started. It holds the error instead if either fails.
+ *
+ * The push is not begun on the `StepThread` itself, though that would be one thread fewer: a step there would own the handle
+ * that owns the thread, and a begin that fails, or whose future is dropped, would then destroy the thread from the thread.
+ * The begin can block for minutes on the dataset's lock, so it is not on the caller's thread either.
  */
 template <LayerModel model_t, std::invocable begin_t>
 [[nodiscard]] std::future<PushInParts<model_t>> in_parts(begin_t begin) {

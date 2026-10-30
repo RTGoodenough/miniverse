@@ -167,8 +167,8 @@ world.verify().get();
 its model is at now, or one the registry does not know (made before layouts were recorded, or by hand), is named with
 what to do: make it again and import its data. A table of the right layout is then compared with its model: the
 columns, their types, which may be null, the primary key, and that no other column would need filling. A model with
-settings must also have them in the table. Every layer is checked at once, and the future holds a `TablesDiffer`
-naming every difference found. It is meant for a program's start, so a missing or wrong table fails there rather than
+settings must also have them in the table. The layers are checked one after another, on a thread started for the call,
+and the future holds a `TablesDiffer` naming every difference found. It is meant for a program's start, so a missing or wrong table fails there rather than
 at the first load. Indexes and permissions are not checked. It needs PostgreSQL 17.
 
 `table_settings<"elevation">()` gives the settings a table was made with, for a writer that has to warp its source onto
@@ -453,9 +453,10 @@ tool built without one says so.
 - Errors from the database and from a model's conversions arrive through the future of the call. `verify` fails with
   `TablesDiffer`; a push to a file layer with `std::logic_error`; a wrong argument (a grid that is none, a chunk of zero
   rows) with `std::invalid_argument`; GDAL and libosmium errors as `std::runtime_error` with the library's message.
-- Stream callbacks run on the pool's threads (on the load's own thread for a file layer), one call at a time. A `push`
-  and a `begin_push` run on a thread started for the call: the call returns at once, and its future waits for that
-  thread if it is dropped before it is done. A push in parts then has one thread of its own, on which every part is made
+- Stream callbacks run on the pool's threads (on the load's own thread for a file layer), one call at a time. Every other
+  call that returns a future (`load`, `table_settings`, `push`, `begin_push`, `remove`, `datasets`, `verify`) runs on a
+  thread started for the call: the call returns at once, and its future waits for that thread if it is dropped before it
+  is done. A push in parts then has one thread of its own, on which every part is made
   into rows and written, in the order the parts were added; an `add` need not be waited for before the next, and
   dropping the push waits for the parts added to be written. A push begins its transaction before it makes its rows.
 - The constructor opens the pool and waits; `create_table` and `drop_tables` wait; `osm::road_file` reads its file when
