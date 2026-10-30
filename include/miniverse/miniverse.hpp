@@ -7,6 +7,7 @@
  * models use.
  */
 
+#include "miniverse/check_location.hpp"       // IWYU pragma: export
 #include "miniverse/concepts/miniverse.hpp"   // IWYU pragma: export
 #include "miniverse/geo/column_types.hpp"     // IWYU pragma: export
 #include "miniverse/geo/grid.hpp"             // IWYU pragma: export
@@ -15,7 +16,6 @@
 #include "miniverse/geo/raster_wkb.hpp"       // IWYU pragma: export
 #include "miniverse/geo/types.hpp"            // IWYU pragma: export
 #include "miniverse/layer.hpp"                // IWYU pragma: export
-#include "miniverse/location.hpp"             // IWYU pragma: export
 #include "miniverse/model/feature.hpp"        // IWYU pragma: export
 #include "miniverse/model/feature_model.hpp"  // IWYU pragma: export
 #include "miniverse/model/raster/reach.hpp"   // IWYU pragma: export

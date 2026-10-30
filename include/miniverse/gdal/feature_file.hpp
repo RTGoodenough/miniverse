@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <limits>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -38,8 +37,7 @@ class FeatureFile : public Reader<model_t> {
   [[nodiscard]] typename model_t::result_type load(const geo::Polygon& location) const override {
     typename model_t::result_type all;
 
-    // One chunk, of however many there are.
-    std::ignore = read_features_in<GeometryOf<model_t>>(_source, location, std::numeric_limits<std::size_t>::max(), [&all](auto chunk) {
+    std::ignore = read_features_in<GeometryOf<model_t>>(_source, location, ONE_CHUNK, [&all](auto chunk) {
       all = std::move(chunk);
 
       return true;

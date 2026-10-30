@@ -20,6 +20,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "commands.hpp"
 #include "models.hpp"
@@ -64,7 +65,7 @@ int main(int argc, char** argv) {
     import->add_option("--chunk", files.chunk, "Features or ways a part (10000)");
     import->add_option("--band", files.band, "A raster file's band (1)");
     import->add_option("--resampling", files.resampling, "How a raster file's pixels are made the grid's (bilinear)")
-        ->check(CLI::IsMember({"nearest", "bilinear", "cubic", "average"}));
+        ->check(CLI::IsMember(std::vector<std::string>(tool::RESAMPLINGS.begin(), tool::RESAMPLINGS.end())));
     import->add_option("--window-tiles", files.window_tiles, "A raster file's parts, in tiles a side (2)");
 
     CLI::App*   remove = app.add_subcommand("remove", "Remove a dataset from a table of features or roads");

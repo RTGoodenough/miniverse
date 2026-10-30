@@ -5,7 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <future>
-#include <iterator>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -404,23 +404,20 @@ class Miniverse {
   );
 
   [[nodiscard]] static std::tuple<layer_ts...> distinct_tables(layer_ts... layers) {
-    std::vector<std::pair<std::string_view, std::string>> tables;  // the name and the table of each layer that is one
-    const auto                                            note = [&tables](std::string_view name, const auto& layer) {
-      if ( layer.is_table() ) {
-        tables.emplace_back(name, layer.table().name().quoted());
+    std::map<std::string, std::string_view> tables;  // each table a layer is, and that layer's name
+    const auto                              note = [&tables](std::string_view name, const auto& layer) {
+      if ( ! layer.is_table() ) {
+        return;
+      }
+
+      const auto [first, added] = tables.emplace(layer.table().name().quoted(), name);
+      if ( ! added ) {
+        throw std::invalid_argument(
+            "the layers " + std::string(first->second) + " and " + std::string(name) + " of the miniverse are both the table " + first->first
+        );
       }
     };
     (note(layer_ts::NAME.view(), layers), ...);
-    for ( auto first = tables.begin(); first != tables.end(); ++first ) {
-      for ( auto second = std::next(first); second != tables.end(); ++second ) {
-        if ( first->second == second->second ) {
-          throw std::invalid_argument(
-              "the layers " + std::string(first->first) + " and " + std::string(second->first) + " of the miniverse are both the table " +
-              first->second
-          );
-        }
-      }
-    }
 
     return {std::move(layers)...};
   }

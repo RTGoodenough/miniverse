@@ -1,4 +1,5 @@
 #include "miniverse/gdal/vector.hpp"
+#include "miniverse/concepts/miniverse.hpp"
 
 #include <cpl_error.h>
 #include <gdal_priv.h>
@@ -11,7 +12,6 @@
 #include <cstddef>
 #include <exception>
 #include <functional>
-#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -175,8 +175,7 @@ template <geo::wkb::Geometry geometry_t>
 Features<geometry_t> read_features(const VectorSource& source) {
   Features<geometry_t> all;
 
-  std::ignore =
-      read_features<geometry_t>(source, std::numeric_limits<std::size_t>::max(), [&all](Features<geometry_t> chunk) { all = std::move(chunk); });
+  std::ignore = read_features<geometry_t>(source, ONE_CHUNK, [&all](Features<geometry_t> chunk) { all = std::move(chunk); });
 
   return all;
 }

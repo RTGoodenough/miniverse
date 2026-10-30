@@ -9,13 +9,13 @@
 #include <algorithm>
 #include <cstddef>
 #include <functional>
-#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/geo/types.hpp"
 #include "miniverse/model/way.hpp"
 #include "miniverse/osm/ways_in_memory.hpp"
@@ -95,7 +95,7 @@ void WaysInMemory::in(const geo::Polygon& location, std::size_t chunk_ways, cons
 Ways WaysInMemory::in(const geo::Polygon& location) const {
   Ways all;
 
-  in(location, std::numeric_limits<std::size_t>::max(), [&all](Ways chunk) {
+  in(location, ONE_CHUNK, [&all](Ways chunk) {
     all = std::move(chunk);
 
     return true;

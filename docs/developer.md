@@ -17,7 +17,7 @@ include/miniverse/
   tables_differ.hpp      TablesDiffer: what verify fails with
   layer.hpp              Layer<Model, "name">: a model under a name, in a table named at run time or read by a reader; IsLayer
   reader.hpp             Reader<Model>
-  location.hpp           check_location: what a reader's load holds a polygon to, as a table's would refuse
+  check_location.hpp     check_location: what a reader's load holds a polygon to, as a table's would refuse
   miniverse.hpp          umbrella: world.hpp plus the built-in models and geo types
   concepts/              LayerModel, WritesPlain, WritesSettings, WritesDatasets, HasOwnChunks, ChunkCallback
   geo/                   one idea each: types.hpp (Boost.Geometry), grid.hpp (the grid, where its tiles and pixels lie),

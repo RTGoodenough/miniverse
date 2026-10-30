@@ -8,9 +8,9 @@
 #include <type_traits>
 #include <utility>
 
+#include "miniverse/check_location.hpp"
 #include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/geo/types.hpp"
-#include "miniverse/location.hpp"
 #include "miniverse/reader.hpp"
 #include "miniverse/world/async.hpp"
 #include "schemacht/postgres/database.hpp"

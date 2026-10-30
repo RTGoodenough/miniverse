@@ -1,4 +1,5 @@
 #include "miniverse/gdal/raster.hpp"
+#include "miniverse/concepts/miniverse.hpp"
 
 #include <cpl_error.h>
 #include <gdal_priv.h>
@@ -98,9 +99,7 @@ template <geo::Pixel pixel_t>
 geo::Raster<pixel_t> read_raster(const RasterSource& source, const geo::Grid<pixel_t>& grid) {
   geo::Raster<pixel_t> whole;
 
-  std::ignore = read_raster<pixel_t>(source, grid, std::numeric_limits<std::size_t>::max(), [&whole](geo::Raster<pixel_t> window) {
-    whole = std::move(window);
-  });
+  std::ignore = read_raster<pixel_t>(source, grid, ONE_CHUNK, [&whole](geo::Raster<pixel_t> window) { whole = std::move(window); });
 
   return whole;
 }

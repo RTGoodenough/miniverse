@@ -1,9 +1,11 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 /**
@@ -33,6 +35,9 @@ struct GridOptions {
 void create(const Table& table, const GridOptions& grid);
 
 /** @brief How files are read into a table. Unset, an option has the default named. */
+/** @brief The resamplings a raster import takes, by name: the command line's choices, in `miniverse::gdal::Resampling`'s order. */
+inline constexpr std::array<std::string_view, 4> RESAMPLINGS{"nearest", "bilinear", "cubic", "average"};
+
 struct ImportOptions {
   std::vector<std::string>                files;         ///< One for features and roads; for a raster, any number, each pushed in turn.
   std::optional<std::string>              dataset;       ///< Of features and roads: the dataset the file replaces; the file's name.

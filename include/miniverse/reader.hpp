@@ -76,7 +76,7 @@ class Reader : public ReaderSettings<model_t> {
   [[nodiscard]] virtual std::string name() const = 0;
 
   /**
-   * @return What the layer holds in `location`, a polygon in WGS 84 longitude and latitude that `check_location` (location.hpp) has passed:
+   * @return What the layer holds in `location`, a polygon in WGS 84 longitude and latitude that `check_location` (check_location.hpp) has passed:
    * what a load of a table of the model would give for the same data. What it throws is the load's error.
    */
   [[nodiscard]] virtual typename model_t::result_type load(const geo::Polygon& location) const = 0;

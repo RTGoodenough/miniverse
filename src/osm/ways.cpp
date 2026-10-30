@@ -1,4 +1,5 @@
 #include "miniverse/osm/ways.hpp"
+#include "miniverse/concepts/miniverse.hpp"
 
 #include <boost/json/object.hpp>
 #include <boost/json/serialize.hpp>
@@ -21,7 +22,6 @@
 #include <algorithm>
 #include <cstddef>
 #include <functional>
-#include <limits>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -151,7 +151,7 @@ WayRead read_ways(const WaySource& source, std::size_t chunk_ways, const std::fu
 Ways read_ways(const WaySource& source) {
   Ways all;
 
-  std::ignore = read_ways(source, std::numeric_limits<std::size_t>::max(), [&all](Ways chunk) { all = std::move(chunk); });
+  std::ignore = read_ways(source, ONE_CHUNK, [&all](Ways chunk) { all = std::move(chunk); });
 
   return all;
 }

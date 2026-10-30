@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <exception>
 #include <filesystem>
@@ -143,22 +145,19 @@ void import_into(std::type_identity<miniverse::RoadModel> /*model*/, const Table
 }
 
 #if MINIVERSE_TOOL_GDAL
-/** @return The resampling called `name`. @throws std::invalid_argument for a name of none. */
+/** @return The resampling called `name`, one of `RESAMPLINGS`. @throws std::invalid_argument for a name of none. */
 [[nodiscard]] miniverse::gdal::Resampling resampling_of(const std::string& name) {
-  if ( name == "nearest" ) {
-    return miniverse::gdal::Resampling::Nearest;
-  }
-  if ( name == "bilinear" ) {
-    return miniverse::gdal::Resampling::Bilinear;
-  }
-  if ( name == "cubic" ) {
-    return miniverse::gdal::Resampling::Cubic;
-  }
-  if ( name == "average" ) {
-    return miniverse::gdal::Resampling::Average;
+  using miniverse::gdal::Resampling;
+
+  // What each name of RESAMPLINGS means, in its order.
+  constexpr std::array<Resampling, RESAMPLINGS.size()> MEANINGS{Resampling::Nearest, Resampling::Bilinear, Resampling::Cubic, Resampling::Average};
+
+  const auto found = std::ranges::find(RESAMPLINGS, name);
+  if ( found == RESAMPLINGS.end() ) {
+    throw std::invalid_argument("there is no resampling '" + name + "': nearest, bilinear, cubic or average");
   }
 
-  throw std::invalid_argument("there is no resampling '" + name + "': nearest, bilinear, cubic or average");
+  return MEANINGS.at(static_cast<std::size_t>(found - RESAMPLINGS.begin()));
 }
 #endif
 

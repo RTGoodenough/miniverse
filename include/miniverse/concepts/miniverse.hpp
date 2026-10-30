@@ -1,7 +1,9 @@
 #pragma once
 
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -148,6 +150,9 @@ struct ChunkType<model_t> {
 /** @brief What a streamed load of `model_t` hands its callback: some of what a load would give. */
 template <typename model_t>
 using ChunkOf = ChunkType<model_t>::type;
+
+/** @brief The chunk size that asks a chunked read for everything as one chunk: what a load passes where a stream passes its chunk size. */
+inline constexpr std::size_t ONE_CHUNK = std::numeric_limits<std::size_t>::max();
 
 /**
  * @brief A function a streamed load of `model_t` hands its chunks to: invocable with a `ChunkOf<model_t>`, returning `void`, or a

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <iterator>
 #include <memory>
 #include <string>
 #include <utility>
@@ -41,8 +40,8 @@ class RasterFile : public Reader<model_t> {
   [[nodiscard]] typename model_t::result_type load(const geo::Polygon& location) const override {
     // From the tiles a stream hands over, so a load and a stream agree.
     std::vector<geo::Raster<PixelOf<model_t>>> tiles;
-    read_tiles_in<PixelOf<model_t>>(_source, _grid, location, TILES_AT_A_TIME, [&tiles](std::vector<geo::Raster<PixelOf<model_t>>> chunk) {
-      tiles.insert(tiles.end(), std::make_move_iterator(chunk.begin()), std::make_move_iterator(chunk.end()));
+    read_tiles_in<PixelOf<model_t>>(_source, _grid, location, ONE_CHUNK, [&tiles](std::vector<geo::Raster<PixelOf<model_t>>> chunk) {
+      tiles = std::move(chunk);
 
       return true;
     });
@@ -57,8 +56,6 @@ class RasterFile : public Reader<model_t> {
   [[nodiscard]] std::vector<std::string> problems() const override { return problems_of<PixelOf<model_t>>(_source, _grid); }
 
  private:
-  static constexpr std::size_t TILES_AT_A_TIME = 64;  // how many tiles of a load are read before they are taken over
-
   RasterSource                _source;
   geo::Grid<PixelOf<model_t>> _grid;
 

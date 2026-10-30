@@ -43,7 +43,11 @@ namespace miniverse::detail {
   return {"CREATE INDEX ON " + table.quoted() + " (dataset)"};
 }
 
-/** @return The key of the advisory lock a push or a remove of `dataset` in `table` holds while it runs: a dataset name in two tables is two locks. */
+/**
+ * @return The key of the advisory lock a push or a remove of `dataset` in `table` holds while it runs: a dataset name in two
+ * tables is two locks. `hashtext` makes 32 bits of it, so two keys can share a lock; then two unrelated pushes take turns,
+ * which costs them time and nothing else.
+ */
 [[nodiscard]] inline std::string lock_key(const schemacht::schema::TableName& table, const Dataset& dataset) {
   return table.quoted() + '/' + dataset.name;
 }
