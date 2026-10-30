@@ -171,6 +171,10 @@ TEST_CASE("integration: create_tables makes the spatial index the loads use", "[
   CHECK(names == std::vector<std::string>{"miniverse_test_roads_dataset_idx", "miniverse_test_roads_geom_idx", "miniverse_test_roads_pkey"});
 }
 
+// The registry's records by the key it holds them under: the name the table resolves to, read while the table is there.
+using RegistryName = schemacht::query::RawStatement<
+    "SELECT miniverse_internal.layer_name($1) AS name", schemacht::query::RawArguments<std::string>, schemacht::schema::Field<std::string, "name">>;
+
 using DatasetRecords = schemacht::query::RawStatement<
     "SELECT dataset FROM miniverse_internal.datasets WHERE table_name = $1 ORDER BY dataset", schemacht::query::RawArguments<std::string>,
     schemacht::schema::Field<std::string, "dataset">>;
@@ -179,18 +183,32 @@ using LayerRecord = schemacht::query::RawStatement<
     "SELECT kind, layout FROM miniverse_internal.layers WHERE table_name = $1", schemacht::query::RawArguments<std::string>,
     schemacht::schema::Field<std::string, "kind">, schemacht::schema::Field<std::int32_t, "layout">>;
 
+namespace {
+
+/** @return The name the registry keys `table` under, which exists. */
+[[nodiscard]] std::string registry_name(World& world, const std::string& table) {
+  return schemacht::schema::get<"name">(world.database().execute(RegistryName::bind(table)).get().front());
+}
+
+}  // namespace
+
 TEST_CASE("integration: create_table records the table in the registry, and drop_tables forgets it", "[integration]") {
   test::Fresh<World> loaded = with_network(test_db());
   World&             world = loaded.world();
 
-  const auto recorded = world.database().execute(LayerRecord::bind("miniverse_test_roads")).get();
+  // Keyed by the name the table resolves to, however the layer spelled it.
+  const std::string key = registry_name(world, "miniverse_test_roads");
+  CHECK(key.ends_with(".miniverse_test_roads"));
+  CHECK(registry_name(world, "public.miniverse_test_roads") == key);
+
+  const auto recorded = world.database().execute(LayerRecord::bind(key)).get();
   REQUIRE(recorded.size() == 1);
   CHECK(schemacht::schema::get<"kind">(recorded.front()) == "roads");
   CHECK(schemacht::schema::get<"layout">(recorded.front()) == TestRoads::model_type::LAYOUT);
 
   world.drop_tables();
-  CHECK(world.database().execute(LayerRecord::bind("miniverse_test_roads")).get().empty());
-  CHECK(world.database().execute(DatasetRecords::bind("miniverse_test_roads")).get().empty());  // the network's, gone with the table
+  CHECK(world.database().execute(LayerRecord::bind(key)).get().empty());
+  CHECK(world.database().execute(DatasetRecords::bind(key)).get().empty());  // the network's, gone with the table
 }
 
 TEST_CASE("integration: the record of a push is written in the push's own transaction", "[integration]") {
@@ -205,7 +223,7 @@ TEST_CASE("integration: the record of a push is written in the push's own transa
   std::ignore = world.database().execute(schemacht::postgres::unchecked_sql("ALTER TABLE miniverse_internal.away RENAME TO datasets")).get();
 
   CHECK(world.load<"roads">(FAR_EAST).get().empty());
-  CHECK(world.database().execute(DatasetRecords::bind("miniverse_test_roads")).get().size() == 1);
+  CHECK(world.database().execute(DatasetRecords::bind(registry_name(world, "miniverse_test_roads"))).get().size() == 1);
 }
 
 TEST_CASE("integration: datasets lists each with its rows and when it was last pushed, and remove takes it off the list", "[integration]") {

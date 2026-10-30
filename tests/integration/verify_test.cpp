@@ -165,7 +165,8 @@ TEST_CASE("integration: verify names a table that is not in the registry, and on
   std::ignore = database
                     .execute(
                         schemacht::postgres::unchecked_sql(
-                            "DELETE FROM miniverse_internal.layers WHERE table_name = $1", std::string("miniverse_test_verify_roads")
+                            "DELETE FROM miniverse_internal.layers WHERE table_name = miniverse_internal.layer_name($1)",
+                            std::string("miniverse_test_verify_roads")
                         )
                     )
                     .get();
@@ -175,12 +176,13 @@ TEST_CASE("integration: verify names a table that is not in the registry, and on
   std::ignore = database
                     .execute(
                         schemacht::postgres::unchecked_sql(
-                            "UPDATE miniverse_internal.layers SET layout = 0 WHERE table_name = $1", std::string("miniverse_test_verify_buildings")
+                            "UPDATE miniverse_internal.layers SET layout = 0 WHERE table_name = miniverse_internal.layer_name($1)",
+                            std::string("miniverse_test_verify_buildings")
                         )
                     )
                     .get();
   const std::string complaint = complaint_of(made.world());
-  CHECK_THAT(complaint, ContainsSubstring(R"("miniverse_test_verify_buildings": made with layout 0; this build needs layout 1)"));
+  CHECK_THAT(complaint, ContainsSubstring(R"("miniverse_test_verify_buildings": made with layout 0; this build needs layout 2)"));
   CHECK_THAT(complaint, ! ContainsSubstring("miniverse_test_verify_elevation"));
 }
 

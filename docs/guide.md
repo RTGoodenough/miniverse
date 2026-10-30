@@ -66,7 +66,8 @@ world.create_table<"elevation">({.pixels_per_degree = 3600, .tile_pixels = 512, 
 function) in one transaction, and waits. It also records the table in the registry, with the layout the model is at
 (`Model::LAYOUT`, a number raised when a model's table layout changes), for `verify` to read back. The registry is the
 schema `miniverse_internal`, which the library keeps for itself in the database: its tables `layers` and `datasets`,
-and its functions. The role that first makes a table in a database makes the schema and owns it; another role that
+and its functions. It names a table by the schema and table it resolves to, so `roads` and `public.roads` are one
+layer to it. `drop_tables` forgets the table there; a database with no registry gets none from a drop. The role that first makes a table in a database makes the schema and owns it; another role that
 makes tables needs CREATE on the database, and one that pushes needs USAGE on the schema with INSERT and UPDATE on
 `datasets` (DELETE, to remove). A worker that only loads and verifies needs USAGE and SELECT on `layers`. A model with settings, such as a raster's grid, takes them here and the table
 keeps them. `create_tables()` makes every table of a miniverse whose models have no settings. `drop_tables()` drops them.

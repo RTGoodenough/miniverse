@@ -79,7 +79,7 @@ A model is a type that is never instantiated. A `Layer<Model, "name">` puts it u
 - `writes::WithSettings<T>` (a raster's grid, `SettingsOf<Model>`): `setup_sql(table, settings)`, `settings_statement_type`
   (a `RawStatement` taking the table's quoted name) and `settings_from_rows`, so a push can read the settings back from
   the table, and `to_rows(result, settings)`.
-- `writes::Datasets` (the two vector models): `dataset::Name` and `dataset::Pushed` among the schema's columns,
+- `writes::Datasets` (the two vector models): `dataset::Name` and `dataset::Stamp` among the schema's columns,
   `setup_sql(table)` for the model's own indexes, and `to_rows(result, dataset, stamp)`. The rest is the library's, in
   `world/datasets.hpp`, so a model of its own writes none of it: the sweep of a dataset's rows another push wrote
   (`sweep_statement`), the remove of a dataset (`remove_statement`), the index on `dataset` (`dataset_index_sql`), and
@@ -129,8 +129,9 @@ takes the `Database` and the layer's `Table`, the reader side the `Reader`. What
 - **verify:** on a thread started for the call, each layer in turn: the registry's record of the table, then schemacht's
   `table_differences_statement`, then the settings statement for a model with settings (`table_problems` in
   `world/verify.hpp`); `Reader::problems` for a reader. What they find is thrown as one `TablesDiffer`.
-- **create_table:** `CREATE TABLE` from the schema and the model's `setup_sql`, in one transaction, waited for
-  (`world/tables.hpp`).
+- **create_table:** the registry's setup (if absent), `CREATE TABLE` from the schema and the model's `setup_sql`, and the
+  registry's record of the table under the name it resolves to (`miniverse_internal.layer_name`), in one transaction,
+  waited for (`world/tables.hpp`). `drop_tables` forgets the table and its datasets, if there is a registry, then drops it.
 
 Thread boundaries: a stream's conversions and callbacks run on the pool's threads. A load, `table_settings`, a push, a
 `remove`, `datasets` and `verify` run on a thread started for the call, where the model makes its result or its rows;
@@ -144,11 +145,11 @@ handle is dropped. What runs on the caller's thread and waits: the constructor
 ### The built-in models
 
 - **FeatureModel<G>** (`model/feature_model.hpp`): `feature_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, dataset
-  text, geom geometry(<G>,4326), tags jsonb, pushed bigint`, a GiST index on `geom` and a btree on `dataset`. Writes are
+  text, geom geometry(<G>,4326), tags jsonb, stamp bigint`, a GiST index on `geom` and a btree on `dataset`. Writes are
   plain inserts; the load projects id, geometry and tags. Geometries are written and read as PostGIS WKB (`geo/wkb.hpp`).
   Batches are bounded by `FEATURES_PER_STATEMENT` and `POINTS_PER_STATEMENT`.
 - **RoadModel** (`model/road_model.hpp`): `way_id bigint PRIMARY KEY, dataset text, node_ids bigint[], geom
-  geometry(LineString,4326), tags jsonb, pushed bigint`, a GiST index and a btree on `dataset`. The way id is the
+  geometry(LineString,4326), tags jsonb, stamp bigint`, a GiST index and a btree on `dataset`. The way id is the
   source's own (OpenStreetMap's), and writes are schemacht's `upsert_statement` matched on it: a way whose id is there
   updates that row. The array is data, not a key: a btree entry holds at most 2704 bytes, which a way of some hundreds of
   nodes exceeds. Batches of `WAYS_PER_STATEMENT`.
@@ -202,7 +203,7 @@ dependencies are private.
 
 A model with `writes::WithSettings<T>` adds `settings_statement_type` (a `RawStatement` taking the table's quoted name),
 `settings_from_rows`, and the settings argument to `setup_sql` and `to_rows`; `RasterModel` is the example. A model with
-`writes::Datasets` puts `dataset::Name` and `dataset::Pushed` (`model/writes.hpp`) in its schema and takes the
+`writes::Datasets` puts `dataset::Name` and `dataset::Stamp` (`model/writes.hpp`) in its schema and takes the
 dataset and stamp in `to_rows`; the rest is the library's. `FeatureModel` is the plain example and `RoadModel` the one
 keyed by the source's own id, written by upsert.
 

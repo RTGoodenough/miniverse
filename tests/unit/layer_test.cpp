@@ -63,7 +63,7 @@ TEST_CASE("layer: a road layer's statements are aimed at its table", "[layer]") 
   CHECK(miniverse::detail::dataset_index_sql(layer.table().name()) == std::vector<std::string>{R"(CREATE INDEX ON "osm_roads" (dataset))"});
   CHECK(
       std::string(miniverse::detail::sweep_statement<Roads::model_type>(layer.table(), std::string("town"), std::int64_t{7}).sql()) ==
-      R"(DELETE FROM "osm_roads" WHERE "dataset" = $1 AND "pushed" <> $2)"
+      R"(DELETE FROM "osm_roads" WHERE "dataset" = $1 AND "stamp" <> $2)"
   );
   CHECK(
       std::string(miniverse::detail::remove_statement<Roads::model_type>(layer.table(), std::string("town")).sql()) ==

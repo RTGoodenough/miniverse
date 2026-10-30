@@ -14,7 +14,7 @@
 
 /**
  * @file
- * Making and dropping a layer's table, and recording it in the registry (registry.hpp): the one part of a miniverse that
+ * Making and dropping a layer's table, and recording and forgetting it in the registry (registry.hpp): the one part of a miniverse that
  * waits rather than returning a future, for tests and a program's first start. What `Miniverse::create_table` and
  * `drop_tables` do for a layer that is a table.
  */
@@ -53,14 +53,20 @@ void make_table(
   transaction.commit().get();
 }
 
-/** @brief Drops `table` if it exists and forgets it and its datasets in the registry, in one transaction, and waits for it. */
+/**
+ * @brief Drops `table` if it exists and forgets it and its datasets in the registry, in one transaction, and waits for it. A
+ * database with no registry, or with one of an older build, has nothing to forget, and gets no registry from a drop.
+ */
 template <LayerModel model_t>
 void drop_table(schemacht::postgres::Database& database, const schemacht::schema::Table<typename model_t::schema_type>& table) {
   schemacht::postgres::Transaction transaction = database.begin().get();
-  make_registry(transaction);  // a drop in a database with no registry yet
+  if ( schemacht::schema::get<"present">(transaction.execute(registry::Present::bind()).get().front()) ) {
+    // Before the drop: the registry names the table by what it resolves to while it is there.
+    transaction.execute(registry::datasets_forgotten(registry::name_of(table.name()))).get();
+    transaction.execute(registry::layer_forgotten(registry::name_of(table.name()))).get();
+  }
+
   transaction.execute(schemacht::postgres::drop_table_statement<typename model_t::schema_type>().on(table)).get();
-  transaction.execute(registry::datasets_forgotten(registry::name_of(table.name()))).get();
-  transaction.execute(registry::layer_forgotten(registry::name_of(table.name()))).get();
 
   transaction.commit().get();
 }

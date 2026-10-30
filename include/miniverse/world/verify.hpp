@@ -61,7 +61,7 @@ namespace detail {
 
 /**
  * @return The layout the registry records the layer table `name` as made with; nothing for a table it does not know, or a
- * database with no registry. Waits for the answer.
+ * database with no registry, or with one of an older build. Waits for the answer.
  */
 [[nodiscard]] inline std::optional<std::int32_t> recorded_layout(schemacht::postgres::Database& database, const std::string& name) {
   try {
@@ -72,7 +72,8 @@ namespace detail {
 
     return schemacht::schema::get<"layout">(rows.front());
   } catch ( const schemacht::postgres::QueryError& failed ) {
-    if ( failed.sqlstate() != "42P01" ) {  // undefined_table: a database with no registry holds no layer of this layout
+    // undefined_table: a database with no registry; undefined_function: a registry of an older build, without `layer_name`.
+    if ( failed.sqlstate() != "42P01" && failed.sqlstate() != "42883" ) {
       throw;
     }
 

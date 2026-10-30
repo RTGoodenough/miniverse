@@ -64,7 +64,7 @@ TEST_CASE("feature model: its statements are aimed at its table, in its geometry
   CHECK(miniverse::detail::dataset_index_sql(layer.table().name()) == std::vector<std::string>{R"(CREATE INDEX ON "osm_buildings" (dataset))"});
   CHECK(
       std::string(miniverse::detail::sweep_statement<Buildings::model_type>(layer.table(), DATASET.name, STAMP).sql()) ==
-      R"(DELETE FROM "osm_buildings" WHERE "dataset" = $1 AND "pushed" <> $2)"
+      R"(DELETE FROM "osm_buildings" WHERE "dataset" = $1 AND "stamp" <> $2)"
   );
   CHECK(
       std::string(miniverse::detail::remove_statement<Buildings::model_type>(layer.table(), DATASET.name).sql()) ==
@@ -93,7 +93,7 @@ TEST_CASE("feature model: features become rows and back", "[feature]") {
   const auto written = rows(Buildings::model_type::to_rows(miniverse::Features<geo::MultiPolygon>(buildings), DATASET, STAMP));
   REQUIRE(written.size() == 2);
   CHECK(schemacht::schema::get<"dataset">(written.front()) == "survey");
-  CHECK(schemacht::schema::get<"pushed">(written.front()) == STAMP);
+  CHECK(schemacht::schema::get<"stamp">(written.front()) == STAMP);
   CHECK(bg::to_wkt(schemacht::schema::get<"geom">(written.back())) == bg::to_wkt(buildings.back().geometry));
   CHECK(schemacht::schema::get<"tags">(written.back()) == buildings.back().tags);
 

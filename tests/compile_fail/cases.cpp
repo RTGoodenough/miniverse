@@ -81,7 +81,7 @@ void open(const std::string& conninfo) { miniverse::Miniverse world(conninfo, mi
 
 #if defined(CASE_DATASETS_WITHOUT_COLUMNS)
 struct Replaced : Spots {
-  using writes = miniverse::writes::Datasets;  // but no `dataset` or `pushed` column in the schema
+  using writes = miniverse::writes::Datasets;  // but no `dataset` or `stamp` column in the schema
 
   static std::vector<std::vector<schema_type::row_type>> to_rows(result_type spots, const miniverse::Dataset& dataset, std::int64_t stamp);
 };

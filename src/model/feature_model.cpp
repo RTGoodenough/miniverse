@@ -38,7 +38,7 @@ std::vector<std::vector<typename FeatureModel<geometry_t>::insert_row_type>> Fea
 
     points += more;
     batches.back().emplace_back(
-        dataset::Name{dataset.name}, feature::Geom<geometry_t>{std::move(each.geometry)}, feature::Tags{std::move(each.tags)}, dataset::Pushed{stamp}
+        dataset::Name{dataset.name}, feature::Geom<geometry_t>{std::move(each.geometry)}, feature::Tags{std::move(each.tags)}, dataset::Stamp{stamp}
     );
   }
 

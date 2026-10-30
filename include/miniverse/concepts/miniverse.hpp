@@ -33,7 +33,7 @@
  *   - `writes::WithSettings<T>` (a `RasterModel`'s grid): `setup_sql(table, settings)`, run once by
  *     `Miniverse::create_table<"name">(settings)`; `settings_statement_type`, whose one argument is the table's quoted name, and
  *     `settings_from_rows(rows)`, which read the settings back from the table before `to_rows(result, settings)`.
- *   - `writes::Datasets` (a `FeatureModel` or `RoadModel`): `dataset::Name` and `dataset::Pushed` among the schema's columns,
+ *   - `writes::Datasets` (a `FeatureModel` or `RoadModel`): `dataset::Name` and `dataset::Stamp` among the schema's columns,
  *     `setup_sql(table)`, and `to_rows(result, dataset, stamp)`, which marks each row with the dataset's name and the push's
  *     stamp. The sweep and the remove of a dataset, and the dataset index, are the library's (world/datasets.hpp).
  * - `setup_sql(table, ...)`: statements run once the table is made, such as its spatial index, written with `table.quoted()`.
@@ -95,9 +95,9 @@ concept WritesDatasets = std::same_as<typename model_t::writes, writes::Datasets
                          // The columns before the statements, by name and then by type: a statement written against a column
                          // that is not there is a hard error, not an unmet requirement.
                          model_t::schema_type::template has_column<dataset::Name::COLUMN_NAME>() &&
-                         model_t::schema_type::template has_column<dataset::Pushed::COLUMN_NAME>() &&
+                         model_t::schema_type::template has_column<dataset::Stamp::COLUMN_NAME>() &&
                          std::same_as<typename model_t::schema_type::template field_by_name<dataset::Name::COLUMN_NAME>, dataset::Name> &&
-                         std::same_as<typename model_t::schema_type::template field_by_name<dataset::Pushed::COLUMN_NAME>, dataset::Pushed> &&
+                         std::same_as<typename model_t::schema_type::template field_by_name<dataset::Stamp::COLUMN_NAME>, dataset::Stamp> &&
                          requires(const schemacht::schema::TableName& table, model_t::result_type data, const Dataset& dataset, std::int64_t stamp) {
                            { model_t::setup_sql(table) } -> std::same_as<std::vector<std::string>>;
                            { model_t::to_rows(std::move(data), dataset, stamp) } -> std::same_as<RowBatches<model_t>>;

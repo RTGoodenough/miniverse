@@ -39,7 +39,7 @@ TEST_CASE("road model: ways become rows and back", "[road]") {
   CHECK(schemacht::schema::get<"way_id">(written.front()) == 7);
   CHECK(schemacht::schema::get<"way_id">(written.back()) == 9);
   CHECK(schemacht::schema::get<"dataset">(written.front()) == "town");
-  CHECK(schemacht::schema::get<"pushed">(written.front()) == 42);
+  CHECK(schemacht::schema::get<"stamp">(written.front()) == 42);
   CHECK(schemacht::schema::get<"node_ids">(written.back()) == std::vector<std::int64_t>{3, 4, 5});
 
   // Read back, as a load has them.

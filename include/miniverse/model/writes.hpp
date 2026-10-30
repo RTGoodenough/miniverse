@@ -25,7 +25,7 @@ struct WithSettings {
 
 /**
  * @brief The rows belong to a `Dataset`: a push of a dataset replaces it, `Miniverse::remove` deletes it, and two pushes of
- * one dataset take turns. The model's schema holds `dataset::Name`, the dataset a row belongs to, and `dataset::Pushed`, the
+ * one dataset take turns. The model's schema holds `dataset::Name`, the dataset a row belongs to, and `dataset::Stamp`, the
  * stamp of the push that wrote it; the statements written against them are in world/datasets.hpp.
  */
 struct Datasets {};
@@ -39,6 +39,6 @@ namespace miniverse::dataset {
 using Name = schemacht::schema::Field<std::string, "dataset">;
 
 /** @brief The stamp of the push that last wrote the row: a push's sweep deletes its dataset's rows that carry another. */
-using Pushed = schemacht::schema::Field<std::int64_t, "pushed">;
+using Stamp = schemacht::schema::Field<std::int64_t, "stamp">;
 
 }  // namespace miniverse::dataset

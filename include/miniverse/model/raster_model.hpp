@@ -23,6 +23,7 @@
 #include "schemacht/schema/field.hpp"
 #include "schemacht/schema/schema.hpp"
 #include "schemacht/schema/table_name.hpp"
+#include "schemacht/util/compile_time.hpp"
 
 /**
  * @file
@@ -51,8 +52,8 @@ using Rast = schemacht::schema::Field<geo::Raster<pixel_t>, "rast">;
  * push finds it whatever the search path.
  */
 struct MergeRaster {
-  static constexpr std::string_view FUNCTION = "miniverse_internal.merge_raster";
-  static_assert(FUNCTION.starts_with(INTERNAL_SCHEMA), "the merge function lives in the library's own schema");
+  static constexpr auto             FUNCTION_TEXT = schemacht::util::concat_ctstrings<INTERNAL_SCHEMA_NAME, ".merge_raster">();
+  static constexpr std::string_view FUNCTION = FUNCTION_TEXT.view();
 };
 
 }  // namespace raster

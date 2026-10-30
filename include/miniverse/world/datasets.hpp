@@ -52,7 +52,7 @@ namespace miniverse::detail {
 template <schemacht::schema::IsSchema schema_t>
 constexpr auto SWEEP = schemacht::query::delete_where(
     schemacht::query::On<schema_t>::template col<dataset::Name::COLUMN_NAME>() == schemacht::query::arg<0>() &&
-    schemacht::query::On<schema_t>::template col<dataset::Pushed::COLUMN_NAME>() != schemacht::query::arg<1>()
+    schemacht::query::On<schema_t>::template col<dataset::Stamp::COLUMN_NAME>() != schemacht::query::arg<1>()
 );
 
 /** @brief The delete of every row of `schema_t` of the dataset named by argument 0. */

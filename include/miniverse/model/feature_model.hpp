@@ -65,12 +65,12 @@ using Tags = schemacht::schema::Field<schemacht::json::Json, "tags">;
  */
 template <geo::wkb::Geometry geometry_t>
 struct FeatureModel {
-  static constexpr std::int32_t LAYOUT = 1;  ///< The first layout recorded.
+  static constexpr std::int32_t LAYOUT = 2;  ///< Layout 1 called the stamp column `pushed`.
 
   using writes = miniverse::writes::Datasets;
   using result_type = Features<geometry_t>;
   /// The table's layout. Its name, `features`, is only a placeholder: a layer names its own table (`Layer`).
-  using schema_type = schemacht::schema::Schema<"features", feature::Id, dataset::Name, feature::Geom<geometry_t>, feature::Tags, dataset::Pushed>;
+  using schema_type = schemacht::schema::Schema<"features", feature::Id, dataset::Name, feature::Geom<geometry_t>, feature::Tags, dataset::Stamp>;
   using row_type = schema_type::row_type;
   /// A row as it is written: without the id, which the database numbers.
   using insert_row_type = schema_type::insert_row_type;
