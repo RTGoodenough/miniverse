@@ -11,8 +11,9 @@
 namespace miniverse::geo {
 
 /**
- * @brief What PostGIS calls the pixel type `pixel_t`: its number in raster WKB (`CODE`) and its name (`NAME`, as
- * `ST_BandPixelType` gives it). Specialized for each pixel type a raster can hold; undefined for any other type.
+ * @brief What PostGIS calls the pixel type `pixel_t`: its number in raster WKB (`CODE`) and its
+ * name (`NAME`, as `ST_BandPixelType` gives it). Specialized for each pixel type a raster can hold;
+ * undefined for any other type.
  */
 template <typename pixel_t>
 struct PixelType;

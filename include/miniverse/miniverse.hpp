@@ -2,9 +2,9 @@
 
 /**
  * @file
- * All of miniverse: the `Miniverse` (world.hpp), its built-in models (model/), and the geometry and raster types they
- * store (geo/). A program with models of its own alone can leave the built-in models out: world.hpp, and the geo headers its
- * models use.
+ * All of miniverse: the `Miniverse` (world.hpp), its built-in models (model/), and the geometry and
+ * raster types they store (geo/). A program with models of its own alone can leave the built-in
+ * models out: world.hpp, and the geo headers its models use.
  */
 
 #include "miniverse/check_location.hpp"       // IWYU pragma: export

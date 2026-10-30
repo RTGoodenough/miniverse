@@ -7,14 +7,18 @@
 
 /**
  * @file
- * Which models an OpenStreetMap file can be read as, in place of a table (road_file.hpp): those whose load gives `Ways`.
+ * Which models an OpenStreetMap file can be read as, in place of a table (road_file.hpp): those
+ * whose load gives `Ways`.
  */
 namespace miniverse::osm {
 
 /**
- * @brief Whether `model_t` is a model of ways: a load gives `Ways`, and a streamed load some of them. Every `RoadModel` is one.
+ * @brief Whether `model_t` is a model of ways: a load gives `Ways`, and a streamed load some of
+ * them. Every `RoadModel` is one.
  */
 template <typename model_t>
-concept ReadsWays = LayerModel<model_t> && ! HasOwnChunks<model_t> && std::same_as<typename model_t::result_type, Ways>;
+concept ReadsWays = LayerModel<model_t> &&
+                    ! HasOwnChunks<model_t> &&
+                    std::same_as<typename model_t::result_type, Ways>;
 
 }  // namespace miniverse::osm

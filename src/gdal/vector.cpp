@@ -1,18 +1,18 @@
 #include "miniverse/gdal/vector.hpp"
-#include "miniverse/concepts/miniverse.hpp"
 
-#include <cpl_error.h>
-#include <gdal_priv.h>
 #include <ogr_api.h>
 #include <ogr_core.h>
 #include <ogr_feature.h>
 #include <ogr_geometry.h>
-#include <ogrsf_frmts.h>
+
+#include <cpl_error.h>
+#include <gdal_priv.h>
 
 #include <cstddef>
 #include <exception>
 #include <functional>
 #include <memory>
+#include <ogrsf_frmts.h>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -24,6 +24,7 @@
 #include "gdal/vector/filter.hpp"
 #include "gdal/vector/geometry.hpp"
 #include "gdal/vector/source.hpp"
+#include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/geo/concepts/wkb.hpp"
 #include "miniverse/geo/types.hpp"
 #include "miniverse/geo/wkb.hpp"
@@ -50,13 +51,16 @@ using detail::tags_of;
 using detail::to_wgs84_from;
 
 /**
- * @brief Reads `source`'s features, those that intersect `location` if there is one, and hands them to `on_chunk`,
- * `chunk_features` at a time, until it returns `false`: what `read_features` and `read_features_in` do.
+ * @brief Reads `source`'s features, those that intersect `location` if there is one, and hands them
+ * to `on_chunk`, `chunk_features` at a time, until it returns `false`: what `read_features` and
+ * `read_features_in` do.
  */
 template <geo::wkb::Geometry geometry_t>
-VectorRead read_matching(
-    const VectorSource& source, const geo::Polygon* location, std::size_t chunk_features, const std::function<bool(Features<geometry_t>)>& on_chunk
-) {
+VectorRead read_matching(const VectorSource&                              source,
+                         const geo::Polygon*                              location,
+                         std::size_t                                      chunk_features,
+                         const std::function<bool(Features<geometry_t>)>& on_chunk)
+{
   if ( chunk_features == 0 ) {
     throw std::invalid_argument("a chunk of features holds at least one");
   }
@@ -64,7 +68,7 @@ VectorRead read_matching(
   const QuietErrors          quiet;
   const GDALDatasetUniquePtr dataset = opened(source);
 
-  OGRLayer&  layer = layer_of(*dataset, source);
+  OGRLayer&  layer    = layer_of(*dataset, source);
   const int  id_field = id_field_of(layer, source);
   const auto to_wgs84 = to_wgs84_from(layer, source);
 
@@ -72,7 +76,8 @@ VectorRead read_matching(
     return {};  // nothing is in a location of no points
   }
 
-  const Prepared within = location != nullptr ? narrowed_to(layer, *location, *to_wgs84, source) : Prepared(nullptr, OGRDestroyPreparedGeometry);
+  const Prepared within = location != nullptr ? narrowed_to(layer, *location, *to_wgs84, source)
+                                              : Prepared(nullptr, OGRDestroyPreparedGeometry);
 
   VectorRead           read;
   Features<geometry_t> chunk;
@@ -95,18 +100,17 @@ VectorRead read_matching(
       continue;
     }
 
-    std::unique_ptr<OGRGeometry> geometry = in_wgs84(std::move(stolen), *feature, *to_wgs84, source);
+    std::unique_ptr<OGRGeometry> geometry =
+        in_wgs84(std::move(stolen), *feature, *to_wgs84, source);
     if ( within && ! intersects(*within, *geometry, *feature, source) ) {
       continue;  // whatever type it is: only a feature in the location must be a `geometry_t`
     }
 
-    chunk.push_back(
-        Feature<geometry_t>{
-            .id = id_of(*feature, id_field, source),
-            .geometry = of_type<geometry_t>(std::move(geometry), *feature, source),
-            .tags = tags_of(*feature, id_field),
-        }
-    );
+    chunk.push_back(Feature<geometry_t>{
+        .id       = id_of(*feature, id_field, source),
+        .geometry = of_type<geometry_t>(std::move(geometry), *feature, source),
+        .tags     = tags_of(*feature, id_field),
+    });
     ++read.features;
 
     if ( chunk.size() == chunk_features && ! on_chunk(std::exchange(chunk, {})) ) {
@@ -115,7 +119,8 @@ VectorRead read_matching(
   }
 
   if ( CPLGetLastErrorType() == CE_Failure ) {
-    fail("'" + source.path + "' could not be read to its end");  // the loop ends on an error as on the last feature
+    fail("'" + source.path + "' could not be read to its end");  // the loop ends on an error as on
+                                                                 // the last feature
   }
 
   if ( ! chunk.empty() ) {
@@ -128,41 +133,55 @@ VectorRead read_matching(
 }  // namespace
 
 template <geo::wkb::Geometry geometry_t>
-VectorRead read_features(const VectorSource& source, std::size_t chunk_features, const std::function<void(Features<geometry_t>)>& on_chunk) {
-  return read_matching<geometry_t>(source, nullptr, chunk_features, [&on_chunk](Features<geometry_t> chunk) {
-    on_chunk(std::move(chunk));
+VectorRead read_features(const VectorSource&                              source,
+                         std::size_t                                      chunk_features,
+                         const std::function<void(Features<geometry_t>)>& on_chunk)
+{
+  return read_matching<geometry_t>(source, nullptr, chunk_features,
+                                   [&on_chunk](Features<geometry_t> chunk) {
+                                     on_chunk(std::move(chunk));
 
-    return true;
-  });
+                                     return true;
+                                   });
 }
 
 template <geo::wkb::Geometry geometry_t>
-VectorRead read_features_in(
-    const VectorSource& source, const geo::Polygon& location, std::size_t chunk_features, const std::function<bool(Features<geometry_t>)>& on_chunk
-) {
+VectorRead read_features_in(const VectorSource&                              source,
+                            const geo::Polygon&                              location,
+                            std::size_t                                      chunk_features,
+                            const std::function<bool(Features<geometry_t>)>& on_chunk)
+{
   return read_matching<geometry_t>(source, &location, chunk_features, on_chunk);
 }
 
 template <geo::wkb::Geometry geometry_t>
-std::vector<std::string> problems_of(const VectorSource& source) {
+std::vector<std::string> problems_of(const VectorSource& source)
+{
   try {
     const QuietErrors          quiet;
     const GDALDatasetUniquePtr dataset = opened(source);
 
     OGRLayer& layer = layer_of(*dataset, source);
-    std::ignore = id_field_of(layer, source);
-    std::ignore = to_wgs84_from(layer, source);
+    std::ignore     = id_field_of(layer, source);
+    std::ignore     = to_wgs84_from(layer, source);
     need_geos();
 
-    // A layer that declares its geometry type must declare the type asked for, or one that reads as it (a single type as the
-    // multi one, a multi one as the single one, a curve as lines). A layer that declares none may hold any.
-    const OGRwkbGeometryType found = wkbFlatten(OGR_GT_GetLinear(layer.GetGeomType()));
+    // A layer that declares its geometry type must declare the type asked for, or one that reads as
+    // it (a single type as the multi one, a multi one as the single one, a curve as lines). A layer
+    // that declares none may hold any.
+    const OGRwkbGeometryType found  = wkbFlatten(OGR_GT_GetLinear(layer.GetGeomType()));
     const OGRwkbGeometryType wanted = ogr_type<geometry_t>();
-    if ( found != wkbUnknown && found != wanted && OGR_GT_GetCollection(found) != wanted && OGR_GT_GetCollection(wanted) != found ) {
-      return {
-          "the geometries of '" + source.path + "' are " + OGRGeometryTypeToName(found) + ", not " +
-          std::string(geo::wkb::type_name<geometry_t>().view())
-      };
+    if ( found != wkbUnknown &&
+         found != wanted &&
+         OGR_GT_GetCollection(found) != wanted &&
+         OGR_GT_GetCollection(wanted) != found )
+    {
+      return {"the geometries of '" +
+              source.path +
+              "' are " +
+              OGRGeometryTypeToName(found) +
+              ", not " +
+              std::string(geo::wkb::type_name<geometry_t>().view())};
     }
 
     return {};
@@ -172,35 +191,51 @@ std::vector<std::string> problems_of(const VectorSource& source) {
 }
 
 template <geo::wkb::Geometry geometry_t>
-Features<geometry_t> read_features(const VectorSource& source) {
+Features<geometry_t> read_features(const VectorSource& source)
+{
   Features<geometry_t> all;
 
-  std::ignore = read_features<geometry_t>(source, ONE_CHUNK, [&all](Features<geometry_t> chunk) { all = std::move(chunk); });
+  std::ignore = read_features<geometry_t>(
+      source, ONE_CHUNK, [&all](Features<geometry_t> chunk) { all = std::move(chunk); });
 
   return all;
 }
 
-template VectorRead read_features<geo::Point>(const VectorSource&, std::size_t, const std::function<void(Features<geo::Point>)>&);
-template VectorRead read_features<geo::LineString>(const VectorSource&, std::size_t, const std::function<void(Features<geo::LineString>)>&);
-template VectorRead read_features<geo::Polygon>(const VectorSource&, std::size_t, const std::function<void(Features<geo::Polygon>)>&);
-template VectorRead read_features<geo::MultiLineString>(const VectorSource&, std::size_t, const std::function<void(Features<geo::MultiLineString>)>&);
-template VectorRead read_features<geo::MultiPolygon>(const VectorSource&, std::size_t, const std::function<void(Features<geo::MultiPolygon>)>&);
+template VectorRead read_features<geo::Point>(
+    const VectorSource&, std::size_t, const std::function<void(Features<geo::Point>)>&);
+template VectorRead read_features<geo::LineString>(
+    const VectorSource&, std::size_t, const std::function<void(Features<geo::LineString>)>&);
+template VectorRead read_features<geo::Polygon>(
+    const VectorSource&, std::size_t, const std::function<void(Features<geo::Polygon>)>&);
+template VectorRead read_features<geo::MultiLineString>(
+    const VectorSource&, std::size_t, const std::function<void(Features<geo::MultiLineString>)>&);
+template VectorRead read_features<geo::MultiPolygon>(
+    const VectorSource&, std::size_t, const std::function<void(Features<geo::MultiPolygon>)>&);
 
-template VectorRead read_features_in<geo::Point>(
-    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::Point>)>&
-);
+template VectorRead read_features_in<geo::Point>(const VectorSource&,
+                                                 const geo::Polygon&,
+                                                 std::size_t,
+                                                 const std::function<bool(Features<geo::Point>)>&);
 template VectorRead read_features_in<geo::LineString>(
-    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::LineString>)>&
-);
+    const VectorSource&,
+    const geo::Polygon&,
+    std::size_t,
+    const std::function<bool(Features<geo::LineString>)>&);
 template VectorRead read_features_in<geo::Polygon>(
-    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::Polygon>)>&
-);
+    const VectorSource&,
+    const geo::Polygon&,
+    std::size_t,
+    const std::function<bool(Features<geo::Polygon>)>&);
 template VectorRead read_features_in<geo::MultiLineString>(
-    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::MultiLineString>)>&
-);
+    const VectorSource&,
+    const geo::Polygon&,
+    std::size_t,
+    const std::function<bool(Features<geo::MultiLineString>)>&);
 template VectorRead read_features_in<geo::MultiPolygon>(
-    const VectorSource&, const geo::Polygon&, std::size_t, const std::function<bool(Features<geo::MultiPolygon>)>&
-);
+    const VectorSource&,
+    const geo::Polygon&,
+    std::size_t,
+    const std::function<bool(Features<geo::MultiPolygon>)>&);
 
 template std::vector<std::string> problems_of<geo::Point>(const VectorSource&);
 template std::vector<std::string> problems_of<geo::LineString>(const VectorSource&);

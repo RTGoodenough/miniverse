@@ -1,3 +1,5 @@
+#include "miniverse/osm/ways_in_memory.hpp"
+
 #include <boost/geometry/algorithms/correct.hpp>
 #include <boost/geometry/algorithms/envelope.hpp>    // IWYU pragma: keep
 #include <boost/geometry/algorithms/intersects.hpp>  // IWYU pragma: keep
@@ -18,25 +20,28 @@
 #include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/geo/types.hpp"
 #include "miniverse/model/way.hpp"
-#include "miniverse/osm/ways_in_memory.hpp"
 
 namespace miniverse::osm::detail {
 
 namespace {
 
-using Box = boost::geometry::model::box<geo::Point>;
+using Box   = boost::geometry::model::box<geo::Point>;
 using Boxed = std::pair<Box, std::size_t>;  // a way's box, and which way it is
 constexpr std::size_t BOXES_TO_A_NODE = 16;
-using Boxes = boost::geometry::index::rtree<Boxed, boost::geometry::index::quadratic<BOXES_TO_A_NODE>>;
+using Boxes =
+    boost::geometry::index::rtree<Boxed, boost::geometry::index::quadratic<BOXES_TO_A_NODE>>;
 
-/** @return The box of each way that has points, with its place among `ways`: a way of none is nowhere, and never found. */
-[[nodiscard]] std::vector<Boxed> boxed(const Ways& ways) {
+/** @return The box of each way that has points, with its place among `ways`: a way of none is
+ * nowhere, and never found. */
+[[nodiscard]] std::vector<Boxed> boxed(const Ways& ways)
+{
   std::vector<Boxed> boxes;
 
   boxes.reserve(ways.size());
   for ( std::size_t i = 0; i < ways.size(); ++i ) {
     if ( ! ways.at(i).coordinates.empty() ) {
-      boxes.emplace_back(boost::geometry::return_envelope<Box>(ways.at(i).coordinates), i);  // NOLINT(misc-include-cleaner)
+      boxes.emplace_back(boost::geometry::return_envelope<Box>(ways.at(i).coordinates),
+                         i);  // NOLINT(misc-include-cleaner)
     }
   }
 
@@ -50,11 +55,17 @@ struct WaysInMemory::Index {
   Boxes boxes;
 };
 
-WaysInMemory::WaysInMemory(Ways ways) : _ways(std::move(ways)), _index(std::make_unique<const Index>(Index{.boxes = Boxes(boxed(_ways))})) {}
+WaysInMemory::WaysInMemory(Ways ways)
+    : _ways(std::move(ways)),
+      _index(std::make_unique<const Index>(Index{.boxes = Boxes(boxed(_ways))}))
+{}
 
 WaysInMemory::~WaysInMemory() = default;
 
-void WaysInMemory::in(const geo::Polygon& location, std::size_t chunk_ways, const std::function<bool(Ways)>& on_chunk) const {
+void WaysInMemory::in(const geo::Polygon&              location,
+                      std::size_t                      chunk_ways,
+                      const std::function<bool(Ways)>& on_chunk) const
+{
   if ( chunk_ways == 0 ) {
     throw std::invalid_argument("a chunk of ways holds at least one");
   }
@@ -70,14 +81,17 @@ void WaysInMemory::in(const geo::Polygon& location, std::size_t chunk_ways, cons
 
   // The ways whose boxes meet the location's, in the order they were given.
   std::vector<std::size_t> nearby;
-  for ( auto found = _index->boxes.qbegin(boost::geometry::index::intersects(box)); found != _index->boxes.qend(); ++found ) {
+  for ( auto found = _index->boxes.qbegin(boost::geometry::index::intersects(box));
+        found != _index->boxes.qend(); ++found )
+  {
     nearby.push_back(found->second);
   }
   std::ranges::sort(nearby);
 
   Ways chunk;
   for ( const std::size_t near : nearby ) {
-    if ( ! boost::geometry::intersects(_ways.at(near).coordinates, area) ) {  // NOLINT(misc-include-cleaner)
+    if ( ! boost::geometry::intersects(_ways.at(near).coordinates,
+                                       area) ) {  // NOLINT(misc-include-cleaner)
       continue;
     }
 
@@ -92,7 +106,8 @@ void WaysInMemory::in(const geo::Polygon& location, std::size_t chunk_ways, cons
   }
 }
 
-Ways WaysInMemory::in(const geo::Polygon& location) const {
+Ways WaysInMemory::in(const geo::Polygon& location) const
+{
   Ways all;
 
   in(location, ONE_CHUNK, [&all](Ways chunk) {

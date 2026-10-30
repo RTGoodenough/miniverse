@@ -1,19 +1,53 @@
 Language: Cpp
 BasedOnStyle: Google
 Standard: Latest
+
 TabWidth: 2
 UseTab: Never
-ColumnLimit: 150
-# A blank line separates the steps of a function; one is kept, more are folded into one.
+
+ColumnLimit: 100
+ReflowComments:  true
+PenaltyBreakComment: 0
+PenaltyBreakOpenParenthesis: 1
+
+AlignAfterOpenBracket: Align
+BinPackParameters: false
+
+BreakBinaryOperations: RespectPrecedence
+
+SortIncludes: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^<catch2.*'
+    Priority: 1
+  - Regex: '^<boost.*'
+    Priority: 2
+  - Regex: '^<ogr_.*'
+    Priority: 3
+  - Regex: '^<gdal.*'
+    Priority: 4
+  - Regex: '^<cpl_.*'
+    Priority: 4
+  - Regex: '^"schemacht.*'
+    Priority: 5
+  - Regex: '^<.*'
+    Priority: 6
+  - Regex: '.*'
+    Priority: 7
+
 MaxEmptyLinesToKeep: 1
-# Arguments, parameters and lambda captures that do not fit break after the opening bracket and are indented one step, with
-# the closing bracket on a line of its own: a lambda's captures wrap among themselves instead of pushing its parameters
-# to the far right.
-AlignAfterOpenBracket: BlockIndent
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterClass: true
+  AfterControlStatement: MultiLine
+  AfterEnum: true
+  AfterFunction: true
+  AfterStruct: false
+  BeforeElse: true
+  SplitEmptyFunction: false
+
 PointerAlignment: Left
-ReflowComments:  false
-IncludeBlocks: Preserve
-AlignConsecutiveDeclarations: true
 DerivePointerAlignment: false
 
 SpaceAfterLogicalNot: true
@@ -31,3 +65,19 @@ SpaceBeforeParensOptions:
   AfterIfMacros: true
   AfterOverloadedOperator: false
   BeforeNonEmptyParentheses: false
+
+AlignConsecutiveDeclarations:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: true
+  AlignCompound: false
+  PadOperators: true
+
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: true
+  AlignCompound: false
+  PadOperators: true
+
+SeparateDefinitionBlocks: Always

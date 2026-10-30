@@ -17,7 +17,7 @@
 #include "support/files.hpp"
 #include "support/geometry.hpp"
 
-namespace geo = miniverse::geo;
+namespace geo  = miniverse::geo;
 namespace gdal = miniverse::gdal;
 
 using Catch::Matchers::ContainsSubstring;
@@ -31,23 +31,35 @@ using test::polygon;
 using test::Raster;
 using test::write_tiff;
 
-TEST_CASE("gdal raster: a file as a layer loads the box's pixels on the grid, and streams its tiles, with no database", "[gdal]") {
+TEST_CASE(
+    "gdal raster: a file as a layer loads the box's pixels on the grid, and streams its tiles, "
+    "with no database",
+    "[gdal]")
+{
   // Two degrees each way from (1, 3): four tiles of the grid, numbered pixels.
   const Files       files;
   const std::string path = files.path_of("on_grid.tif");
-  write_tiff(path, {.epsg = 4326, .west = 1, .north = 3, .pixel = 0.25, .width = 8, .height = 8, .pixels = numbered(8, 8)});
+  write_tiff(path, {.epsg   = 4326,
+                    .west   = 1,
+                    .north  = 3,
+                    .pixel  = 0.25,
+                    .width  = 8,
+                    .height = 8,
+                    .pixels = numbered(8, 8)});
   miniverse::Miniverse     world(gdal::raster_file<Elevation>(as_it_is(path), GRID));
   std::vector<std::size_t> chunks;
 
   world.verify().get();
   const Raster whole = world.load<"elevation">(polygon("POLYGON((1 1,3 1,3 3,1 3,1 1))")).get();
-  const Raster part = world.load<"elevation">(polygon("POLYGON((1.3 2.3,1.6 2.3,1.6 2.6,1.3 2.6,1.3 2.3))")).get();
-  const Raster past = world.load<"elevation">(polygon("POLYGON((2.5 2.5,3.5 2.5,3.5 3.5,2.5 3.5,2.5 2.5))")).get();
+  const Raster part =
+      world.load<"elevation">(polygon("POLYGON((1.3 2.3,1.6 2.3,1.6 2.6,1.3 2.6,1.3 2.3))")).get();
+  const Raster past =
+      world.load<"elevation">(polygon("POLYGON((2.5 2.5,3.5 2.5,3.5 3.5,2.5 3.5,2.5 2.5))")).get();
   world
       .stream<"elevation">(
-          polygon("POLYGON((0 0,5 0,5 5,0 5,0 0))"), [&chunks](const std::vector<Raster>& tiles) { chunks.push_back(tiles.size()); },
-          {.chunk_rows = 3}
-      )
+          polygon("POLYGON((0 0,5 0,5 5,0 5,0 0))"),
+          [&chunks](const std::vector<Raster>& tiles) { chunks.push_back(tiles.size()); },
+          {.chunk_rows = 3})
       .get();
 
   CHECK(world.table_settings<"elevation">().get() == GRID);
@@ -60,7 +72,8 @@ TEST_CASE("gdal raster: a file as a layer loads the box's pixels on the grid, an
   REQUIRE(part.height == 2);
   CHECK(part.at(0, 0) == 101);  // column 1, row 1 of the file
 
-  // The box reaches past the file to the north and east: no data there, the file's pixels in its corner.
+  // The box reaches past the file to the north and east: no data there, the file's pixels in its
+  // corner.
   REQUIRE(past.width == 4);
   REQUIRE(past.height == 4);
   CHECK(past.at(0, 0) == GRID_NODATA);
@@ -68,12 +81,18 @@ TEST_CASE("gdal raster: a file as a layer loads the box's pixels on the grid, an
   CHECK(past.at(2, 2) == GRID_NODATA);
 
   CHECK(chunks == std::vector<std::size_t>{3, 1});
-  CHECK(world.load<"elevation">(polygon("POLYGON((40 40,41 40,41 41,40 41,40 40))")).get() == Raster{});
+  CHECK(world.load<"elevation">(polygon("POLYGON((40 40,41 40,41 41,40 41,40 40))")).get() ==
+        Raster{});
 
   // A triangle in the north west of the file: the south-east tile is in its box, and is not read.
   const geo::Polygon  triangle = polygon("POLYGON((1.1 1.2,2.8 2.9,1.1 2.9,1.1 1.2))");
   std::vector<Raster> reached;
-  world.stream<"elevation">(triangle, [&reached](std::vector<Raster> tiles) { reached.insert(reached.end(), tiles.begin(), tiles.end()); }).get();
+  world
+      .stream<"elevation">(triangle,
+                           [&reached](std::vector<Raster> tiles) {
+                             reached.insert(reached.end(), tiles.begin(), tiles.end());
+                           })
+      .get();
   const Raster askew = world.load<"elevation">(triangle).get();
 
   CHECK(reached.size() == 3);
@@ -81,21 +100,27 @@ TEST_CASE("gdal raster: a file as a layer loads the box's pixels on the grid, an
   CHECK(askew.value_at({2.6, 1.4}) == std::nullopt);  // in the box, in the tile not read
 }
 
-TEST_CASE("gdal raster: verify says what keeps a file from being a layer", "[gdal]") {
+TEST_CASE("gdal raster: verify says what keeps a file from being a layer", "[gdal]")
+{
   const Files          files;
-  miniverse::Miniverse world(gdal::raster_file<Elevation>(as_it_is(files.path_of("missing.tif")), GRID));
+  miniverse::Miniverse world(
+      gdal::raster_file<Elevation>(as_it_is(files.path_of("missing.tif")), GRID));
 
   try {
     world.verify().get();
     FAIL("it verified");
   } catch ( const miniverse::TablesDiffer& differ ) {
     REQUIRE(differ.differences().size() == 1);
-    CHECK_THAT(differ.differences().front(), ContainsSubstring("missing.tif") && ContainsSubstring("can't be opened"));
+    CHECK_THAT(differ.differences().front(),
+               ContainsSubstring("missing.tif") && ContainsSubstring("can't be opened"));
   }
 
-  CHECK_THROWS_WITH(world.load<"elevation">(polygon("POLYGON((0 0,1 0,1 1,0 0))")).get(), ContainsSubstring("can't be opened"));
+  CHECK_THROWS_WITH(world.load<"elevation">(polygon("POLYGON((0 0,1 0,1 1,0 0))")).get(),
+                    ContainsSubstring("can't be opened"));
   CHECK_THROWS_AS(
-      world.stream<"elevation">(polygon("POLYGON((0 0,1 0,1 1,0 0))"), [](const std::vector<Raster>& /*tiles*/) {}, {.chunk_rows = 0}).get(),
-      std::invalid_argument
-  );
+      world
+          .stream<"elevation">(polygon("POLYGON((0 0,1 0,1 1,0 0))"),
+                               [](const std::vector<Raster>& /*tiles*/) {}, {.chunk_rows = 0})
+          .get(),
+      std::invalid_argument);
 }

@@ -15,9 +15,9 @@
 
 /**
  * @file
- * The bytes of well-known binary, geometry's (geo/wkb.hpp) and raster's (geo/raster_wkb.hpp) alike: a `Reader` for either
- * byte order, as the data's own mark says, and a `Writer` that writes little-endian. Not installed: what the two WKB forms
- * share, and nothing else uses.
+ * The bytes of well-known binary, geometry's (geo/wkb.hpp) and raster's (geo/raster_wkb.hpp) alike:
+ * a `Reader` for either byte order, as the data's own mark says, and a `Writer` that writes
+ * little-endian. Not installed: what the two WKB forms share, and nothing else uses.
  *
  * Malformed input throws `std::invalid_argument`, its message starting `wkb: `.
  */
@@ -25,22 +25,34 @@ namespace miniverse::geo::wkb {
 
 /** @brief A number WKB holds: an integer or a floating point number of 1, 2, 4 or 8 bytes. */
 template <typename number_t>
-concept Number = (std::integral<number_t> || std::floating_point<number_t>) && ! std::same_as<number_t, bool> &&
-                 std::has_single_bit(sizeof(number_t)) && sizeof(number_t) <= sizeof(std::uint64_t);
+concept Number = (std::integral<number_t> || std::floating_point<number_t>) &&
+                 ! std::same_as<number_t, bool> &&
+                 std::has_single_bit(sizeof(number_t)) &&
+                 sizeof(number_t) <= sizeof(std::uint64_t);
 
-/** @brief Throws `std::invalid_argument("wkb: " + what)`: for a reader of a WKB form to report what is wrong with it. */
-[[noreturn]] inline void malformed(const std::string& what) { throw std::invalid_argument("wkb: " + what); }
+/** @brief Throws `std::invalid_argument("wkb: " + what)`: for a reader of a WKB form to report what
+ * is wrong with it. */
+[[noreturn]] inline void malformed(const std::string& what)
+{
+  throw std::invalid_argument("wkb: " + what);
+}
 
-/** @brief Reads WKB's numbers from a buffer, in the byte order its mark names (`byte_order`). Little-endian until then. */
-class Reader {
+/** @brief Reads WKB's numbers from a buffer, in the byte order its mark names (`byte_order`).
+ * Little-endian until then. */
+class Reader
+{
  public:
   explicit Reader(std::span<const std::byte> bytes) : _bytes(bytes) {}
 
-  /** @brief Reads a byte order mark, 0 (big-endian) or 1 (little-endian), and reads what follows in that order. */
-  void byte_order() {
+  /** @brief Reads a byte order mark, 0 (big-endian) or 1 (little-endian), and reads what follows in
+   * that order. */
+  void byte_order()
+  {
     const auto mark = std::to_integer<std::uint8_t>(byte());
     if ( mark != LITTLE_ENDIAN_MARK && mark != BIG_ENDIAN_MARK ) {
-      malformed("byte order mark " + std::to_string(static_cast<unsigned>(mark)) + " is neither 0 (big-endian) nor 1 (little-endian)");
+      malformed("byte order mark " +
+                std::to_string(static_cast<unsigned>(mark)) +
+                " is neither 0 (big-endian) nor 1 (little-endian)");
     }
 
     _little = mark == LITTLE_ENDIAN_MARK;
@@ -50,7 +62,8 @@ class Reader {
 
   /** @return The next `number_t`, in the byte order. */
   template <Number number_t>
-  [[nodiscard]] number_t number() {
+  [[nodiscard]] number_t number()
+  {
     std::array<std::byte, sizeof(number_t)> raw{};
     std::ranges::copy(take(sizeof(number_t)), raw.begin());
     if ( _little != (std::endian::native == std::endian::little) ) {
@@ -60,13 +73,23 @@ class Reader {
     return std::bit_cast<number_t>(raw);
   }
 
-  /** @return A count of items of `item_bytes` each, checked to fit in what is left, so a corrupt count can't allocate gigabytes. */
-  [[nodiscard]] std::size_t count(std::size_t item_bytes) { return checked_count(number<std::uint32_t>(), item_bytes); }
+  /** @return A count of items of `item_bytes` each, checked to fit in what is left, so a corrupt
+   * count can't allocate gigabytes. */
+  [[nodiscard]] std::size_t count(std::size_t item_bytes)
+  {
+    return checked_count(number<std::uint32_t>(), item_bytes);
+  }
 
-  /** @return `items`, a count read some other way (a raster's width times its height), checked as `count` checks one. */
-  [[nodiscard]] std::size_t checked_count(std::size_t items, std::size_t item_bytes) const {
+  /** @return `items`, a count read some other way (a raster's width times its height), checked as
+   * `count` checks one. */
+  [[nodiscard]] std::size_t checked_count(std::size_t items, std::size_t item_bytes) const
+  {
     if ( items > remaining() / item_bytes ) {
-      malformed("a count of " + std::to_string(items) + " is more than the " + std::to_string(remaining()) + " bytes left could hold");
+      malformed("a count of " +
+                std::to_string(items) +
+                " is more than the " +
+                std::to_string(remaining()) +
+                " bytes left could hold");
     }
 
     return items;
@@ -76,15 +99,16 @@ class Reader {
 
   [[nodiscard]] std::size_t remaining() const noexcept { return _bytes.size() - _at; }
 
-  static constexpr std::uint8_t BIG_ENDIAN_MARK = 0;
+  static constexpr std::uint8_t BIG_ENDIAN_MARK    = 0;
   static constexpr std::uint8_t LITTLE_ENDIAN_MARK = 1;
 
  private:
   std::span<const std::byte> _bytes;
-  std::size_t                _at = 0;
+  std::size_t                _at     = 0;
   bool                       _little = true;
 
-  [[nodiscard]] std::span<const std::byte> take(std::size_t size) {
+  [[nodiscard]] std::span<const std::byte> take(std::size_t size)
+  {
     if ( size > remaining() ) {
       malformed("the data ends early");
     }
@@ -96,22 +120,24 @@ class Reader {
   }
 
  public:
-  Reader(const Reader&) = delete;
-  Reader(Reader&&) = delete;
+  Reader(const Reader&)            = delete;
+  Reader(Reader&&)                 = delete;
   Reader& operator=(const Reader&) = delete;
-  Reader& operator=(Reader&&) = delete;
-  ~Reader() = default;
+  Reader& operator=(Reader&&)      = delete;
+  ~Reader()                        = default;
 };
 
 /** @brief Writes WKB's numbers, little-endian, starting with the byte order mark that says so. */
-class Writer {
+class Writer
+{
  public:
   Writer() { byte(std::byte{Reader::LITTLE_ENDIAN_MARK}); }
 
   void byte(std::byte value) { _bytes.push_back(value); }
 
   template <Number number_t>
-  void number(number_t value) {
+  void number(number_t value)
+  {
     auto raw = std::bit_cast<std::array<std::byte, sizeof(number_t)>>(value);
     if constexpr ( std::endian::native == std::endian::big ) {
       std::ranges::reverse(raw);
@@ -120,8 +146,10 @@ class Writer {
     _bytes.insert(_bytes.end(), raw.begin(), raw.end());
   }
 
-  /** @brief A count of parts, as WKB writes it: a 32-bit word. @throws std::invalid_argument if it doesn't fit one. */
-  void count(std::size_t size) {
+  /** @brief A count of parts, as WKB writes it: a 32-bit word. @throws std::invalid_argument if it
+   * doesn't fit one. */
+  void count(std::size_t size)
+  {
     if ( size > std::numeric_limits<std::uint32_t>::max() ) {
       throw std::invalid_argument("wkb: more parts than WKB can count");
     }
@@ -136,11 +164,11 @@ class Writer {
   std::vector<std::byte> _bytes;
 
  public:
-  Writer(const Writer&) = delete;
-  Writer(Writer&&) = delete;
+  Writer(const Writer&)            = delete;
+  Writer(Writer&&)                 = delete;
   Writer& operator=(const Writer&) = delete;
-  Writer& operator=(Writer&&) = delete;
-  ~Writer() = default;
+  Writer& operator=(Writer&&)      = delete;
+  ~Writer()                        = default;
 };
 
 }  // namespace miniverse::geo::wkb

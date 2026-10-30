@@ -1,5 +1,8 @@
 #pragma once
 
+#include "schemacht/postgres/transaction.hpp"
+#include "schemacht/schema/table.hpp"
+
 #include <concepts>
 #include <exception>
 #include <functional>
@@ -12,37 +15,40 @@
 #include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/world/async.hpp"
 #include "miniverse/world/step_thread.hpp"
-#include "schemacht/postgres/transaction.hpp"
-#include "schemacht/schema/table.hpp"
 
 /**
  * @file
- * A push run in steps: the steps, and the handle `Miniverse::begin_push` gives to run each on the push's own thread, which a
- * whole push runs in one go.
+ * A push run in steps: the steps, and the handle `Miniverse::begin_push` gives to run each on the
+ * push's own thread, which a whole push runs in one go.
  */
 namespace miniverse {
 
 namespace detail {
 
 /**
- * @brief A push while it runs: its transaction, how its rows are made, what it runs before it commits, and why it ended if a
- * step of it failed. A step runs on the thread that calls it and waits for each statement, so the push holds one statement's
- * text at a time; a step that fails rolls the transaction back, and every later step fails with its error.
+ * @brief A push while it runs: its transaction, how its rows are made, what it runs before it
+ * commits, and why it ended if a step of it failed. A step runs on the thread that calls it and
+ * waits for each statement, so the push holds one statement's text at a time; a step that fails
+ * rolls the transaction back, and every later step fails with its error.
  */
 template <LayerModel model_t>
 struct Push {
-  using Table = schemacht::schema::Table<typename model_t::schema_type>;
-  using ToRows = std::function<RowBatches<model_t>(typename model_t::result_type)>;
+  using Table        = schemacht::schema::Table<typename model_t::schema_type>;
+  using ToRows       = std::function<RowBatches<model_t>(typename model_t::result_type)>;
   using BeforeCommit = std::function<void(schemacht::postgres::Transaction&)>;
 
   schemacht::postgres::Transaction transaction;
   const Table*                     table = nullptr;
-  ToRows                           to_rows;        ///< A part's data as the model's batches: with the table's settings, or the dataset and stamp.
-  BeforeCommit                     before_commit;  ///< A dataset's sweep; nothing, for most models.
-  std::exception_ptr               failed;         ///< Why the push ended, if a step failed: what every later step throws.
+  ToRows to_rows;  ///< A part's data as the model's batches: with the table's settings, or the
+                   ///< dataset and stamp.
+  BeforeCommit       before_commit;  ///< A dataset's sweep; nothing, for most models.
+  std::exception_ptr failed;  ///< Why the push ended, if a step failed: what every later step
+                              ///< throws.
 
-  /** @brief Writes `data` as rows, one statement per batch, each waited for; a batch is let go of once it is written. */
-  void add(typename model_t::result_type data) {
+  /** @brief Writes `data` as rows, one statement per batch, each waited for; a batch is let go of
+   * once it is written. */
+  void add(typename model_t::result_type data)
+  {
     step([&] {
       RowBatches<model_t> batches = to_rows(std::move(data));
       for ( RowsOf<model_t>& batch : batches ) {
@@ -53,8 +59,10 @@ struct Push {
     });
   }
 
-  /** @brief Runs what comes before the commit, then commits: what was added is then there for everyone. */
-  void commit() {
+  /** @brief Runs what comes before the commit, then commits: what was added is then there for
+   * everyone. */
+  void commit()
+  {
     step([&] {
       if ( before_commit ) {
         before_commit(transaction);
@@ -65,24 +73,29 @@ struct Push {
   }
 
   /**
-   * @brief Ends the push with `error`: the transaction is rolled back and waited for, unless it has ended already (a commit that
-   * failed ended it), and every later step throws `error`. What the rollback says is beside the point: the error is the push's.
+   * @brief Ends the push with `error`: the transaction is rolled back and waited for, unless it has
+   * ended already (a commit that failed ended it), and every later step throws `error`. What the
+   * rollback says is beside the point: the error is the push's.
    */
-  void end(const std::exception_ptr& error) noexcept {
+  void end(const std::exception_ptr& error) noexcept
+  {
     failed = error;
 
     try {
       if ( transaction.is_open() ) {
         transaction.rollback().wait();
       }
-    } catch ( ... ) {  // NOLINT(bugprone-empty-catch) -- the ROLLBACK couldn't be queued: dropping the transaction rolls it back
+    } catch ( ... ) {  // NOLINT(bugprone-empty-catch) -- the ROLLBACK couldn't be queued: dropping
+                       // the transaction rolls it back
     }
   }
 
  private:
-  /** @brief Runs `run`, unless a step has failed already; one that throws ends the push with its error. */
+  /** @brief Runs `run`, unless a step has failed already; one that throws ends the push with its
+   * error. */
   template <std::invocable run_t>
-  void step(run_t run) {
+  void step(run_t run)
+  {
     if ( failed ) {
       std::rethrow_exception(failed);
     }
@@ -99,8 +112,8 @@ struct Push {
 }  // namespace detail
 
 /**
- * @brief A push that takes its data in parts, all of them written or none: for data too large to hold at once, such as a file a
- * loader reads a chunk at a time. Made by `Miniverse::begin_push`.
+ * @brief A push that takes its data in parts, all of them written or none: for data too large to
+ * hold at once, such as a file a loader reads a chunk at a time. Made by `Miniverse::begin_push`.
  *
  * @code
  * auto buildings = world.begin_push<"buildings">(miniverse::Dataset{"buildings.gpkg"}).get();
@@ -110,50 +123,64 @@ struct Push {
  * buildings.commit().get();  // now it is all there, for everyone at once
  * @endcode
  *
- * It is one transaction: the parts are seen by no one else until `commit`, and one dropped without a commit writes nothing.
- * It holds one of the pool's connections from `begin_push` until it ends. A part that fails ends the push: it is rolled
- * back, and every later `add`, and the `commit`, fails with that part's error. A connection lost under the push ends it
- * the same way, with the error of the part that found it gone.
+ * It is one transaction: the parts are seen by no one else until `commit`, and one dropped without
+ * a commit writes nothing. It holds one of the pool's connections from `begin_push` until it ends.
+ * A part that fails ends the push: it is rolled back, and every later `add`, and the `commit`,
+ * fails with that part's error. A connection lost under the push ends it the same way, with the
+ * error of the part that found it gone.
  *
- * The parts are made into rows and written on the push's own thread, in the order they are added: an `add` need not be
- * waited for before the next, or before the `commit`. Each `add` holds its part until the part is written, so a reader far
- * ahead of the writes holds that many parts; one that waits for the previous `add` before it reads the next holds two.
- * Dropping the push runs what was added, ends its thread, and waits for that. Commit or drop the push before the miniverse
- * ends. One that was moved from throws `std::logic_error` from every call. For a model with datasets the push replaces its dataset when it commits,
- * so a commit with no parts leaves the dataset empty.
+ * The parts are made into rows and written on the push's own thread, in the order they are added:
+ * an `add` need not be waited for before the next, or before the `commit`. Each `add` holds its
+ * part until the part is written, so a reader far ahead of the writes holds that many parts; one
+ * that waits for the previous `add` before it reads the next holds two. Dropping the push runs what
+ * was added, ends its thread, and waits for that. Commit or drop the push before the miniverse
+ * ends. One that was moved from throws `std::logic_error` from every call. For a model with
+ * datasets the push replaces its dataset when it commits, so a commit with no parts leaves the
+ * dataset empty.
  */
 template <LayerModel model_t>
-class PushInParts {
+class PushInParts
+{
  public:
   /** @brief The handle of `push`, a push that has begun, whose steps run on `thread`. */
-  PushInParts(detail::StepThread thread, std::shared_ptr<detail::Push<model_t>> push) : _push(std::move(push)), _thread(std::move(thread)) {}
+  PushInParts(detail::StepThread thread, std::shared_ptr<detail::Push<model_t>> push)
+      : _push(std::move(push)), _thread(std::move(thread))
+  {}
 
   /**
-   * @return A future that completes once `data`, a part, is written into the push, or holds the error, which ends the push.
-   * @throws std::logic_error if the push was moved from; `std::bad_alloc` if the part could not be queued, which loses it.
+   * @return A future that completes once `data`, a part, is written into the push, or holds the
+   * error, which ends the push.
+   * @throws std::logic_error if the push was moved from; `std::bad_alloc` if the part could not be
+   * queued, which loses it.
    */
-  [[nodiscard]] std::future<void> add(model_t::result_type data) {
+  [[nodiscard]] std::future<void> add(model_t::result_type data)
+  {
     return step([push = _push, data = std::move(data)]() mutable { push->add(std::move(data)); });
   }
 
   /**
-   * @return A future that completes once every part added is there for everyone, or holds the error (nothing is then written).
-   * @throws std::logic_error if the push was moved from; `std::bad_alloc` after a part was lost, so that it never commits without it.
+   * @return A future that completes once every part added is there for everyone, or holds the error
+   * (nothing is then written).
+   * @throws std::logic_error if the push was moved from; `std::bad_alloc` after a part was lost, so
+   * that it never commits without it.
    */
-  [[nodiscard]] std::future<void> commit() {
+  [[nodiscard]] std::future<void> commit()
+  {
     return step([push = _push] { push->commit(); });
   }
 
  private:
-  std::shared_ptr<detail::Push<model_t>> _push;    // null once moved from
-  detail::StepThread                     _thread;  // after the push: its steps hold the push until they have run
+  std::shared_ptr<detail::Push<model_t>> _push;  // null once moved from
+  detail::StepThread _thread;  // after the push: its steps hold the push until they have run
 
   /**
    * @return A future for `run`, a step of the push, posted to its thread.
-   * @throws std::logic_error if there is no push: it was moved from. Else what `StepThread::post` throws.
+   * @throws std::logic_error if there is no push: it was moved from. Else what `StepThread::post`
+   * throws.
    */
   template <std::invocable run_t>
-  [[nodiscard]] std::future<void> step(run_t run) {
+  [[nodiscard]] std::future<void> step(run_t run)
+  {
     if ( ! _push ) {
       throw std::logic_error("this push in parts was moved from: it is the other one now");
     }
@@ -162,11 +189,11 @@ class PushInParts {
   }
 
  public:
-  PushInParts(const PushInParts&) = delete;  // it is one transaction
-  PushInParts(PushInParts&&) noexcept = default;
-  PushInParts& operator=(const PushInParts&) = delete;
+  PushInParts(const PushInParts&)                = delete;  // it is one transaction
+  PushInParts(PushInParts&&) noexcept            = default;
+  PushInParts& operator=(const PushInParts&)     = delete;
   PushInParts& operator=(PushInParts&&) noexcept = default;
-  ~PushInParts() = default;
+  ~PushInParts()                                 = default;
 };
 
 }  // namespace miniverse

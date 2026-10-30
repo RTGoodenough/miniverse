@@ -14,7 +14,8 @@
 
 namespace tool {
 
-void datasets(const Table& table) {
+void datasets(const Table& table)
+{
   with_model(table.model, [&]<typename model_t>(std::type_identity<model_t> /*model*/) {
     if constexpr ( miniverse::WritesDatasets<model_t> ) {
       miniverse::Miniverse world(table.conninfo, layer_of<model_t>(table.name));
@@ -28,10 +29,12 @@ void datasets(const Table& table) {
         std::cout << dataset.name << '\t' << dataset.rows
                   << (dataset.rows == 1 ? " row\t" : " rows\t")
                   // NOLINTNEXTLINE(misc-include-cleaner) -- <chrono> is included
-                  << std::format("{:%FT%TZ}", std::chrono::floor<std::chrono::seconds>(dataset.pushed)) << '\n';
+                  << std::format("{:%FT%TZ}",
+                                 std::chrono::floor<std::chrono::seconds>(dataset.pushed))
+                  << '\n';
       }
-
-    } else {
+    }
+    else {
       throw std::invalid_argument("a table of " + table.model + " has no datasets to list");
     }
   });

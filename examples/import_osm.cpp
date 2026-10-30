@@ -1,13 +1,15 @@
 // An OpenStreetMap file into a road layer: all of it, or none of it.
 //
-// The uploader's side of examples/road_network.cpp. The file's ways are read a chunk at a time and written as one push in
-// parts: one chunk is held at a time, workers see none of them until the commit, and a file that fails halfway leaves nothing.
-// What is held throughout is the position of every node of the file, so read an extract of the area wanted.
-// This needs the optional component miniverse::osm, built when libosmium is found.
+// The uploader's side of examples/road_network.cpp. The file's ways are read a chunk at a time and
+// written as one push in parts: one chunk is held at a time, workers see none of them until the
+// commit, and a file that fails halfway leaves nothing. What is held throughout is the position of
+// every node of the file, so read an extract of the area wanted. This needs the optional component
+// miniverse::osm, built when libosmium is found.
 //
-// Run with a libpq connection string to a database with PostGIS: miniverse_example_import_osm "host=localhost dbname=gis user=gis"
-// It reads examples/data/streets.osm; a file of your own (.osm.pbf, .osm, .osm.bz2) goes in its place. It creates the table
-// miniverse_example_osm_roads, and drops it when it is done; a real uploader would keep it.
+// Run with a libpq connection string to a database with PostGIS: miniverse_example_import_osm
+// "host=localhost dbname=gis user=gis" It reads examples/data/streets.osm; a file of your own
+// (.osm.pbf, .osm, .osm.bz2) goes in its place. It creates the table miniverse_example_osm_roads,
+// and drops it when it is done; a real uploader would keep it.
 
 #include <cstdlib>
 #include <exception>
@@ -20,7 +22,8 @@
 
 using Roads = miniverse::Layer<miniverse::RoadModel, "roads">;
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
   try {
     miniverse::Miniverse world(example::conninfo(argc, argv), Roads("miniverse_example_osm_roads"));
 
@@ -28,22 +31,27 @@ int main(int argc, char** argv) {
     world.create_tables();
 
     // Each chunk is waited for before the next is read, so one chunk is held at a time.
-    miniverse::PushInParts<Roads::model_type> roads = world.begin_push<"roads">(miniverse::Dataset{"town.osm.pbf"}).get();
+    miniverse::PushInParts<Roads::model_type> roads =
+        world.begin_push<"roads">(miniverse::Dataset{"town.osm.pbf"}).get();
 
     // The ways with a `highway` tag, which are OpenStreetMap's roads and paths.
-    const miniverse::osm::WayRead read =
-        miniverse::osm::read_ways({.path = MINIVERSE_EXAMPLE_DATA "/streets.osm", .keys = {"highway"}}, 10'000, [&roads](miniverse::Ways chunk) {
-          roads.add(std::move(chunk)).get();
-        });
+    const miniverse::osm::WayRead read = miniverse::osm::read_ways(
+        {.path = MINIVERSE_EXAMPLE_DATA "/streets.osm", .keys = {"highway"}}, 10'000,
+        [&roads](miniverse::Ways chunk) { roads.add(std::move(chunk)).get(); });
 
     roads.commit().get();  // now they are all there, for everyone at once
 
-    // Left out: a road with a node the file lacks, as an extract has at its edge. The file's building is not a road at all.
+    // Left out: a road with a node the file lacks, as an extract has at its edge. The file's
+    // building is not a road at all.
     std::cout << read.ways << " roads written, " << read.without_nodes << " left out\n";
 
-    // Each has its id, its tags as the file has them, its line, and the ids of its nodes, which roads that meet share.
-    for ( const miniverse::Way& road : world.load<"roads">(example::box(9.99, 49.99, 10.01, 50.01)).get() ) {
-      std::cout << "  way " << road.id << ", " << road.node_ids.size() << " nodes: " << road.tags.text() << '\n';
+    // Each has its id, its tags as the file has them, its line, and the ids of its nodes, which
+    // roads that meet share.
+    for ( const miniverse::Way& road :
+          world.load<"roads">(example::box(9.99, 49.99, 10.01, 50.01)).get() )
+    {
+      std::cout << "  way " << road.id << ", " << road.node_ids.size()
+                << " nodes: " << road.tags.text() << '\n';
     }
 
     world.drop_tables();

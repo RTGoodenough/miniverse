@@ -10,6 +10,9 @@
 
 namespace test {
 
-[[nodiscard]] inline miniverse::geo::Polygon polygon(const std::string& wkt) { return boost::geometry::from_wkt<miniverse::geo::Polygon>(wkt); }
+[[nodiscard]] inline miniverse::geo::Polygon polygon(const std::string& wkt)
+{
+  return boost::geometry::from_wkt<miniverse::geo::Polygon>(wkt);
+}
 
 }  // namespace test

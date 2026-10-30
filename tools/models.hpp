@@ -15,8 +15,8 @@
 
 /**
  * @file
- * The models the tool knows, by the names it is given them by: the built-in models, with each geometry type of a feature
- * layer and each pixel type of a raster layer.
+ * The models the tool knows, by the names it is given them by: the built-in models, with each
+ * geometry type of a feature layer and each pixel type of a raster layer.
  */
 namespace tool {
 
@@ -48,8 +48,11 @@ inline constexpr std::tuple MODELS{
 };
 
 /** @return The names of the models, in the order above. */
-[[nodiscard]] inline std::vector<std::string> model_names() {
-  return std::apply([](const auto&... models) { return std::vector<std::string>{std::string(models.name)...}; }, MODELS);
+[[nodiscard]] inline std::vector<std::string> model_names()
+{
+  return std::apply(
+      [](const auto&... models) { return std::vector<std::string>{std::string(models.name)...}; },
+      MODELS);
 }
 
 /**
@@ -57,7 +60,8 @@ inline constexpr std::tuple MODELS{
  * @throws std::invalid_argument if there is no model of that name.
  */
 template <typename visitor_t>
-void with_model(std::string_view name, const visitor_t& visit) {
+void with_model(std::string_view name, const visitor_t& visit)
+{
   bool found = false;
   std::apply(
       [&](const auto&... models) {
@@ -69,8 +73,7 @@ void with_model(std::string_view name, const visitor_t& visit) {
         };
         (visit_if_named(models), ...);
       },
-      MODELS
-  );
+      MODELS);
 
   if ( ! found ) {
     throw std::invalid_argument("there is no model '" + std::string(name) + "'");

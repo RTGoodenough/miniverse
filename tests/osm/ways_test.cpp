@@ -1,8 +1,9 @@
-// OpenStreetMap files read with libosmium: ways with their node ids, positions and tags, the ways an extract cut left out,
-// and a PBF file pushed into a road layer and loaded back.
+// OpenStreetMap files read with libosmium: ways with their node ids, positions and tags, the ways
+// an extract cut left out, and a PBF file pushed into a road layer and loaded back.
 //
-// The files are OSM XML written here as text, and a PBF libosmium makes from it. The last test needs MINIVERSE_TEST_DB (a
-// libpq connection string to a scratch database with PostGIS), and is skipped without it.
+// The files are OSM XML written here as text, and a PBF libosmium makes from it. The last test
+// needs MINIVERSE_TEST_DB (a libpq connection string to a scratch database with PostGIS), and is
+// skipped without it.
 
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -12,17 +13,18 @@
 #include <boost/geometry/io/wkt/read.hpp>
 #include <boost/geometry/io/wkt/write.hpp>
 
-#include <osmium/io/any_input.hpp>   // IWYU pragma: keep -- the file formats a Reader opens
-#include <osmium/io/any_output.hpp>  // IWYU pragma: keep -- and those a Writer makes
-#include <osmium/io/reader.hpp>
-#include <osmium/io/writer.hpp>
-#include <osmium/memory/buffer.hpp>
+#include "schemacht/postgres/async_client.hpp"
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <future>
 #include <memory>
+#include <osmium/io/any_input.hpp>   // IWYU pragma: keep -- the file formats a Reader opens
+#include <osmium/io/any_output.hpp>  // IWYU pragma: keep -- and those a Writer makes
+#include <osmium/io/reader.hpp>
+#include <osmium/io/writer.hpp>
+#include <osmium/memory/buffer.hpp>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -32,13 +34,12 @@
 
 #include "miniverse/miniverse.hpp"
 #include "miniverse/osm/osm.hpp"
-#include "schemacht/postgres/async_client.hpp"
 #include "support/checks.hpp"
 #include "support/database.hpp"
 #include "support/files.hpp"
 #include "support/geometry.hpp"
 
-namespace bg = boost::geometry;
+namespace bg  = boost::geometry;
 namespace geo = miniverse::geo;
 namespace osm = miniverse::osm;
 
@@ -48,8 +49,8 @@ using test::test_db;
 
 namespace {
 
-// Two roads, a building, a road with a node the file does not have (as an extract leaves one at its edge), a road of one
-// node, and a building with a node the file does not have either.
+// Two roads, a building, a road with a node the file does not have (as an extract leaves one at its
+// edge), a road of one node, and a building with a node the file does not have either.
 constexpr std::string_view TOWN = R"(<?xml version='1.0' encoding='UTF-8'?>
 <osm version="0.6" generator="miniverse test">
   <node id="11" version="1" lat="0" lon="0"/>
@@ -77,9 +78,11 @@ constexpr std::string_view DRAFT = R"(<?xml version='1.0' encoding='UTF-8'?>
 </osm>
 )";
 
-/** @brief Copies the OSM file `from` to `to`, in the format `to`'s name says: a PBF file made by libosmium itself. */
+/** @brief Copies the OSM file `from` to `to`, in the format `to`'s name says: a PBF file made by
+ * libosmium itself. */
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters) -- from, then to, as a copy reads
-void convert(const std::string& from, const std::string& to) {
+void convert(const std::string& from, const std::string& to)
+{
   osmium::io::Reader reader(from);
   osmium::io::Writer writer(to);
   while ( osmium::memory::Buffer buffer = reader.read() ) {
@@ -96,8 +99,9 @@ using test::ids;
 
 using Roads = miniverse::Layer<miniverse::RoadModel, "roads">;
 
-// Ways to tell locations apart by, not in the order of their ids: a square walked round (4), a vee (1), a short way far
-// off (3), and a slant whose box overlaps the vee's but which passes it by (2).
+// Ways to tell locations apart by, not in the order of their ids: a square walked round (4), a vee
+// (1), a short way far off (3), and a slant whose box overlaps the vee's but which passes it by
+// (2).
 constexpr std::string_view STREETS = R"(<?xml version='1.0' encoding='UTF-8'?>
 <osm version="0.6" generator="miniverse test">
   <node id="1" version="1" lat="0" lon="0"/>
@@ -122,15 +126,19 @@ using test::polygon;
 
 }  // namespace
 
-TEST_CASE("osm: the ways with a key are read, with their node ids, positions and tags", "[osm]") {
+TEST_CASE("osm: the ways with a key are read, with their node ids, positions and tags", "[osm]")
+{
   const Files       files;
   const std::string path = files.write("town.osm", TOWN);
 
   miniverse::Ways    roads;
-  const osm::WayRead read = osm::read_ways({.path = path, .keys = {"highway"}}, 100, [&](miniverse::Ways chunk) { roads = std::move(chunk); });
+  const osm::WayRead read =
+      osm::read_ways({.path = path, .keys = {"highway"}}, 100,
+                     [&](miniverse::Ways chunk) { roads = std::move(chunk); });
 
   CHECK(read.ways == 2);
-  CHECK(read.without_nodes == 2);  // the road with a node that is not in the file, and the road of one node: not the building
+  CHECK(read.without_nodes == 2);  // the road with a node that is not in the file, and the road of
+                                   // one node: not the building
   REQUIRE(roads.size() == 2);
   CHECK(roads.at(0).id == 1);
   CHECK(roads.at(0).node_ids == std::vector<std::int64_t>{11, 12});
@@ -142,20 +150,25 @@ TEST_CASE("osm: the ways with a key are read, with their node ids, positions and
   CHECK(roads.at(1).tags.text() == R"({"highway":"residential","name":"The \"High\" Street"})");
 }
 
-TEST_CASE("osm: without keys every way is read, and with several a way of any of them", "[osm]") {
+TEST_CASE("osm: without keys every way is read, and with several a way of any of them", "[osm]")
+{
   const Files       files;
   const std::string path = files.write("town.osm", TOWN);
 
   CHECK(ids(osm::read_ways({.path = path, .keys = {}})) == std::vector<std::int64_t>{1, 2, 3});
   CHECK(ids(osm::read_ways({.path = path, .keys = {"building"}})) == std::vector<std::int64_t>{3});
-  CHECK(ids(osm::read_ways({.path = path, .keys = {"railway", "building", "highway"}})) == std::vector<std::int64_t>{1, 2, 3});
+  CHECK(ids(osm::read_ways({.path = path, .keys = {"railway", "building", "highway"}})) ==
+        std::vector<std::int64_t>{1, 2, 3});
   CHECK(osm::read_ways({.path = path, .keys = {"railway"}}).empty());
 }
 
-TEST_CASE("osm: ids below zero are read as any other, and a closed way ends on its first node", "[osm]") {
+TEST_CASE("osm: ids below zero are read as any other, and a closed way ends on its first node",
+          "[osm]")
+{
   const Files files;
 
-  const miniverse::Ways ways = osm::read_ways({.path = files.write("draft.osm", DRAFT), .keys = {}});
+  const miniverse::Ways ways =
+      osm::read_ways({.path = files.write("draft.osm", DRAFT), .keys = {}});
 
   REQUIRE(ways.size() == 1);
   CHECK(ways.front().id == -7);
@@ -163,44 +176,60 @@ TEST_CASE("osm: ids below zero are read as any other, and a closed way ends on i
   CHECK(bg::to_wkt(ways.front().coordinates) == "LINESTRING(0 0,2 0,1 2,0 0)");
 }
 
-TEST_CASE("osm: a damaged file is refused", "[osm]") {
+TEST_CASE("osm: a damaged file is refused", "[osm]")
+{
   const Files files;
 
   CHECK_THROWS_AS(
-      osm::read_ways({.path = files.write("damaged.osm.pbf", "this is not a PBF file, whatever its name says"), .keys = {}}), std::runtime_error
-  );
-  CHECK_THROWS_AS(osm::read_ways({.path = files.write("damaged.osm", "<osm version=\"0.6\"><way id="), .keys = {}}), std::runtime_error);
+      osm::read_ways(
+          {.path = files.write("damaged.osm.pbf", "this is not a PBF file, whatever its name says"),
+           .keys = {}}),
+      std::runtime_error);
+  CHECK_THROWS_AS(
+      osm::read_ways(
+          {.path = files.write("damaged.osm", "<osm version=\"0.6\"><way id="), .keys = {}}),
+      std::runtime_error);
 }
 
-TEST_CASE("osm: ways are handed over a chunk at a time, in the file's order", "[osm]") {
+TEST_CASE("osm: ways are handed over a chunk at a time, in the file's order", "[osm]")
+{
   const Files       files;
   const std::string path = files.write("town.osm", TOWN);
 
   std::vector<std::vector<std::int64_t>> chunks;
-  const osm::WayRead read = osm::read_ways({.path = path, .keys = {}}, 2, [&](const miniverse::Ways& chunk) { chunks.push_back(ids(chunk)); });
+  const osm::WayRead                     read =
+      osm::read_ways({.path = path, .keys = {}}, 2,
+                     [&](const miniverse::Ways& chunk) { chunks.push_back(ids(chunk)); });
 
   CHECK(read.ways == 3);
-  CHECK(chunks == std::vector<std::vector<std::int64_t>>{{1, 2}, {3}});  // the last chunk is what is left
-  CHECK_THROWS_AS(osm::read_ways({.path = path, .keys = {}}, 0, [](const miniverse::Ways&) {}), std::invalid_argument);
+  CHECK(chunks == std::vector<std::vector<std::int64_t>>{{1, 2}, {3}});  // the last chunk is what
+                                                                         // is left
+  CHECK_THROWS_AS(osm::read_ways({.path = path, .keys = {}}, 0, [](const miniverse::Ways&) {}),
+                  std::invalid_argument);
 }
 
-TEST_CASE("osm: what the callback throws is passed on, and a file that is not there is refused", "[osm]") {
+TEST_CASE("osm: what the callback throws is passed on, and a file that is not there is refused",
+          "[osm]")
+{
   const Files       files;
   const std::string path = files.write("town.osm", TOWN);
 
-  std::size_t chunks = 0;
+  std::size_t chunks     = 0;
   const auto  taking_one = [&](const miniverse::Ways& /*chunk*/) {
     if ( ++chunks == 2 ) {
       throw std::runtime_error("one chunk is enough");
     }
   };
 
-  CHECK_THROWS_WITH(osm::read_ways({.path = path, .keys = {}}, 1, taking_one), ContainsSubstring("is enough"));
+  CHECK_THROWS_WITH(osm::read_ways({.path = path, .keys = {}}, 1, taking_one),
+                    ContainsSubstring("is enough"));
   CHECK(chunks == 2);
-  CHECK_THROWS_AS(osm::read_ways({.path = files.path_of("nothing.osm.pbf"), .keys = {}}), std::runtime_error);
+  CHECK_THROWS_AS(osm::read_ways({.path = files.path_of("nothing.osm.pbf"), .keys = {}}),
+                  std::runtime_error);
 }
 
-TEST_CASE("osm: a PBF file reads as the XML it was made from", "[osm]") {
+TEST_CASE("osm: a PBF file reads as the XML it was made from", "[osm]")
+{
   const Files       files;
   const std::string xml = files.write("town.osm", TOWN);
   const std::string pbf = files.path_of("town.osm.pbf");
@@ -218,7 +247,11 @@ TEST_CASE("osm: a PBF file reads as the XML it was made from", "[osm]") {
   }
 }
 
-TEST_CASE("integration: a PBF file pushed a chunk at a time, as parts of one dataset, loads back as it was read", "[osm][integration]") {
+TEST_CASE(
+    "integration: a PBF file pushed a chunk at a time, as parts of one dataset, loads back as it "
+    "was read",
+    "[osm][integration]")
+{
   const Files       files;
   const std::string pbf = files.path_of("town.osm.pbf");
   convert(files.write("town.osm", TOWN), pbf);
@@ -228,11 +261,15 @@ TEST_CASE("integration: a PBF file pushed a chunk at a time, as parts of one dat
   world.drop_tables();
   world.create_tables();
 
-  // Parts of one push: a push per chunk would replace the dataset with each chunk, and leave the last alone.
+  // Parts of one push: a push per chunk would replace the dataset with each chunk, and leave the
+  // last alone.
   miniverse::PushInParts<Roads::model_type> parts = world.begin_push<"roads">(TOWN_DATASET).get();
-  const osm::WayRead                        read = osm::read_ways(source, 1, [&](miniverse::Ways chunk) { parts.add(std::move(chunk)).get(); });
+  const osm::WayRead                        read =
+      osm::read_ways(source, 1, [&](miniverse::Ways chunk) { parts.add(std::move(chunk)).get(); });
   parts.commit().get();
-  const miniverse::Ways loaded = world.load<"roads">(bg::from_wkt<geo::Polygon>("POLYGON((-1 -1,12 -1,12 12,-1 12,-1 -1))")).get();
+  const miniverse::Ways loaded =
+      world.load<"roads">(bg::from_wkt<geo::Polygon>("POLYGON((-1 -1,12 -1,12 12,-1 12,-1 -1))"))
+          .get();
   const miniverse::Ways in_file = osm::read_ways(source);
 
   CHECK(read.ways == 2);
@@ -248,67 +285,100 @@ TEST_CASE("integration: a PBF file pushed a chunk at a time, as parts of one dat
   world.drop_tables();
 }
 
-TEST_CASE("osm: a file as a layer loads the ways that intersect a location, in the file's order, with no database", "[osm]") {
+TEST_CASE(
+    "osm: a file as a layer loads the ways that intersect a location, in the file's order, with no "
+    "database",
+    "[osm]")
+{
   const Files          files;
-  miniverse::Miniverse world(osm::road_file<Roads>({.path = files.write("streets.osm", STREETS), .keys = {"highway"}}));
-  const auto           in = [&world](const std::string& wkt) { return ids(world.load<"roads">(polygon(wkt)).get()); };
+  miniverse::Miniverse world(
+      osm::road_file<Roads>({.path = files.write("streets.osm", STREETS), .keys = {"highway"}}));
+  const auto in = [&world](const std::string& wkt) {
+    return ids(world.load<"roads">(polygon(wkt)).get());
+  };
 
   world.verify().get();
 
-  CHECK(in("POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1))") == std::vector<std::int64_t>{4, 1, 3, 2});       // as the file has them, not by id
-  CHECK(in("POLYGON((0 0,1 0,1 1,0 1,0 0))") == std::vector<std::int64_t>{1});                      // the slant's box overlaps it; it passes by
-  CHECK(in("POLYGON((3.4 3.4,3.6 3.4,3.6 3.6,3.4 3.6,3.4 3.4))").empty());                          // inside the square that 4 walks round
-  CHECK(in("POLYGON((2 -1,3 -1,3 0,2 0,2 -1))") == std::vector<std::int64_t>{1});                   // the vee ends on its corner
-  CHECK(in("POLYGON((4.5 4.5,4.5 6.5,6.5 6.5,6.5 4.5,4.5 4.5))") == std::vector<std::int64_t>{3});  // a ring that runs clockwise
+  CHECK(in("POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1))") ==
+        std::vector<std::int64_t>{4, 1, 3, 2});                                 // as
+                                                                                // the
+                                                                                // file
+                                                                                // has
+                                                                                // them,
+                                                                                // not
+                                                                                // by
+                                                                                // id
+  CHECK(in("POLYGON((0 0,1 0,1 1,0 1,0 0))") == std::vector<std::int64_t>{1});  // the slant's box
+                                                                                // overlaps it; it
+                                                                                // passes by
+  CHECK(in("POLYGON((3.4 3.4,3.6 3.4,3.6 3.6,3.4 3.6,3.4 3.4))").empty());      // inside the square
+                                                                            // that 4 walks round
+  CHECK(in("POLYGON((2 -1,3 -1,3 0,2 0,2 -1))") == std::vector<std::int64_t>{1});  // the vee ends
+                                                                                   // on its corner
+  CHECK(in("POLYGON((4.5 4.5,4.5 6.5,6.5 6.5,6.5 4.5,4.5 4.5))") ==
+        std::vector<std::int64_t>{3});  // a ring that runs clockwise
   CHECK(in("POLYGON((40 40,41 40,41 41,40 41,40 40))").empty());
 }
 
-TEST_CASE("osm: a road file is streamed a chunk at a time, and is read when its layer is made", "[osm]") {
-  const Files              files;
-  miniverse::Miniverse     world(osm::road_file<Roads>({.path = files.write("streets.osm", STREETS), .keys = {"highway"}}));
+TEST_CASE("osm: a road file is streamed a chunk at a time, and is read when its layer is made",
+          "[osm]")
+{
+  const Files          files;
+  miniverse::Miniverse world(
+      osm::road_file<Roads>({.path = files.write("streets.osm", STREETS), .keys = {"highway"}}));
   std::vector<std::size_t> sizes;
 
   world
-      .stream<"roads">(
-          polygon("POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1))"), [&sizes](const miniverse::Ways& chunk) { sizes.push_back(chunk.size()); },
-          {.chunk_rows = 3}
-      )
+      .stream<"roads">(polygon("POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1))"),
+                       [&sizes](const miniverse::Ways& chunk) { sizes.push_back(chunk.size()); },
+                       {.chunk_rows = 3})
       .get();
 
   CHECK(sizes == std::vector<std::size_t>{3, 1});
-  CHECK_THROWS_AS(osm::road_file<Roads>({.path = files.path_of("missing.osm.pbf"), .keys = {}}), std::runtime_error);
+  CHECK_THROWS_AS(osm::road_file<Roads>({.path = files.path_of("missing.osm.pbf"), .keys = {}}),
+                  std::runtime_error);
   CHECK_THROWS_AS(std::ignore = world.push<"roads">(TOWN_DATASET, {}), std::logic_error);
 }
 
-TEST_CASE("osm: a road file's stream stops when its callback wants no more, and hands over no empty chunk", "[osm]") {
-  const Files                            files;
-  miniverse::Miniverse                   world(osm::road_file<Roads>({.path = files.write("streets.osm", STREETS), .keys = {"highway"}}));
-  const geo::Polygon                     everywhere = polygon("POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1))");
+TEST_CASE(
+    "osm: a road file's stream stops when its callback wants no more, and hands over no empty "
+    "chunk",
+    "[osm]")
+{
+  const Files          files;
+  miniverse::Miniverse world(
+      osm::road_file<Roads>({.path = files.write("streets.osm", STREETS), .keys = {"highway"}}));
+  const geo::Polygon everywhere = polygon("POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1))");
   std::vector<std::vector<std::int64_t>> stopped;
   std::vector<std::vector<std::int64_t>> halves;
 
   world
-      .stream<"roads">(
-          everywhere,
-          [&stopped](const miniverse::Ways& chunk) {
-            stopped.push_back(ids(chunk));
+      .stream<"roads">(everywhere,
+                       [&stopped](const miniverse::Ways& chunk) {
+                         stopped.push_back(ids(chunk));
 
-            return false;
-          },
-          {.chunk_rows = 1}
-      )
+                         return false;
+                       },
+                       {.chunk_rows = 1})
       .get();
-  world.stream<"roads">(everywhere, [&halves](const miniverse::Ways& chunk) { halves.push_back(ids(chunk)); }, {.chunk_rows = 2}).get();
+  world
+      .stream<"roads">(everywhere,
+                       [&halves](const miniverse::Ways& chunk) { halves.push_back(ids(chunk)); },
+                       {.chunk_rows = 2})
+      .get();
 
   CHECK(stopped == std::vector<std::vector<std::int64_t>>{{4}});
-  CHECK(halves == std::vector<std::vector<std::int64_t>>{{4, 1}, {3, 2}});  // four ways in twos: no third chunk of none
+  CHECK(halves == std::vector<std::vector<std::int64_t>>{{4, 1}, {3, 2}});  // four ways in twos: no
+                                                                            // third chunk of none
 }
 
-TEST_CASE("osm: ways held in memory are found from several threads at once", "[osm]") {
+TEST_CASE("osm: ways held in memory are found from several threads at once", "[osm]")
+{
   const Files          files;
-  miniverse::Miniverse world(osm::road_file<Roads>({.path = files.write("streets.osm", STREETS), .keys = {"highway"}}));
-  const geo::Polygon   near_vee = polygon("POLYGON((0 0,1 0,1 1,0 1,0 0))");
-  const geo::Polygon   everywhere = polygon("POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1))");
+  miniverse::Miniverse world(
+      osm::road_file<Roads>({.path = files.write("streets.osm", STREETS), .keys = {"highway"}}));
+  const geo::Polygon near_vee   = polygon("POLYGON((0 0,1 0,1 1,0 1,0 0))");
+  const geo::Polygon everywhere = polygon("POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1))");
 
   std::vector<std::future<miniverse::Ways>> loads;
   loads.reserve(16);
@@ -317,26 +387,35 @@ TEST_CASE("osm: ways held in memory are found from several threads at once", "[o
   }
 
   for ( std::size_t i = 0; i < loads.size(); ++i ) {
-    CHECK(ids(loads.at(i).get()) == (i % 2 == 0 ? std::vector<std::int64_t>{1} : std::vector<std::int64_t>{4, 1, 3, 2}));
+    CHECK(ids(loads.at(i).get()) ==
+          (i % 2 == 0 ? std::vector<std::int64_t>{1} : std::vector<std::int64_t>{4, 1, 3, 2}));
   }
 }
 
-TEST_CASE("osm: ways given in the program are a layer too, and one of no points is nowhere", "[osm]") {
+TEST_CASE("osm: ways given in the program are a layer too, and one of no points is nowhere",
+          "[osm]")
+{
   miniverse::Ways ways;
   ways.push_back({.id = 1, .node_ids = {1, 2}, .coordinates = {{0, 0}, {1, 1}}});
-  ways.push_back({.id = 2});                                                               // no points at all
-  ways.push_back({.id = 3, .node_ids = {3, 3}, .coordinates = {{0.5, 0.2}, {0.5, 0.2}}});  // no length: a point
-  miniverse::Miniverse world{Roads(std::make_shared<osm::RoadFile<Roads::model_type>>("three ways", std::move(ways)))};
+  ways.push_back({.id = 2});  // no points at all
+  ways.push_back(
+      {.id = 3, .node_ids = {3, 3}, .coordinates = {{0.5, 0.2}, {0.5, 0.2}}});  // no
+                                                                                // length:
+                                                                                // a
+                                                                                // point
+  miniverse::Miniverse world{
+      Roads(std::make_shared<osm::RoadFile<Roads::model_type>>("three ways", std::move(ways)))};
 
-  CHECK(ids(world.load<"roads">(polygon("POLYGON((-1 -1,2 -1,2 2,-1 2,-1 -1))")).get()) == std::vector<std::int64_t>{1, 3});
-  CHECK(
-      ids(world.load<"roads">(polygon("POLYGON((0.4 0.1,0.6 0.1,0.6 0.2,0.4 0.2,0.4 0.1))")).get()) == std::vector<std::int64_t>{3}
-  );  // on its edge
+  CHECK(ids(world.load<"roads">(polygon("POLYGON((-1 -1,2 -1,2 2,-1 2,-1 -1))")).get()) ==
+        std::vector<std::int64_t>{1, 3});
+  CHECK(ids(world.load<"roads">(polygon("POLYGON((0.4 0.1,0.6 0.1,0.6 0.2,0.4 0.2,0.4 0.1))"))
+                .get()) == std::vector<std::int64_t>{3});  // on its edge
   CHECK(world.load<"roads">(geo::Polygon{}).get().empty());
   CHECK_THROWS_WITH(world.push<"roads">(TOWN_DATASET, {}).get(), ContainsSubstring("three ways"));
 }
 
-TEST_CASE("integration: a road file loads as the table it was pushed into", "[osm][integration]") {
+TEST_CASE("integration: a road file loads as the table it was pushed into", "[osm][integration]")
+{
   const Files          files;
   const osm::WaySource source{.path = files.write("streets.osm", STREETS), .keys = {"highway"}};
   miniverse::Miniverse tables(test_db(), Roads("miniverse_test_osm_roads"));
@@ -345,25 +424,32 @@ TEST_CASE("integration: a road file loads as the table it was pushed into", "[os
   tables.create_tables();
   tables.push<"roads">(TOWN_DATASET, osm::read_ways(source)).get();
 
-  for ( const std::string wkt : {
-            "POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1))",
-            "POLYGON((0 0,1 0,1 1,0 1,0 0))",
-            "POLYGON((3.4 3.4,3.6 3.4,3.6 3.6,3.4 3.6,3.4 3.4))",
-            "POLYGON((2 -1,3 -1,3 0,2 0,2 -1))",
-            "POLYGON((4.5 4.5,4.5 6.5,6.5 6.5,6.5 4.5,4.5 4.5))",
-            "POLYGON((1.2 1.2,1.3 1.2,1.3 1.3,1.2 1.3,1.2 1.2))",          // on the slant
-            "POLYGON((0 3,3 3,3 6,0 6,0 3))",                              // an edge of it along a side of the square
-            "POLYGON((1 0.2,3 0.2,2 0.4,1 0.2))",                          // a triangle across the vee's east arm
-            "POLYGON((4 4,5 4,5 5,4 5,4 4))",                              // a corner of it on a corner of the square, and on the track's end
-            "POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1),(3 3,3 4,4 4,4 3,3 3))",  // the square on the edge of its hole
-            "POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1),(-0.5 -0.5,-0.5 2.5,2.5 2.5,2.5 -0.5,-0.5 -0.5))",  // the vee and the slant in its hole
-            "POLYGON((40 40,41 40,41 41,40 41,40 40))",
-        } ) {
+  for (
+      const std::string wkt :
+      {
+          "POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1))",
+          "POLYGON((0 0,1 0,1 1,0 1,0 0))",
+          "POLYGON((3.4 3.4,3.6 3.4,3.6 3.6,3.4 3.6,3.4 3.4))",
+          "POLYGON((2 -1,3 -1,3 0,2 0,2 -1))",
+          "POLYGON((4.5 4.5,4.5 6.5,6.5 6.5,6.5 4.5,4.5 4.5))",
+          "POLYGON((1.2 1.2,1.3 1.2,1.3 1.3,1.2 1.3,1.2 1.2))",  // on the slant
+          "POLYGON((0 3,3 3,3 6,0 6,0 3))",      // an edge of it along a side of the square
+          "POLYGON((1 0.2,3 0.2,2 0.4,1 0.2))",  // a triangle across the vee's east arm
+          "POLYGON((4 4,5 4,5 5,4 5,4 4))",  // a corner of it on a corner of the square, and on the
+                                             // track's end
+          "POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1),(3 3,3 4,4 4,4 3,3 3))",  // the square on the edge
+                                                                         // of its hole
+          "POLYGON((-1 -1,9 -1,9 9,-1 9,-1 -1),(-0.5 -0.5,-0.5 2.5,2.5 2.5,2.5 -0.5,-0.5 -0.5))",  // the vee and the slant in its hole
+          "POLYGON((40 40,41 40,41 41,40 41,40 40))",
+      } )
+  {
     INFO(wkt);
     // The same ways: the table gives them in id order, the file in its own.
-    const auto      by_id = [](const miniverse::Way& one, const miniverse::Way& other) { return one.id < other.id; };
+    const auto by_id = [](const miniverse::Way& one, const miniverse::Way& other) {
+      return one.id < other.id;
+    };
     miniverse::Ways in_table = tables.load<"roads">(polygon(wkt)).get();
-    miniverse::Ways in_file = from_file.load<"roads">(polygon(wkt)).get();
+    miniverse::Ways in_file  = from_file.load<"roads">(polygon(wkt)).get();
     std::ranges::sort(in_file, by_id);
 
     REQUIRE(in_file.size() == in_table.size());
@@ -374,8 +460,8 @@ TEST_CASE("integration: a road file loads as the table it was pushed into", "[os
     }
   }
 
-  // A location of no points holds nothing, from either. One whose ring is not closed is refused by both: by the file's
-  // layer at once, and by PostGIS when it comes to test a way against it.
+  // A location of no points holds nothing, from either. One whose ring is not closed is refused by
+  // both: by the file's layer at once, and by PostGIS when it comes to test a way against it.
   geo::Polygon open_ring;
   open_ring.outer() = {{-1, -1}, {9, -1}, {9, 9}, {-1, 9}};
   CHECK(tables.load<"roads">(geo::Polygon{}).get().empty());

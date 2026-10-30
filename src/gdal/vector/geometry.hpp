@@ -17,28 +17,30 @@
 
 /**
  * @file
- * OGR's geometries as miniverse's: which OGR type each geometry type is, and a feature's geometry made into one, as that
- * type or one that reads as it. Not installed.
+ * OGR's geometries as miniverse's: which OGR type each geometry type is, and a feature's geometry
+ * made into one, as that type or one that reads as it. Not installed.
  */
 namespace miniverse::gdal::detail {
 
 /** @return The OGR type that is `geometry_t`. */
 template <geo::wkb::Geometry geometry_t>
-[[nodiscard]] constexpr OGRwkbGeometryType ogr_type() {
+[[nodiscard]] constexpr OGRwkbGeometryType ogr_type()
+{
   if constexpr ( std::same_as<geometry_t, geo::Point> ) {
     return wkbPoint;
-
-  } else if constexpr ( std::same_as<geometry_t, geo::LineString> ) {
+  }
+  else if constexpr ( std::same_as<geometry_t, geo::LineString> ) {
     return wkbLineString;
-
-  } else if constexpr ( std::same_as<geometry_t, geo::Polygon> ) {
+  }
+  else if constexpr ( std::same_as<geometry_t, geo::Polygon> ) {
     return wkbPolygon;
-
-  } else if constexpr ( std::same_as<geometry_t, geo::MultiLineString> ) {
+  }
+  else if constexpr ( std::same_as<geometry_t, geo::MultiLineString> ) {
     return wkbMultiLineString;
-
-  } else {
-    static_assert(std::same_as<geometry_t, geo::MultiPolygon>, "a new geometry type needs its OGR type here");
+  }
+  else {
+    static_assert(std::same_as<geometry_t, geo::MultiPolygon>,
+                  "a new geometry type needs its OGR type here");
 
     return wkbMultiPolygon;
   }
@@ -51,35 +53,38 @@ template <geo::wkb::Geometry geometry_t>
 [[nodiscard]] geo::Polygon polygon_of(const OGRPolygon& from);
 
 /**
- * @return `geometry`, already in WGS 84 and linear (`in_wgs84`), as the OGR type `wanted`, or null if it is not one: itself; a
-  * single geometry as a multi one of one part; or the one part of a multi one (`forceTo` would make a multipolygon of several
- * parts into one polygon of all their rings).
+ * @return `geometry`, already in WGS 84 and linear (`in_wgs84`), as the OGR type `wanted`, or null
+ * if it is not one: itself; a single geometry as a multi one of one part; or the one part of a
+ * multi one (`forceTo` would make a multipolygon of several parts into one polygon of all their
+ * rings).
  */
-[[nodiscard]] std::unique_ptr<OGRGeometry> as_type(std::unique_ptr<OGRGeometry> geometry, OGRwkbGeometryType wanted);
+[[nodiscard]] std::unique_ptr<OGRGeometry> as_type(std::unique_ptr<OGRGeometry> geometry,
+                                                   OGRwkbGeometryType           wanted);
 
 /** @return `geometry`, which is of `geometry_t`'s OGR type, as a `geometry_t`. */
 template <geo::wkb::Geometry geometry_t>
-[[nodiscard]] geometry_t converted(const OGRGeometry& geometry) {
+[[nodiscard]] geometry_t converted(const OGRGeometry& geometry)
+{
   if constexpr ( std::same_as<geometry_t, geo::Point> ) {
     const OGRPoint* point = geometry.toPoint();
 
     return {point->getX(), point->getY()};
-
-  } else if constexpr ( std::same_as<geometry_t, geo::LineString> ) {
+  }
+  else if constexpr ( std::same_as<geometry_t, geo::LineString> ) {
     return line_of(*geometry.toLineString());
-
-  } else if constexpr ( std::same_as<geometry_t, geo::Polygon> ) {
+  }
+  else if constexpr ( std::same_as<geometry_t, geo::Polygon> ) {
     return polygon_of(*geometry.toPolygon());
-
-  } else if constexpr ( std::same_as<geometry_t, geo::MultiLineString> ) {
+  }
+  else if constexpr ( std::same_as<geometry_t, geo::MultiLineString> ) {
     geo::MultiLineString lines;
     for ( const OGRLineString* part : *geometry.toMultiLineString() ) {
       lines.push_back(line_of(*part));
     }
 
     return lines;
-
-  } else {
+  }
+  else {
     geo::MultiPolygon polygons;
     for ( const OGRPolygon* part : *geometry.toMultiPolygon() ) {
       polygons.push_back(polygon_of(*part));
@@ -91,14 +96,20 @@ template <geo::wkb::Geometry geometry_t>
 
 /** @return `geometry`, the one of `feature`, as a `geometry_t`. */
 template <geo::wkb::Geometry geometry_t>
-[[nodiscard]] geometry_t of_type(std::unique_ptr<OGRGeometry> geometry, const OGRFeature& feature, const VectorSource& source) {
+[[nodiscard]] geometry_t of_type(
+    std::unique_ptr<OGRGeometry> geometry, const OGRFeature& feature, const VectorSource& source)
+{
   const std::string                  found = geometry->getGeometryName();
   const std::unique_ptr<OGRGeometry> typed = as_type(std::move(geometry), ogr_type<geometry_t>());
   if ( ! typed ) {
-    throw std::runtime_error(
-        "feature " + std::to_string(feature.GetFID()) + " of '" + source.path + "' is a " + found + " that is not a " +
-        std::string(geo::wkb::type_name<geometry_t>().view())
-    );
+    throw std::runtime_error("feature " +
+                             std::to_string(feature.GetFID()) +
+                             " of '" +
+                             source.path +
+                             "' is a " +
+                             found +
+                             " that is not a " +
+                             std::string(geo::wkb::type_name<geometry_t>().view()));
   }
 
   return converted<geometry_t>(*typed);

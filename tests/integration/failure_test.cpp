@@ -1,13 +1,25 @@
-// A miniverse when the database fails under it, or another writer holds what it needs: a connection lost under a push in
-// parts and under a stream, a push and a remove that wait for an open push of their dataset, timeouts given in the
-// connection string, what a stream sees of a table replaced while it runs, and a database that is not there.
+// A miniverse when the database fails under it, or another writer holds what it needs: a connection
+// lost under a push in parts and under a stream, a push and a remove that wait for an open push of
+// their dataset, timeouts given in the connection string, what a stream sees of a table replaced
+// while it runs, and a database that is not there.
 //
-// Skipped unless MINIVERSE_TEST_DB holds a libpq connection string to a database with PostGIS enabled. The tests make and
-// drop their own table (miniverse_test_failure_roads), and end backends of their own role with pg_terminate_backend.
+// Skipped unless MINIVERSE_TEST_DB holds a libpq connection string to a database with PostGIS
+// enabled. The tests make and drop their own table (miniverse_test_failure_roads), and end backends
+// of their own role with pg_terminate_backend.
 
 #include <catch2/catch_test_macros.hpp>
 
 #include <boost/geometry/io/wkt/read.hpp>
+
+#include "schemacht/json/json.hpp"
+#include "schemacht/postgres/async_client.hpp"
+#include "schemacht/postgres/database.hpp"
+#include "schemacht/postgres/statement_runner.hpp"
+#include "schemacht/query/predicate.hpp"
+#include "schemacht/query/prepared.hpp"
+#include "schemacht/query/query.hpp"
+#include "schemacht/query/raw_statement.hpp"
+#include "schemacht/schema/field.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -28,22 +40,13 @@
 #include <vector>
 
 #include "miniverse/miniverse.hpp"
-#include "schemacht/json/json.hpp"
-#include "schemacht/postgres/async_client.hpp"
-#include "schemacht/postgres/database.hpp"
-#include "schemacht/postgres/statement_runner.hpp"
-#include "schemacht/query/predicate.hpp"
-#include "schemacht/query/prepared.hpp"
-#include "schemacht/query/query.hpp"
-#include "schemacht/query/raw_statement.hpp"
-#include "schemacht/schema/field.hpp"
 #include "support/checks.hpp"
 #include "support/database.hpp"
 #include "support/geometry.hpp"
 
-namespace bg = boost::geometry;
+namespace bg  = boost::geometry;
 namespace geo = miniverse::geo;
-namespace pg = schemacht::postgres;
+namespace pg  = schemacht::postgres;
 
 using test::ids;
 using test::test_db;
@@ -53,25 +56,30 @@ namespace {
 using TestRoads = miniverse::Layer<miniverse::RoadModel, "roads">;
 
 /**
- * @brief Roads whose load sleeps 5 ms per row of the table, and gives the rows in no order, so the server is still producing
- * them when a test pulls the connection away or replaces the table under them. The sleep is a subquery around the column,
- * `(SELECT geom FROM pg_sleep(...))`, whose sleep takes a value of the row: with a constant, PostgreSQL runs the function
- * once and rewinds its rows for every other row. No `order_by`, which would hold every row back for the sort.
+ * @brief Roads whose load sleeps 5 ms per row of the table, and gives the rows in no order, so the
+ * server is still producing them when a test pulls the connection away or replaces the table under
+ * them. The sleep is a subquery around the column,
+ * `(SELECT geom FROM pg_sleep(...))`, whose sleep takes a value of the row: with a constant,
+ * PostgreSQL runs the function once and rewinds its rows for every other row. No `order_by`, which
+ * would hold every row back for the sort.
  */
 struct SlowRoadModel : miniverse::RoadModel {
   struct SleepyIntersects {
-    static constexpr std::string_view FUNCTION = "ST_Intersects";
+    static constexpr std::string_view FUNCTION      = "ST_Intersects";
     static constexpr std::string_view COLUMN_PREFIX = "(SELECT ";
-    static constexpr std::string_view COLUMN_SUFFIX = " FROM pg_sleep(0.005 * sign(ST_NPoints(geom))))";
+    static constexpr std::string_view COLUMN_SUFFIX =
+        " FROM pg_sleep(0.005 * sign(ST_NPoints(geom))))";
     using argument_type = geo::Polygon;
   };
 
   static constexpr auto LOAD =
-      schemacht::query::select(schemacht::query::On<schema_type>::col<"geom">().apply<SleepyIntersects>(schemacht::query::arg<0>()))
-          .project(
-              schemacht::query::On<schema_type>::col<"way_id">(), schemacht::query::On<schema_type>::col<"node_ids">(),
-              schemacht::query::On<schema_type>::col<"geom">(), schemacht::query::On<schema_type>::col<"tags">()
-          );
+      schemacht::query::select(
+          schemacht::query::On<schema_type>::col<"geom">().apply<SleepyIntersects>(
+              schemacht::query::arg<0>()))
+          .project(schemacht::query::On<schema_type>::col<"way_id">(),
+                   schemacht::query::On<schema_type>::col<"node_ids">(),
+                   schemacht::query::On<schema_type>::col<"geom">(),
+                   schemacht::query::On<schema_type>::col<"tags">());
   using load_statement_type = schemacht::query::Prepared<LOAD>;
 };
 
@@ -79,24 +87,27 @@ using SlowRoads = miniverse::Layer<SlowRoadModel, "roads">;
 
 constexpr const char* TABLE = "miniverse_test_failure_roads";
 
-/** @brief A pool of one connection: the backend a test asks the pid of is the one its next call runs on. */
-const pg::Database::Options ONE_CONNECTION{.pool = {.connections = 1, .workers = 2, .session = {}}, .read = {}};
+/** @brief A pool of one connection: the backend a test asks the pid of is the one its next call
+ * runs on. */
+const pg::Database::Options ONE_CONNECTION{.pool = {.connections = 1, .workers = 2, .session = {}},
+                                           .read = {}};
 
 const miniverse::Dataset SURVEY{"survey"};
 
 const geo::Polygon FAR_EAST = test::polygon("POLYGON((50 50,51 50,51 51,50 51,50 50))");
 
-[[nodiscard]] miniverse::Way way(std::int64_t id) {
+[[nodiscard]] miniverse::Way way(std::int64_t id)
+{
   return miniverse::Way{
-      .id = id,
-      .node_ids = {2 * id, (2 * id) + 1},
+      .id          = id,
+      .node_ids    = {2 * id, (2 * id) + 1},
       .coordinates = bg::from_wkt<geo::LineString>("LINESTRING(50.1 50.1,50.2 50.2)"),
-      .tags = schemacht::json::Json("{}")
-  };
+      .tags        = schemacht::json::Json("{}")};
 }
 
 /** @return Ways with ids `first` to `last`, all in the far east. */
-[[nodiscard]] miniverse::Ways ways(std::int64_t first, std::int64_t last) {
+[[nodiscard]] miniverse::Ways ways(std::int64_t first, std::int64_t last)
+{
   miniverse::Ways made;
   for ( std::int64_t id = first; id <= last; ++id ) {
     made.push_back(way(id));
@@ -105,42 +116,59 @@ const geo::Polygon FAR_EAST = test::polygon("POLYGON((50 50,51 50,51 51,50 51,50
   return made;
 }
 
-/** @return A world of the layer `layer_t` over the table `table`, made fresh with `survey` as the dataset `SURVEY`, dropped afterwards. */
+/** @return A world of the layer `layer_t` over the table `table`, made fresh with `survey` as the
+ * dataset `SURVEY`, dropped afterwards. */
 template <miniverse::IsLayer layer_t>
 [[nodiscard]] test::Fresh<miniverse::Miniverse<layer_t>> with_survey(
-    const std::string& conninfo, miniverse::Ways survey, const pg::Database::Options& options = {}, const char* table = TABLE
-) {
+    const std::string&           conninfo,
+    miniverse::Ways              survey,
+    const pg::Database::Options& options = {},
+    const char*                  table   = TABLE)
+{
   return test::Fresh<miniverse::Miniverse<layer_t>>(
       [survey = std::move(survey)](miniverse::Miniverse<layer_t>& world) mutable {
         world.create_tables();
         world.template push<layer_t::NAME>(SURVEY, std::move(survey)).get();
       },
-      conninfo, options, layer_t(table)
-  );
+      conninfo, options, layer_t(table));
 }
 
-using BackendPid =
-    schemacht::query::RawStatement<"SELECT pg_backend_pid() AS pid", schemacht::query::RawArguments<>, schemacht::schema::Field<std::int32_t, "pid">>;
-using Terminate = schemacht::query::RawStatement<
-    "SELECT pg_terminate_backend($1) AS ended", schemacht::query::RawArguments<std::int32_t>, schemacht::schema::Field<bool, "ended">>;
+using BackendPid  = schemacht::query::RawStatement<"SELECT pg_backend_pid() AS pid",
+                                                   schemacht::query::RawArguments<>,
+                                                   schemacht::schema::Field<std::int32_t, "pid">>;
+using Terminate   = schemacht::query::RawStatement<"SELECT pg_terminate_backend($1) AS ended",
+                                                   schemacht::query::RawArguments<std::int32_t>,
+                                                   schemacht::schema::Field<bool, "ended">>;
 using LockWaiters = schemacht::query::RawStatement<
     "SELECT count(*)::integer AS waiting FROM pg_locks WHERE locktype = 'advisory' AND NOT granted"
     " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
-    schemacht::query::RawArguments<>, schemacht::schema::Field<std::int32_t, "waiting">>;
-using Jit = schemacht::query::RawStatement<"SHOW jit", schemacht::query::RawArguments<>, schemacht::schema::Field<std::string, "jit">>;
+    schemacht::query::RawArguments<>,
+    schemacht::schema::Field<std::int32_t, "waiting">>;
+using Jit = schemacht::query::RawStatement<"SHOW jit",
+                                           schemacht::query::RawArguments<>,
+                                           schemacht::schema::Field<std::string, "jit">>;
 
-/** @return The pid of the backend `database`'s next statement runs on: the pool's one connection. */
-[[nodiscard]] std::int32_t pid_of(pg::Database& database) { return schemacht::schema::get<"pid">(database.execute(BackendPid::bind()).get().at(0)); }
+/** @return The pid of the backend `database`'s next statement runs on: the pool's one connection.
+ */
+[[nodiscard]] std::int32_t pid_of(pg::Database& database)
+{
+  return schemacht::schema::get<"pid">(database.execute(BackendPid::bind()).get().at(0));
+}
 
 /** @brief Ends the backend `pid` through `database`, another pool's. */
-void terminate(pg::Database& database, std::int32_t pid) {
+void terminate(pg::Database& database, std::int32_t pid)
+{
   REQUIRE(schemacht::schema::get<"ended">(database.execute(Terminate::bind(pid)).get().at(0)));
 }
 
-/** @brief Waits, through `probe`, until a transaction waits on an advisory lock (a dataset's): up to 10 s, then fails the test. */
-void wait_for_a_lock_waiter(pg::Database& probe) {
-  for ( const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(10); std::chrono::steady_clock::now() < until;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10)) ) {
+/** @brief Waits, through `probe`, until a transaction waits on an advisory lock (a dataset's): up
+ * to 10 s, then fails the test. */
+void wait_for_a_lock_waiter(pg::Database& probe)
+{
+  for ( const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        std::chrono::steady_clock::now() < until;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10)) )
+  {
     if ( schemacht::schema::get<"waiting">(probe.execute(LockWaiters::bind()).get().at(0)) > 0 ) {
       return;
     }
@@ -149,13 +177,16 @@ void wait_for_a_lock_waiter(pg::Database& probe) {
   FAIL("no transaction came to wait on the dataset's lock");
 }
 
-/** @return What `result` failed with: the SQLSTATE of a server's error, the message of any other, or "ok". */
+/** @return What `result` failed with: the SQLSTATE of a server's error, the message of any other,
+ * or "ok". */
 template <typename result_t>
-[[nodiscard]] std::string failure_of(std::future<result_t> result) {
+[[nodiscard]] std::string failure_of(std::future<result_t> result)
+{
   try {
     if constexpr ( std::is_void_v<result_t> ) {
       result.get();
-    } else {
+    }
+    else {
       std::ignore = result.get();
     }
   } catch ( const pg::QueryError& error ) {
@@ -167,16 +198,20 @@ template <typename result_t>
   return "ok";
 }
 
-/** @return `conninfo` with `setting` (`-c name=value`) among libpq's `options`: as a keyword, or as a parameter of a URL. */
-[[nodiscard]] std::string with_server_setting(const std::string& conninfo, std::string_view setting) {
+/** @return `conninfo` with `setting` (`-c name=value`) among libpq's `options`: as a keyword, or as
+ * a parameter of a URL. */
+[[nodiscard]] std::string with_server_setting(const std::string& conninfo, std::string_view setting)
+{
   if ( conninfo.starts_with("postgresql://") || conninfo.starts_with("postgres://") ) {
     std::string encoded;
     for ( const char c : setting ) {
       if ( c == ' ' ) {
         encoded += "%20";
-      } else if ( c == '=' ) {
+      }
+      else if ( c == '=' ) {
         encoded += "%3D";
-      } else {
+      }
+      else {
         encoded += c;
       }
     }
@@ -188,7 +223,8 @@ template <typename result_t>
 }
 
 /** @return The ids of `loaded`, sorted: for a load that gives no order. */
-[[nodiscard]] std::vector<std::int64_t> sorted_ids(const miniverse::Ways& loaded) {
+[[nodiscard]] std::vector<std::int64_t> sorted_ids(const miniverse::Ways& loaded)
+{
   std::vector<std::int64_t> sorted = ids(loaded);
   std::ranges::sort(sorted);
 
@@ -198,33 +234,38 @@ template <typename result_t>
 }  // namespace
 
 TEST_CASE(
-    "failure: a push in parts whose connection is lost ends with that error, writes nothing, and the miniverse goes on", "[integration][failure]"
-) {
-  using World = miniverse::Miniverse<TestRoads>;
-  test::Fresh<World> made = with_survey<TestRoads>(test_db(), ways(1, 2), ONE_CONNECTION);
+    "failure: a push in parts whose connection is lost ends with that error, writes nothing, and "
+    "the miniverse goes on",
+    "[integration][failure]")
+{
+  using World              = miniverse::Miniverse<TestRoads>;
+  test::Fresh<World> made  = with_survey<TestRoads>(test_db(), ways(1, 2), ONE_CONNECTION);
   World&             world = made.world();
   pg::Database       other(test_db());
 
-  const std::int32_t                            pid = pid_of(world.database());
+  const std::int32_t                            pid   = pid_of(world.database());
   miniverse::PushInParts<TestRoads::model_type> parts = world.begin_push<"roads">(SURVEY).get();
   parts.add(ways(10, 10)).get();
   terminate(other, pid);
 
   // The step that finds the link gone fails, and every later call fails with that same error.
-  SECTION("a part finds it gone") {
+  SECTION("a part finds it gone")
+  {
     const std::string lost = failure_of(parts.add(ways(11, 11)));
     CHECK(lost != "ok");
     CHECK(failure_of(parts.add(ways(12, 12))) == lost);
     CHECK(failure_of(parts.commit()) == lost);
   }
-  SECTION("the commit finds it gone") {
+  SECTION("the commit finds it gone")
+  {
     const std::string lost = failure_of(parts.commit());
     CHECK(lost != "ok");
     CHECK(failure_of(parts.add(ways(11, 11))) == lost);
   }
 
-  // The failing step ended the push's transaction, which gave the pool's one connection back; it is re-established, with
-  // its settings, for the next statement. Nothing of the push is there, and the dataset is as it was.
+  // The failing step ended the push's transaction, which gave the pool's one connection back; it is
+  // re-established, with its settings, for the next statement. Nothing of the push is there, and
+  // the dataset is as it was.
   CHECK(pid_of(world.database()) != pid);
   CHECK(schemacht::schema::get<"jit">(world.database().execute(Jit::bind()).get().at(0)) == "off");
   CHECK(ids(world.load<"roads">(FAR_EAST).get()) == std::vector<std::int64_t>{1, 2});
@@ -236,11 +277,16 @@ TEST_CASE(
   CHECK(ids(world.load<"roads">(FAR_EAST).get()) == std::vector<std::int64_t>{20});
 }
 
-TEST_CASE("failure: a stream whose connection is lost fails through its future, and the miniverse goes on", "[integration][failure]") {
+TEST_CASE(
+    "failure: a stream whose connection is lost fails through its future, and the miniverse goes "
+    "on",
+    "[integration][failure]")
+{
   using World = miniverse::Miniverse<SlowRoads>;
-  test::Fresh<World> made = with_survey<SlowRoads>(test_db(), ways(1, 200), ONE_CONNECTION);  // a second of server time
-  World&             world = made.world();
-  pg::Database       other(test_db());
+  test::Fresh<World> made =
+      with_survey<SlowRoads>(test_db(), ways(1, 200), ONE_CONNECTION);  // a second of server time
+  World&       world = made.world();
+  pg::Database other(test_db());
 
   const std::int32_t       pid = pid_of(world.database());
   std::atomic<std::size_t> chunks{0};
@@ -248,12 +294,12 @@ TEST_CASE("failure: a stream whose connection is lost fails through its future, 
   std::future<void>        streamed = world.stream<"roads">(
       FAR_EAST,
       [&](const miniverse::Ways& /*chunk*/) {
-        if ( chunks++ == 0 ) {  // the first chunk is in hand while the server still has the rest to find
+        if ( chunks++ == 0 ) {  // the first chunk is in hand while the server still has the rest to
+                                // find
           ended = schemacht::schema::get<"ended">(other.execute(Terminate::bind(pid)).get().at(0));
         }
       },
-      pg::ReadOptions{.chunk_rows = 1}
-  );
+      pg::ReadOptions{.chunk_rows = 1});
 
   // Together: the stream failed after it had begun handing rows over, and before it had them all.
   CHECK_THROWS_AS(streamed.get(), std::runtime_error);
@@ -265,9 +311,11 @@ TEST_CASE("failure: a stream whose connection is lost fails through its future, 
   CHECK(world.load<"roads">(FAR_EAST).get().size() == 200);
 }
 
-TEST_CASE("failure: a push of a dataset waits for an open push of it, and is what remains", "[integration][failure]") {
-  using World = miniverse::Miniverse<TestRoads>;
-  test::Fresh<World> made = with_survey<TestRoads>(test_db(), ways(1, 2));
+TEST_CASE("failure: a push of a dataset waits for an open push of it, and is what remains",
+          "[integration][failure]")
+{
+  using World              = miniverse::Miniverse<TestRoads>;
+  test::Fresh<World> made  = with_survey<TestRoads>(test_db(), ways(1, 2));
   World&             world = made.world();
   World              other(test_db(), TestRoads(TABLE));
   pg::Database       probe(test_db());
@@ -278,7 +326,9 @@ TEST_CASE("failure: a push of a dataset waits for an open push of it, and is wha
   std::future<void> pushing = other.push<"roads">(SURVEY, ways(20, 20));
   wait_for_a_lock_waiter(probe);
   CHECK(pushing.wait_for(std::chrono::seconds(0)) == std::future_status::timeout);
-  CHECK(ids(other.load<"roads">(FAR_EAST).get()) == std::vector<std::int64_t>{1, 2});  // neither push is there yet
+  CHECK(ids(other.load<"roads">(FAR_EAST).get()) == std::vector<std::int64_t>{1, 2});  // neither
+                                                                                       // push is
+                                                                                       // there yet
 
   open.commit().get();
   pushing.get();
@@ -288,9 +338,12 @@ TEST_CASE("failure: a push of a dataset waits for an open push of it, and is wha
   CHECK(world.datasets<"roads">().get().front().rows == 1);
 }
 
-TEST_CASE("failure: a remove waits for an open push of its dataset, and removes what that push wrote", "[integration][failure]") {
-  using World = miniverse::Miniverse<TestRoads>;
-  test::Fresh<World> made = with_survey<TestRoads>(test_db(), ways(1, 2));
+TEST_CASE(
+    "failure: a remove waits for an open push of its dataset, and removes what that push wrote",
+    "[integration][failure]")
+{
+  using World              = miniverse::Miniverse<TestRoads>;
+  test::Fresh<World> made  = with_survey<TestRoads>(test_db(), ways(1, 2));
   World&             world = made.world();
   World              other(test_db(), TestRoads(TABLE));
   pg::Database       probe(test_db());
@@ -309,20 +362,26 @@ TEST_CASE("failure: a remove waits for an open push of its dataset, and removes 
   CHECK(world.datasets<"roads">().get().empty());
 }
 
-TEST_CASE("failure: a push of a dataset's name into another table does not wait for the open push", "[integration][failure]") {
-  using World = miniverse::Miniverse<TestRoads>;
-  test::Fresh<World> made = with_survey<TestRoads>(test_db(), ways(1, 2));
+TEST_CASE("failure: a push of a dataset's name into another table does not wait for the open push",
+          "[integration][failure]")
+{
+  using World              = miniverse::Miniverse<TestRoads>;
+  test::Fresh<World> made  = with_survey<TestRoads>(test_db(), ways(1, 2));
   World&             world = made.world();
-  test::Fresh<World> other_made = with_survey<TestRoads>(test_db(), ways(1, 2), {}, "miniverse_test_failure_other_roads");
-  World&             other = other_made.world();
-  pg::Database       probe(test_db());
+  test::Fresh<World> other_made =
+      with_survey<TestRoads>(test_db(), ways(1, 2), {}, "miniverse_test_failure_other_roads");
+  World&       other = other_made.world();
+  pg::Database probe(test_db());
 
   miniverse::PushInParts<TestRoads::model_type> open = world.begin_push<"roads">(SURVEY).get();
   open.add(ways(10, 10)).get();
 
   // The same dataset name, another table: the lock is the table's and the dataset's together.
   std::future<void> pushing = other.push<"roads">(SURVEY, ways(20, 20));
-  REQUIRE(pushing.wait_for(std::chrono::seconds(10)) == std::future_status::ready);  // a wait here would be one of the open push's lock
+  REQUIRE(pushing.wait_for(std::chrono::seconds(10)) == std::future_status::ready);  // a wait here
+                                                                                     // would be one
+                                                                                     // of the open
+                                                                                     // push's lock
   CHECK(schemacht::schema::get<"waiting">(probe.execute(LockWaiters::bind()).get().at(0)) == 0);
   pushing.get();
 
@@ -332,37 +391,50 @@ TEST_CASE("failure: a push of a dataset's name into another table does not wait 
 }
 
 TEST_CASE(
-    "failure: a lock timeout in the connection string ends the wait for a dataset with its error, and nothing is written", "[integration][failure]"
-) {
-  using World = miniverse::Miniverse<TestRoads>;
-  test::Fresh<World> made = with_survey<TestRoads>(test_db(), ways(1, 2));
+    "failure: a lock timeout in the connection string ends the wait for a dataset with its error, "
+    "and nothing is written",
+    "[integration][failure]")
+{
+  using World              = miniverse::Miniverse<TestRoads>;
+  test::Fresh<World> made  = with_survey<TestRoads>(test_db(), ways(1, 2));
   World&             world = made.world();
-  World              impatient(with_server_setting(test_db(), "-c lock_timeout=200"), TestRoads(TABLE));
+  World impatient(with_server_setting(test_db(), "-c lock_timeout=200"), TestRoads(TABLE));
 
   miniverse::PushInParts<TestRoads::model_type> open = world.begin_push<"roads">(SURVEY).get();
   open.add(ways(10, 10)).get();
 
   CHECK(failure_of(impatient.push<"roads">(SURVEY, ways(20, 20))) == "55P03");
   CHECK(failure_of(impatient.remove<"roads">(SURVEY)) == "55P03");
-  CHECK(failure_of(impatient.push<"roads">(miniverse::Dataset{"another"}, ways(30, 30))) == "ok");  // another dataset: no wait
+  CHECK(failure_of(impatient.push<"roads">(miniverse::Dataset{"another"}, ways(30, 30))) ==
+        "ok");  // another dataset: no wait
 
   open.commit().get();
   CHECK(ids(world.load<"roads">(FAR_EAST).get()) == std::vector<std::int64_t>{10, 30});
 }
 
-TEST_CASE("failure: a statement timeout in the connection string ends a load that outruns it, through its future", "[integration][failure]") {
-  using World = miniverse::Miniverse<SlowRoads>;
-  test::Fresh<World> made = with_survey<SlowRoads>(test_db(), ways(1, 50));  // a quarter of a second of server time
+TEST_CASE(
+    "failure: a statement timeout in the connection string ends a load that outruns it, through "
+    "its future",
+    "[integration][failure]")
+{
+  using World              = miniverse::Miniverse<SlowRoads>;
+  test::Fresh<World> made  = with_survey<SlowRoads>(test_db(), ways(1, 50));  // a quarter of a
+                                                                              // second of server
+                                                                              // time
   World&             world = made.world();
-  World              impatient(with_server_setting(test_db(), "-c statement_timeout=100"), SlowRoads(TABLE));
+  World impatient(with_server_setting(test_db(), "-c statement_timeout=100"), SlowRoads(TABLE));
 
   CHECK(failure_of(impatient.load<"roads">(FAR_EAST)) == "57014");
   CHECK(world.load<"roads">(FAR_EAST).get().size() == 50);
 }
 
-TEST_CASE("failure: a push does not wait for a stream, and the stream sees the table as it was when it started", "[integration][failure]") {
-  using World = miniverse::Miniverse<SlowRoads>;
-  test::Fresh<World> made = with_survey<SlowRoads>(test_db(), ways(1, 50));
+TEST_CASE(
+    "failure: a push does not wait for a stream, and the stream sees the table as it was when it "
+    "started",
+    "[integration][failure]")
+{
+  using World              = miniverse::Miniverse<SlowRoads>;
+  test::Fresh<World> made  = with_survey<SlowRoads>(test_db(), ways(1, 50));
   World&             world = made.world();
   World              other(test_db(), SlowRoads(TABLE));
 
@@ -379,13 +451,14 @@ TEST_CASE("failure: a push does not wait for a stream, and the stream sees the t
           started.set_value();
           std::ignore = replaced_done.wait_for(std::chrono::seconds(30));
         }
-        seen.insert(seen.end(), std::make_move_iterator(chunk.begin()), std::make_move_iterator(chunk.end()));
+        seen.insert(seen.end(), std::make_move_iterator(chunk.begin()),
+                    std::make_move_iterator(chunk.end()));
       },
-      pg::ReadOptions{.chunk_rows = 1}
-  );
+      pg::ReadOptions{.chunk_rows = 1});
 
   REQUIRE(started.get_future().wait_for(std::chrono::seconds(10)) == std::future_status::ready);
-  other.push<"roads">(SURVEY, ways(101, 110)).get();  // committed while the stream's statement runs, and holds a chunk
+  other.push<"roads">(SURVEY, ways(101, 110)).get();  // committed while the stream's statement
+                                                      // runs, and holds a chunk
   replaced.set_value();
   streamed.get();
 
@@ -393,8 +466,11 @@ TEST_CASE("failure: a push does not wait for a stream, and the stream sees the t
   CHECK(sorted_ids(world.load<"roads">(FAR_EAST).get()) == sorted_ids(ways(101, 110)));
 }
 
-TEST_CASE("failure: a miniverse to a database that is not there fails in its constructor", "[failure]") {
+TEST_CASE("failure: a miniverse to a database that is not there fails in its constructor",
+          "[failure]")
+{
   using World = miniverse::Miniverse<TestRoads>;
 
-  CHECK_THROWS_AS(World("host=localhost port=1 connect_timeout=2", TestRoads(TABLE)), std::runtime_error);
+  CHECK_THROWS_AS(World("host=localhost port=1 connect_timeout=2", TestRoads(TABLE)),
+                  std::runtime_error);
 }

@@ -10,14 +10,17 @@
 
 namespace miniverse::raster {
 
-Reach::Reach(geo::Polygon location) : _location(std::move(location)) {
-  boost::geometry::correct(_location);  // Boost's test, unlike PostGIS's, minds which way a ring runs round
+Reach::Reach(geo::Polygon location) : _location(std::move(location))
+{
+  // Boost's test, unlike PostGIS's, minds which way a ring runs round
+  boost::geometry::correct(_location);
 }
 
-bool Reach::into(const geo::Box& tile) const {
+bool Reach::into(const geo::Box& tile) const
+{
   // The tile without its edges: how far in a location must reach, see the class.
   const double across = (tile.max_corner().x() - tile.min_corner().x()) * geo::EDGE_TOLERANCE;
-  const double down = (tile.max_corner().y() - tile.min_corner().y()) * geo::EDGE_TOLERANCE;
+  const double down   = (tile.max_corner().y() - tile.min_corner().y()) * geo::EDGE_TOLERANCE;
 
   const geo::Box inside{
       {tile.min_corner().x() + across, tile.min_corner().y() + down},

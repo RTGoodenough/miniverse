@@ -1,17 +1,24 @@
-// A database made and filled from files, and kept: the roads of an OpenStreetMap extract and the heights of a directory of
-// GeoTIFFs, as the two tables `roads` and `elevation`.
+// A database made and filled from files, and kept: the roads of an OpenStreetMap extract and the
+// heights of a directory of GeoTIFFs, as the two tables `roads` and `elevation`.
 //
-// The other examples make tables in a database that is there, and drop them again. This one makes the database too, and
-// leaves it: something of real size to point workers at, or to open in a viewer (the tables are PostGIS's own, so QGIS
-// reads them over a PostGIS connection). This needs the optional components miniverse::gdal and miniverse::osm.
+// The other examples make tables in a database that is there, and drop them again. This one makes
+// the database too, and leaves it: something of real size to point workers at, or to open in a
+// viewer (the tables are PostGIS's own, so QGIS reads them over a PostGIS connection). This needs
+// the optional components miniverse::gdal and miniverse::osm.
 //
-// Run with a libpq connection string to any database of the server that is there (`postgres` always is), of keywords or a
-// URI, then the new database's name, the OpenStreetMap file, and the directory of GeoTIFFs:
-//   miniverse_example_make_database "host=localhost user=gis dbname=postgres" region region.osm.pbf heights/
-// The database named in the string is only connected to, to make the new one from: nothing in it is read or changed.
-// The user must be allowed to make databases and the extensions postgis and postgis_raster. A database of the name that is
-// there already is left alone, and the run fails; so does a second run after one that failed halfway, until what the first
-// left is dropped by hand (`dropdb region`). Nothing here drops anything.
+// Run with a libpq connection string to any database of the server that is there (`postgres` always
+// is), of keywords or a URI, then the new database's name, the OpenStreetMap file, and the
+// directory of GeoTIFFs:
+//   miniverse_example_make_database "host=localhost user=gis dbname=postgres" region region.osm.pbf
+//   heights/
+// The database named in the string is only connected to, to make the new one from: nothing in it is
+// read or changed. The user must be allowed to make databases and the extensions postgis and
+// postgis_raster. A database of the name that is there already is left alone, and the run fails; so
+// does a second run after one that failed halfway, until what the first left is dropped by hand
+// (`dropdb region`). Nothing here drops anything.
+
+#include "schemacht/postgres/database.hpp"
+#include "schemacht/postgres/statements.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -22,6 +29,7 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <libpq-fe.h>
 #include <memory>
 #include <span>
 #include <stdexcept>
@@ -31,41 +39,45 @@
 #include <utility>
 #include <vector>
 
-#include <libpq-fe.h>
-
 #include "miniverse/gdal/raster.hpp"
 #include "miniverse/miniverse.hpp"
 #include "miniverse/osm/ways.hpp"
-#include "schemacht/postgres/database.hpp"
-#include "schemacht/postgres/statements.hpp"
 
-namespace geo = miniverse::geo;
+namespace geo      = miniverse::geo;
 namespace postgres = schemacht::postgres;
 
-using Roads = miniverse::Layer<miniverse::RoadModel, "roads">;
-using Elevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "elevation">;  // heights in whole metres
+using Roads     = miniverse::Layer<miniverse::RoadModel, "roads">;
+using Elevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "elevation">;  // heights
+                                                                                        // in whole
+                                                                                        // metres
 
 using World = miniverse::Miniverse<Roads, Elevation>;
 
 namespace {
 
 /**
- * @return `conninfo`, a libpq connection string of either form, as one of keywords without its database: the server, the
- * user and all else, for another database's name to follow. libpq reads the string, so what it takes is what is taken.
+ * @return `conninfo`, a libpq connection string of either form, as one of keywords without its
+ * database: the server, the user and all else, for another database's name to follow. libpq reads
+ * the string, so what it takes is what is taken.
  * @throws std::invalid_argument with libpq's message for a string it can't read.
  */
-std::string without_database(const std::string& conninfo) {
+std::string without_database(const std::string& conninfo)
+{
   char*                                                              message = nullptr;
-  const std::unique_ptr<PQconninfoOption, decltype(&PQconninfoFree)> options(PQconninfoParse(conninfo.c_str(), &message), &PQconninfoFree);
-  const std::unique_ptr<char, decltype(&PQfreemem)>                  held(message, &PQfreemem);
+  const std::unique_ptr<PQconninfoOption, decltype(&PQconninfoFree)> options(
+      PQconninfoParse(conninfo.c_str(), &message), &PQconninfoFree);
+  const std::unique_ptr<char, decltype(&PQfreemem)> held(message, &PQfreemem);
   if ( ! options ) {
-    throw std::invalid_argument(message != nullptr ? message : "the connection string can't be read");
+    throw std::invalid_argument(
+        message != nullptr ? message : "the connection string can't be read");
   }
 
-  // Each value in quotes, with the two characters that mean something inside them escaped. The array ends with a keyword of none.
+  // Each value in quotes, with the two characters that mean something inside them escaped. The
+  // array ends with a keyword of none.
   std::string result;
   for ( const PQconninfoOption* option = options.get(); option->keyword != nullptr;
-        ++option ) {  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic) -- libpq ends the array with a null keyword
+        ++option ) {  // NOLINT(cppcoreguidelines-pro-bounds-pointer-arithmetic)
+                      // -- libpq ends the array with a null keyword
     if ( option->val == nullptr || std::string_view(option->keyword) == "dbname" ) {
       continue;
     }
@@ -84,16 +96,24 @@ std::string without_database(const std::string& conninfo) {
 }
 
 /**
- * @brief Makes the database `name` on the server of `server`, a connection string to any database of it.
+ * @brief Makes the database `name` on the server of `server`, a connection string to any database
+ * of it.
  * @return The connection string to the new database.
- * @throws std::invalid_argument unless `name` is of small letters, digits and `_` alone and starts with a letter, which
- * needs no quoting, or if `server` can't be read: either before anything is made. A QueryError if there is such a database
- * already.
+ * @throws std::invalid_argument unless `name` is of small letters, digits and `_` alone and starts
+ * with a letter, which needs no quoting, or if `server` can't be read: either before anything is
+ * made. A QueryError if there is such a database already.
  */
-std::string make_database(const std::string& server, const std::string& name) {
-  const auto plain = [](unsigned char letter) { return std::islower(letter) != 0 || std::isdigit(letter) != 0 || letter == '_'; };
-  if ( name.empty() || std::islower(static_cast<unsigned char>(name.front())) == 0 || ! std::ranges::all_of(name, plain) ) {
-    throw std::invalid_argument("the database's name must be of small letters, digits and _, and start with a letter");
+std::string make_database(const std::string& server, const std::string& name)
+{
+  const auto plain = [](unsigned char letter) {
+    return std::islower(letter) != 0 || std::isdigit(letter) != 0 || letter == '_';
+  };
+  if ( name.empty() ||
+       std::islower(static_cast<unsigned char>(name.front())) == 0 ||
+       ! std::ranges::all_of(name, plain) )
+  {
+    throw std::invalid_argument(
+        "the database's name must be of small letters, digits and _, and start with a letter");
   }
 
   std::string made = without_database(server) + "dbname=" + name;
@@ -104,9 +124,11 @@ std::string make_database(const std::string& server, const std::string& name) {
   return made;
 }
 
-/** @return What `read` gives, or its error with `what` the input was in front of it: the libraries' own messages name no role. */
+/** @return What `read` gives, or its error with `what` the input was in front of it: the libraries'
+ * own messages name no role. */
 template <std::invocable read_t>
-auto about(const std::string& what, read_t read) {
+auto about(const std::string& what, read_t read)
+{
   try {
     return read();
   } catch ( const std::exception& error ) {
@@ -115,30 +137,39 @@ auto about(const std::string& what, read_t read) {
 }
 
 /** @brief Writes the roads and paths of the OpenStreetMap file at `path`, all of them or none. */
-void write_roads(World& world, const std::string& path) {
+void write_roads(World& world, const std::string& path)
+{
   miniverse::PushInParts<Roads::model_type> roads =
-      world.begin_push<"roads">(miniverse::Dataset{std::filesystem::path(path).filename().string()}).get();
+      world.begin_push<"roads">(miniverse::Dataset{std::filesystem::path(path).filename().string()})
+          .get();
 
   const miniverse::osm::WayRead read = about("the OpenStreetMap file '" + path + "'", [&] {
-    return miniverse::osm::read_ways({.path = path, .keys = {"highway"}}, 10'000, [&roads](miniverse::Ways chunk) {
-      roads.add(std::move(chunk)).get();
-    });
+    return miniverse::osm::read_ways(
+        {.path = path, .keys = {"highway"}}, 10'000,
+        [&roads](miniverse::Ways chunk) { roads.add(std::move(chunk)).get(); });
   });
 
   roads.commit().get();
 
-  std::cout << "roads: " << read.ways << " written, " << read.without_nodes << " left out, of " << path << '\n';
+  std::cout << "roads: " << read.ways << " written, " << read.without_nodes << " left out, of "
+            << path << '\n';
 }
 
 /** @return The GeoTIFFs of `directory`, by name. */
-std::vector<std::filesystem::path> geotiffs_of(const std::string& directory) {
+std::vector<std::filesystem::path> geotiffs_of(const std::string& directory)
+{
   if ( ! std::filesystem::is_directory(directory) ) {
-    throw std::runtime_error("'" + directory + "' is not a directory: the GeoTIFFs are read from one");
+    throw std::runtime_error(
+        "'" + directory + "' is not a directory: the GeoTIFFs are read from one");
   }
 
   std::vector<std::filesystem::path> files;
-  for ( const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(directory) ) {
-    if ( entry.is_regular_file() && (entry.path().extension() == ".tif" || entry.path().extension() == ".tiff") ) {
+  for ( const std::filesystem::directory_entry& entry :
+        std::filesystem::directory_iterator(directory) )
+  {
+    if ( entry.is_regular_file() &&
+         (entry.path().extension() == ".tif" || entry.path().extension() == ".tiff") )
+    {
       files.push_back(entry.path());
     }
   }
@@ -152,10 +183,11 @@ std::vector<std::filesystem::path> geotiffs_of(const std::string& directory) {
 }
 
 /**
- * @brief Writes the GeoTIFFs `files` in order, each all of it or none. Where two files overlap, as neighbours of a survey do
- * by a few pixels, the later one's data is what the table has.
+ * @brief Writes the GeoTIFFs `files` in order, each all of it or none. Where two files overlap, as
+ * neighbours of a survey do by a few pixels, the later one's data is what the table has.
  */
-void write_heights(World& world, const std::vector<std::filesystem::path>& files) {
+void write_heights(World& world, const std::vector<std::filesystem::path>& files)
+{
   const geo::Grid<std::int16_t> grid = world.table_settings<"elevation">().get();
 
   std::size_t written = 0;
@@ -164,24 +196,28 @@ void write_heights(World& world, const std::vector<std::filesystem::path>& files
 
     // Windows of 2 by 2 tiles, 1024 pixels a side.
     const miniverse::gdal::RasterRead read = about("the GeoTIFF '" + file.string() + "'", [&] {
-      return miniverse::gdal::read_raster<std::int16_t>({.path = file.string()}, grid, 2, [&heights](geo::Raster<std::int16_t> window) {
-        heights.add(std::move(window)).get();
-      });
+      return miniverse::gdal::read_raster<std::int16_t>(
+          {.path = file.string()}, grid, 2,
+          [&heights](geo::Raster<std::int16_t> window) { heights.add(std::move(window)).get(); });
     });
 
     heights.commit().get();
 
-    std::cout << "elevation: " << ++written << " of " << files.size() << ", " << file.filename().string() << ": " << read.windows
-              << " windows written, " << read.without_data << " with no data left out\n";
+    std::cout << "elevation: " << ++written << " of " << files.size() << ", "
+              << file.filename().string() << ": " << read.windows << " windows written, "
+              << read.without_data << " with no data left out\n";
   }
 }
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int main(int argc, char** argv)
+{
   const std::span<char*> args(argv, static_cast<std::size_t>(argc));
   if ( args.size() != 5 ) {
-    std::cerr << "usage: " << args[0] << " <connection string to the server> <new database> <file.osm.pbf> <directory of GeoTIFFs>\n";
+    std::cerr << "usage: " << args[0]
+              << " <connection string to the server> <new database> <file.osm.pbf> <directory of "
+                 "GeoTIFFs>\n";
     return EXIT_FAILURE;
   }
 
@@ -189,22 +225,33 @@ int main(int argc, char** argv) {
     // The inputs are checked first: a wrong path makes no database.
     const std::string roads_file = args[3];
     if ( ! std::filesystem::is_regular_file(roads_file) ) {
-      throw std::runtime_error("'" + roads_file + "' is not a file: the OpenStreetMap extract is one");
+      throw std::runtime_error(
+          "'" + roads_file + "' is not a file: the OpenStreetMap extract is one");
     }
-    if ( ! roads_file.ends_with(".pbf") && roads_file.find(".osm") == std::string::npos ) {  // libosmium tells the format by the suffix
-      throw std::runtime_error("'" + roads_file + "' is not named as an OpenStreetMap file (.osm.pbf, .osm, .osm.bz2)");
+    if ( ! roads_file.ends_with(".pbf") &&
+         roads_file.find(".osm") == std::string::npos ) {  // libosmium tells the format by the
+                                                           // suffix
+      throw std::runtime_error(
+          "'" + roads_file + "' is not named as an OpenStreetMap file (.osm.pbf, .osm, .osm.bz2)");
     }
     const std::vector<std::filesystem::path> geotiffs = geotiffs_of(args[4]);
 
     World world(make_database(args[1], args[2]), Roads("roads"), Elevation("elevation"));
 
-    std::ignore = world.database().execute(postgres::unchecked_sql("CREATE EXTENSION IF NOT EXISTS postgis")).get();
-    std::ignore = world.database().execute(postgres::unchecked_sql("CREATE EXTENSION IF NOT EXISTS postgis_raster")).get();
+    std::ignore = world.database()
+                      .execute(postgres::unchecked_sql("CREATE EXTENSION IF NOT EXISTS postgis"))
+                      .get();
+    std::ignore =
+        world.database()
+            .execute(postgres::unchecked_sql("CREATE EXTENSION IF NOT EXISTS postgis_raster"))
+            .get();
 
-    // The elevation table's grid, chosen once: 3600 pixels to a degree, about 31 m, which is what a survey of one arc second
-    // has, so its pixels are the table's. Tiles of 512 pixels, about 16 km a side.
+    // The elevation table's grid, chosen once: 3600 pixels to a degree, about 31 m, which is what a
+    // survey of one arc second has, so its pixels are the table's. Tiles of 512 pixels, about 16 km
+    // a side.
     world.create_table<"roads">();
-    world.create_table<"elevation">({.pixels_per_degree = 3600, .tile_pixels = 512, .nodata = -32768});
+    world.create_table<"elevation">(
+        {.pixels_per_degree = 3600, .tile_pixels = 512, .nodata = -32768});
 
     write_roads(world, roads_file);
     write_heights(world, geotiffs);

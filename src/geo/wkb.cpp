@@ -17,63 +17,71 @@ namespace miniverse::geo::wkb {
 namespace {
 
 // The geometry type numbers of WKB, as the low bits of the type word.
-enum class Kind : std::uint8_t {
-  Point = 1,
-  LineString = 2,
-  Polygon = 3,
+enum class Kind : std::uint8_t
+{
+  Point           = 1,
+  LineString      = 2,
+  Polygon         = 3,
   MultiLineString = 5,
-  MultiPolygon = 6,
+  MultiPolygon    = 6,
 };
 
 // Where a geometry is: on its own, or a member of a multi-geometry (see `read_header`).
-enum class Place : std::uint8_t {
+enum class Place : std::uint8_t
+{
   Whole,
   Member,
 };
 
 // EWKB's flags in the type word's high bits, and the bits left for the type number.
-constexpr std::uint32_t Z_FLAG = 0x80000000U;
-constexpr std::uint32_t M_FLAG = 0x40000000U;
+constexpr std::uint32_t Z_FLAG    = 0x80000000U;
+constexpr std::uint32_t M_FLAG    = 0x40000000U;
 constexpr std::uint32_t SRID_FLAG = 0x20000000U;
 constexpr std::uint32_t KIND_MASK = 0x0FFFFFFFU;
 
-// ISO WKB numbers a type with Z, M or both as 1000, 2000 or 3000 more than the 2D one, so any number past this is not 2D.
+// ISO WKB numbers a type with Z, M or both as 1000, 2000 or 3000 more than the 2D one, so any
+// number past this is not 2D.
 constexpr std::uint32_t LAST_2D_KIND = 7;
 
-constexpr std::size_t WORD_BYTES = 4;
-constexpr std::size_t POINT_BYTES = 2 * sizeof(double);
-constexpr std::size_t MEMBER_BYTES = 1 + WORD_BYTES + WORD_BYTES;  // a member is at least its byte order, type and count
+constexpr std::size_t WORD_BYTES   = 4;
+constexpr std::size_t POINT_BYTES  = 2 * sizeof(double);
+constexpr std::size_t MEMBER_BYTES = 1 + WORD_BYTES + WORD_BYTES;  // a member is at least its byte
+                                                                   // order, type and count
 
-/** @brief The points of a line or a ring: Boost.Geometry's `linestring` and `ring` are both a `std::vector` of them. */
+/** @brief The points of a line or a ring: Boost.Geometry's `linestring` and `ring` are both a
+ * `std::vector` of them. */
 using Points = std::vector<Point>;
 
 template <Geometry geometry_t>
-[[nodiscard]] constexpr Kind kind_of() {
+[[nodiscard]] constexpr Kind kind_of()
+{
   if constexpr ( std::same_as<geometry_t, Point> ) {
     return Kind::Point;
-
-  } else if constexpr ( std::same_as<geometry_t, LineString> ) {
+  }
+  else if constexpr ( std::same_as<geometry_t, LineString> ) {
     return Kind::LineString;
-
-  } else if constexpr ( std::same_as<geometry_t, Polygon> ) {
+  }
+  else if constexpr ( std::same_as<geometry_t, Polygon> ) {
     return Kind::Polygon;
-
-  } else if constexpr ( std::same_as<geometry_t, MultiLineString> ) {
+  }
+  else if constexpr ( std::same_as<geometry_t, MultiLineString> ) {
     return Kind::MultiLineString;
-
-  } else {
-    static_assert(std::same_as<geometry_t, MultiPolygon>, "a new geometry type needs its WKB type number here");
+  }
+  else {
+    static_assert(std::same_as<geometry_t, MultiPolygon>,
+                  "a new geometry type needs its WKB type number here");
 
     return Kind::MultiPolygon;
   }
 }
 
 /**
- * @brief Reads the geometry's header (byte order, type, SRID) and checks it is a 2D `geometry_t` in WGS 84. A whole geometry
- * must name its SRID; a member of a multi-geometry need not.
+ * @brief Reads the geometry's header (byte order, type, SRID) and checks it is a 2D `geometry_t` in
+ * WGS 84. A whole geometry must name its SRID; a member of a multi-geometry need not.
  */
 template <Geometry geometry_t>
-void read_header(Reader& reader, Place place) {
+void read_header(Reader& reader, Place place)
+{
   reader.byte_order();
 
   const auto type = reader.number<std::uint32_t>();
@@ -82,12 +90,17 @@ void read_header(Reader& reader, Place place) {
   }
 
   if ( (type & KIND_MASK) != static_cast<std::uint32_t>(kind_of<geometry_t>()) ) {
-    malformed("expected a " + std::string(type_name<geometry_t>().view()) + ", found geometry type " + std::to_string(type & KIND_MASK));
+    malformed("expected a " +
+              std::string(type_name<geometry_t>().view()) +
+              ", found geometry type " +
+              std::to_string(type & KIND_MASK));
   }
 
   if ( (type & SRID_FLAG) == 0 ) {
     if ( place == Place::Whole ) {
-      malformed("the geometry names no SRID, so its coordinates could be in any system (expected " + std::to_string(WGS84_SRID) + ")");
+      malformed("the geometry names no SRID, so its coordinates could be in any system (expected " +
+                std::to_string(WGS84_SRID) +
+                ")");
     }
 
     return;
@@ -95,18 +108,21 @@ void read_header(Reader& reader, Place place) {
 
   const auto srid = reader.number<std::int32_t>();
   if ( srid != WGS84_SRID ) {
-    malformed("the geometry has SRID " + std::to_string(srid) + ", not " + std::to_string(WGS84_SRID));
+    malformed(
+        "the geometry has SRID " + std::to_string(srid) + ", not " + std::to_string(WGS84_SRID));
   }
 }
 
-[[nodiscard]] Point read_point(Reader& reader) {
+[[nodiscard]] Point read_point(Reader& reader)
+{
   const auto lon = reader.number<double>();
   const auto lat = reader.number<double>();
 
   return {lon, lat};
 }
 
-void read_points(Reader& reader, Points& points) {
+void read_points(Reader& reader, Points& points)
+{
   const std::size_t size = reader.count(POINT_BYTES);
 
   points.reserve(size);
@@ -116,7 +132,8 @@ void read_points(Reader& reader, Points& points) {
 }
 
 template <Geometry geometry_t>
-[[nodiscard]] geometry_t read_body(Reader& reader) {
+[[nodiscard]] geometry_t read_body(Reader& reader)
+{
   if constexpr ( std::same_as<geometry_t, Point> ) {
     const Point point = read_point(reader);
     if ( std::isnan(point.x()) && std::isnan(point.y()) ) {
@@ -124,14 +141,14 @@ template <Geometry geometry_t>
     }
 
     return point;
-
-  } else if constexpr ( std::same_as<geometry_t, LineString> ) {
+  }
+  else if constexpr ( std::same_as<geometry_t, LineString> ) {
     LineString line;
     read_points(reader, line);
 
     return line;
-
-  } else if constexpr ( std::same_as<geometry_t, Polygon> ) {
+  }
+  else if constexpr ( std::same_as<geometry_t, Polygon> ) {
     const std::size_t rings = reader.count(WORD_BYTES);  // each ring is at least its own count
     Polygon           polygon;
 
@@ -145,8 +162,9 @@ template <Geometry geometry_t>
     }
 
     return polygon;
-
-  } else {  // a multi-geometry: a count, then each member as a geometry of its own, in a byte order of its own
+  }
+  else {  // a multi-geometry: a count, then each member as a geometry of its own, in a byte order
+          // of its own
     using member_t = geometry_t::value_type;
 
     const std::size_t members = reader.count(MEMBER_BYTES);
@@ -162,12 +180,14 @@ template <Geometry geometry_t>
   }
 }
 
-void put_point(Writer& out, const Point& position) {
+void put_point(Writer& out, const Point& position)
+{
   out.number(position.x());
   out.number(position.y());
 }
 
-void put_points(Writer& out, const Points& positions) {
+void put_points(Writer& out, const Points& positions)
+{
   out.count(positions.size());
   for ( const Point& position : positions ) {
     put_point(out, position);
@@ -175,14 +195,15 @@ void put_points(Writer& out, const Points& positions) {
 }
 
 template <Geometry geometry_t>
-void put_body(Writer& out, const geometry_t& geometry) {
+void put_body(Writer& out, const geometry_t& geometry)
+{
   if constexpr ( std::same_as<geometry_t, Point> ) {
     put_point(out, geometry);
-
-  } else if constexpr ( std::same_as<geometry_t, LineString> ) {
+  }
+  else if constexpr ( std::same_as<geometry_t, LineString> ) {
     put_points(out, geometry);
-
-  } else if constexpr ( std::same_as<geometry_t, Polygon> ) {
+  }
+  else if constexpr ( std::same_as<geometry_t, Polygon> ) {
     if ( geometry.outer().empty() && geometry.inners().empty() ) {
       out.count(0);  // no rings, as PostGIS writes POLYGON EMPTY
       return;
@@ -193,8 +214,9 @@ void put_body(Writer& out, const geometry_t& geometry) {
     for ( const auto& inner : geometry.inners() ) {
       put_points(out, inner);
     }
-
-  } else {  // a multi-geometry: each member with a header of its own, without an SRID, as PostGIS writes them
+  }
+  else {  // a multi-geometry: each member with a header of its own, without an SRID, as PostGIS
+          // writes them
     using member_t = geometry_t::value_type;
 
     out.count(geometry.size());
@@ -209,7 +231,8 @@ void put_body(Writer& out, const geometry_t& geometry) {
 }  // namespace
 
 template <Geometry geometry_t>
-std::vector<std::byte> write(const geometry_t& geometry) {
+std::vector<std::byte> write(const geometry_t& geometry)
+{
   Writer out;
   out.number(static_cast<std::uint32_t>(kind_of<geometry_t>()) | SRID_FLAG);
   out.number(WGS84_SRID);
@@ -219,13 +242,16 @@ std::vector<std::byte> write(const geometry_t& geometry) {
 }
 
 template <Geometry geometry_t>
-geometry_t read(std::span<const std::byte> bytes) {
+geometry_t read(std::span<const std::byte> bytes)
+{
   Reader reader(bytes);
   read_header<geometry_t>(reader, Place::Whole);
   auto geometry = read_body<geometry_t>(reader);
 
   if ( ! reader.at_end() ) {
-    malformed(std::to_string(reader.remaining()) + " bytes are left after the " + std::string(type_name<geometry_t>().view()));
+    malformed(std::to_string(reader.remaining()) +
+              " bytes are left after the " +
+              std::string(type_name<geometry_t>().view()));
   }
 
   return geometry;

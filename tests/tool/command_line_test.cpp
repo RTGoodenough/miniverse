@@ -1,5 +1,6 @@
-// The tool itself, run as a user runs it: its options reach the commands, a table in a schema is named `schema.table`, and
-// it exits with 0, 1 (failed) or 2 (arguments it can't take). Each test needs MINIVERSE_TEST_DB, and is skipped without it.
+// The tool itself, run as a user runs it: its options reach the commands, a table in a schema is
+// named `schema.table`, and it exits with 0, 1 (failed) or 2 (arguments it can't take). Each test
+// needs MINIVERSE_TEST_DB, and is skipped without it.
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
@@ -8,12 +9,13 @@
 #include <gdal.h>
 #include <gdal_utils.h>
 
-#include <stdio.h>   // NOLINT(modernize-deprecated-headers) -- popen and pclose are POSIX, of <stdio.h>
-#include <stdlib.h>  // NOLINT(modernize-deprecated-headers) -- WIFEXITED and WEXITSTATUS
+#include "schemacht/postgres/statements.hpp"
 
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <stdio.h>  // NOLINT(modernize-deprecated-headers) -- popen and pclose are POSIX, of <stdio.h>
+#include <stdlib.h>  // NOLINT(modernize-deprecated-headers) -- WIFEXITED and WEXITSTATUS
 #include <string>
 #include <tuple>
 #include <utility>
@@ -21,7 +23,6 @@
 
 #include "layer_of.hpp"
 #include "miniverse/miniverse.hpp"
-#include "schemacht/postgres/statements.hpp"
 #include "support/database.hpp"
 #include "support/files.hpp"
 #include "support/geometry.hpp"
@@ -35,19 +36,21 @@ using test::test_db;
 namespace {
 
 const std::string BUILDINGS_FILE = MINIVERSE_EXAMPLE_DATA "/buildings.geojson";
-const std::string STREETS_FILE = MINIVERSE_EXAMPLE_DATA "/streets.osm";
-const std::string HEIGHTS_FILE = MINIVERSE_EXAMPLE_DATA "/heights.asc";
+const std::string STREETS_FILE   = MINIVERSE_EXAMPLE_DATA "/streets.osm";
+const std::string HEIGHTS_FILE   = MINIVERSE_EXAMPLE_DATA "/heights.asc";
 
 const geo::Polygon EVERYWHERE = polygon("POLYGON((-179 -89,179 -89,179 89,-179 89,-179 -89))");
 
-/** @brief How a run of the tool went: its exit code, and what it wrote to standard output and error. */
+/** @brief How a run of the tool went: its exit code, and what it wrote to standard output and
+ * error. */
 struct Run {
   int         exit = -1;
   std::string output;
 };
 
 /** @return `text` in single quotes for the shell, each quote in it closed, escaped and reopened. */
-[[nodiscard]] std::string quoted(const std::string& text) {
+[[nodiscard]] std::string quoted(const std::string& text)
+{
   std::string result = "'";
   for ( const char letter : text ) {
     result += letter == '\'' ? std::string("'\\''") : std::string(1, letter);
@@ -57,9 +60,15 @@ struct Run {
 }
 
 /** @return The tool run with `arguments` (written for the shell) and `--db` the test database. */
-[[nodiscard]] Run run(const std::string& arguments) {
-  const std::string                     command = std::string(MINIVERSE_TOOL) + " " + arguments + " --db " + quoted(test_db()) + " 2>&1";
-  std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(command.c_str(), "r"), pclose);  // NOLINT(cert-env33-c) -- run as a user runs it, from a shell
+[[nodiscard]] Run run(const std::string& arguments)
+{
+  const std::string command =
+      std::string(MINIVERSE_TOOL) + " " + arguments + " --db " + quoted(test_db()) + " 2>&1";
+  std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(command.c_str(), "r"),
+                                             pclose);  // NOLINT(cert-env33-c)
+                                                       // -- run as a
+                                                       // user runs it,
+                                                       // from a shell
   REQUIRE(pipe != nullptr);
 
   Run                    result;
@@ -68,13 +77,14 @@ struct Run {
     result.output += buffer.data();
   }
   const int status = pclose(pipe.release());
-  result.exit = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+  result.exit      = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 
   return result;
 }
 
 /** @brief Copies the vector file `from` to `to`, a directory GDAL makes of one shapefile. */
-void to_shapefiles(const std::string& from, const std::string& to) {
+void to_shapefiles(const std::string& from, const std::string& to)
+{
   GDALAllRegister();
 
   std::vector<std::string> words{"-f", "ESRI Shapefile"};
@@ -88,7 +98,7 @@ void to_shapefiles(const std::string& from, const std::string& to) {
   GDALDatasetH source = GDALOpenEx(from.c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr);
   REQUIRE(source != nullptr);
   GDALVectorTranslateOptions* options = GDALVectorTranslateOptionsNew(arguments.data(), nullptr);
-  GDALDatasetH                made = GDALVectorTranslate(to.c_str(), nullptr, 1, &source, options, nullptr);
+  GDALDatasetH made = GDALVectorTranslate(to.c_str(), nullptr, 1, &source, options, nullptr);
   GDALVectorTranslateOptionsFree(options);
   REQUIRE(made != nullptr);
   GDALClose(made);
@@ -96,56 +106,83 @@ void to_shapefiles(const std::string& from, const std::string& to) {
 }
 
 using Buildings = tool::Layer<miniverse::FeatureModel<geo::MultiPolygon>>;
-using Roads = tool::Layer<miniverse::RoadModel>;
-using Heights = tool::Layer<miniverse::RasterModel<std::int16_t>>;
+using Roads     = tool::Layer<miniverse::RoadModel>;
+using Heights   = tool::Layer<miniverse::RasterModel<std::int16_t>>;
 
 /** @return A world of the one layer `layer`, its table dropped before and after the test. */
 template <miniverse::IsLayer layer_t>
-[[nodiscard]] test::Fresh<miniverse::Miniverse<layer_t>> fresh(layer_t layer) {
-  return test::Fresh<miniverse::Miniverse<layer_t>>([](miniverse::Miniverse<layer_t>& /*world*/) {}, test_db(), std::move(layer));
+[[nodiscard]] test::Fresh<miniverse::Miniverse<layer_t>> fresh(layer_t layer)
+{
+  return test::Fresh<miniverse::Miniverse<layer_t>>([](miniverse::Miniverse<layer_t>& /*world*/) {},
+                                                    test_db(), std::move(layer));
 }
 
 }  // namespace
 
-TEST_CASE("tool command line: an import's options reach the command", "[tool][integration]") {
+TEST_CASE("tool command line: an import's options reach the command", "[tool][integration]")
+{
   auto buildings = fresh(Buildings("miniverse_test_tool_buildings"));
-  auto roads = fresh(Roads("miniverse_test_tool_roads"));
-  auto heights = fresh(Heights("miniverse_test_tool_heights"));
+  auto roads     = fresh(Roads("miniverse_test_tool_roads"));
+  auto heights   = fresh(Heights("miniverse_test_tool_heights"));
 
   CHECK(run("create --model features:multipolygon miniverse_test_tool_buildings").exit == 0);
-  const Run named = run("import --model features:multipolygon miniverse_test_tool_buildings " + BUILDINGS_FILE + " --dataset village --chunk 1");
+  const Run named = run("import --model features:multipolygon miniverse_test_tool_buildings " +
+                        BUILDINGS_FILE +
+                        " --dataset village --chunk 1");
   CHECK(named.exit == 0);
   CHECK_THAT(named.output, ContainsSubstring("as the dataset 'village'"));
-  CHECK_THAT(run("datasets --model features:multipolygon miniverse_test_tool_buildings").output, ContainsSubstring("village\t4 rows\t20"));
-  CHECK(run("remove --model features:multipolygon miniverse_test_tool_buildings village").exit == 0);
-  CHECK_THAT(run("datasets --model features:multipolygon miniverse_test_tool_buildings").output, ContainsSubstring("no datasets"));
+  CHECK_THAT(run("datasets --model features:multipolygon miniverse_test_tool_buildings").output,
+             ContainsSubstring("village\t4 rows\t20"));
+  CHECK(
+      run("remove --model features:multipolygon miniverse_test_tool_buildings village").exit == 0);
+  CHECK_THAT(run("datasets --model features:multipolygon miniverse_test_tool_buildings").output,
+             ContainsSubstring("no datasets"));
   CHECK(buildings.world().load<"table">(EVERYWHERE).get().empty());
 
   // Of the extract's ways, one is a building, and not a road.
   CHECK(run("create --model roads miniverse_test_tool_roads").exit == 0);
-  CHECK_THAT(run("import --model roads miniverse_test_tool_roads " + STREETS_FILE + " --keys building").output, ContainsSubstring(": 1 ways"));
+  CHECK_THAT(
+      run("import --model roads miniverse_test_tool_roads " + STREETS_FILE + " --keys building")
+          .output,
+      ContainsSubstring(": 1 ways"));
   CHECK(roads.world().load<"table">(EVERYWHERE).get().size() == 1);
 
   // A degree is 3711 pixels of 30 m; windows of one tile are more windows than of two.
-  CHECK_THAT(
-      run("create --model raster:int16 miniverse_test_tool_heights --metres 30 --tile-pixels 256 --nodata -32768").output,
-      ContainsSubstring("3711 pixels per degree")
-  );
-  const Run ones = run("import --model raster:int16 miniverse_test_tool_heights " + HEIGHTS_FILE + " --window-tiles 1 --resampling nearest");
-  const Run twos = run("import --model raster:int16 miniverse_test_tool_heights " + HEIGHTS_FILE + " --window-tiles 2 --resampling nearest");
+  CHECK_THAT(run("create --model raster:int16 miniverse_test_tool_heights --metres 30 "
+                 "--tile-pixels 256 --nodata -32768")
+                 .output,
+             ContainsSubstring("3711 pixels per degree"));
+  const Run ones = run("import --model raster:int16 miniverse_test_tool_heights " +
+                       HEIGHTS_FILE +
+                       " --window-tiles 1 --resampling nearest");
+  const Run twos = run("import --model raster:int16 miniverse_test_tool_heights " +
+                       HEIGHTS_FILE +
+                       " --window-tiles 2 --resampling nearest");
   CHECK(ones.exit == 0);
   CHECK(twos.exit == 0);
   CHECK(ones.output != twos.output);
-  const Run band = run("import --model raster:int16 miniverse_test_tool_heights " + HEIGHTS_FILE + " --band 2");
+  const Run band =
+      run("import --model raster:int16 miniverse_test_tool_heights " + HEIGHTS_FILE + " --band 2");
   CHECK(band.exit == 1);
   CHECK_THAT(band.output, ContainsSubstring("so no band 2"));
-  CHECK_THAT(run("settings --model raster:int16 miniverse_test_tool_heights").output, ContainsSubstring("nodata: -32768"));
+  CHECK_THAT(run("settings --model raster:int16 miniverse_test_tool_heights").output,
+             ContainsSubstring("nodata: -32768"));
 }
 
-TEST_CASE("tool command line: a table in a schema is named schema.table, and a directory's dataset is its name", "[tool][integration]") {
+TEST_CASE(
+    "tool command line: a table in a schema is named schema.table, and a directory's dataset is "
+    "its name",
+    "[tool][integration]")
+{
   miniverse::Miniverse<Buildings> world(test_db(), Buildings("miniverse_test_tool", "places"));
-  std::ignore = world.database().execute(schemacht::postgres::unchecked_sql("DROP SCHEMA IF EXISTS miniverse_test_tool CASCADE")).get();
-  std::ignore = world.database().execute(schemacht::postgres::unchecked_sql("CREATE SCHEMA miniverse_test_tool")).get();
+  std::ignore = world.database()
+                    .execute(schemacht::postgres::unchecked_sql(
+                        "DROP SCHEMA IF EXISTS miniverse_test_tool CASCADE"))
+                    .get();
+  std::ignore =
+      world.database()
+          .execute(schemacht::postgres::unchecked_sql("CREATE SCHEMA miniverse_test_tool"))
+          .get();
 
   const test::Files files;
   const std::string shapes = files.path_of("shapes");
@@ -153,22 +190,42 @@ TEST_CASE("tool command line: a table in a schema is named schema.table, and a d
 
   CHECK(run("create --model features:multipolygon miniverse_test_tool.places").exit == 0);
   CHECK(run("verify --model features:multipolygon miniverse_test_tool.places").exit == 0);
-  const Run directory = run("import --model features:multipolygon miniverse_test_tool.places " + shapes + "/");  // as a shell completes it
+  const Run directory = run("import --model features:multipolygon miniverse_test_tool.places " +
+                            shapes +
+                            "/");  // as
+                                   // a
+                                   // shell
+                                   // completes
+                                   // it
   CHECK(directory.exit == 0);
   CHECK_THAT(directory.output, ContainsSubstring("as the dataset 'shapes'"));
 
-  std::ignore = world.database().execute(schemacht::postgres::unchecked_sql("DROP SCHEMA miniverse_test_tool CASCADE")).get();
+  std::ignore =
+      world.database()
+          .execute(schemacht::postgres::unchecked_sql("DROP SCHEMA miniverse_test_tool CASCADE"))
+          .get();
 }
 
-TEST_CASE("tool command line: it exits with 2 for arguments it can't take, and 1 for a command that failed", "[tool][integration]") {
+TEST_CASE(
+    "tool command line: it exits with 2 for arguments it can't take, and 1 for a command that "
+    "failed",
+    "[tool][integration]")
+{
   auto buildings = fresh(Buildings("miniverse_test_tool_buildings"));
   CHECK(run("create --model features:multipolygon miniverse_test_tool_buildings").exit == 0);
 
   CHECK(run("verify --model nothing miniverse_test_tool_buildings").exit == 2);
-  CHECK(run("import --model features:multipolygon miniverse_test_tool_buildings " + BUILDINGS_FILE + " --band 2").exit == 2);
-  CHECK(run("create --model raster:int8 miniverse_test_tool_bytes --pixels-per-degree 4 --tile-pixels 4 --nodata 300").exit == 2);
+  CHECK(run("import --model features:multipolygon miniverse_test_tool_buildings " +
+            BUILDINGS_FILE +
+            " --band 2")
+            .exit == 2);
+  CHECK(run("create --model raster:int8 miniverse_test_tool_bytes --pixels-per-degree 4 "
+            "--tile-pixels 4 --nodata 300")
+            .exit == 2);
   CHECK(run("verify --model features:point miniverse_test_tool_buildings").exit == 1);
-  CHECK(run("create --model features:multipolygon miniverse_test_tool_buildings").exit == 1);  // there already
-  CHECK(run("remove --model features:multipolygon miniverse_test_tool_buildings never_imported").exit == 1);
+  CHECK(run("create --model features:multipolygon miniverse_test_tool_buildings").exit ==
+        1);  // there already
+  CHECK(run("remove --model features:multipolygon miniverse_test_tool_buildings never_imported")
+            .exit == 1);
   CHECK(run("--help").exit == 0);
 }

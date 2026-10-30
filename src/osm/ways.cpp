@@ -1,9 +1,13 @@
 #include "miniverse/osm/ways.hpp"
-#include "miniverse/concepts/miniverse.hpp"
 
 #include <boost/json/object.hpp>
 #include <boost/json/serialize.hpp>
 
+#include "schemacht/json/json.hpp"
+
+#include <algorithm>
+#include <cstddef>
+#include <functional>
 #include <osmium/handler.hpp>
 #include <osmium/handler/node_locations_for_ways.hpp>
 #include <osmium/index/map/flex_mem.hpp>
@@ -16,37 +20,35 @@
 #include <osmium/osm/types.hpp>
 #include <osmium/osm/way.hpp>
 #include <osmium/visitor.hpp>
-
 #include <protozero/exception.hpp>
-
-#include <algorithm>
-#include <cstddef>
-#include <functional>
 #include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/model/way.hpp"
-#include "schemacht/json/json.hpp"
 
 namespace miniverse::osm {
 
 namespace {
 
-/** @brief Where each node of the file is, by its id: filled as the nodes are read, and asked for each way's. */
+/** @brief Where each node of the file is, by its id: filled as the nodes are read, and asked for
+ * each way's. */
 using Positions = osmium::index::map::FlexMem<osmium::unsigned_object_id_type, osmium::Location>;
 
-// Nodes, for their positions, and ways: not relations. libosmium's own `node | way` is this value, made in its header, where
-// the analyzer's complaint can't be silenced.
-// NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange) -- a set of bits, which the type is for
+// Nodes, for their positions, and ways: not relations. libosmium's own `node | way` is this value,
+// made in its header, where the analyzer's complaint can't be silenced.
+// NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange) -- a set of bits, which the type is
+// for
 constexpr auto NODES_AND_WAYS = static_cast<osmium::osm_entity_bits::type>(
-    static_cast<unsigned char>(osmium::osm_entity_bits::node) | static_cast<unsigned char>(osmium::osm_entity_bits::way)
-);
+    static_cast<unsigned char>(osmium::osm_entity_bits::node) |
+    static_cast<unsigned char>(osmium::osm_entity_bits::way));
 
 /** @return `tags` as one JSON object, each value text, in the file's order. */
-[[nodiscard]] schemacht::json::Json json_of(const osmium::TagList& tags) {
+[[nodiscard]] schemacht::json::Json json_of(const osmium::TagList& tags)
+{
   boost::json::object object;
   for ( const osmium::Tag& tag : tags ) {
     object[tag.key()] = tag.value();
@@ -55,20 +57,29 @@ constexpr auto NODES_AND_WAYS = static_cast<osmium::osm_entity_bits::type>(
   return schemacht::json::Json(boost::json::serialize(object));
 }
 
-/** @brief Gathers the ways libosmium reads, those `source` asks for, and hands them over a chunk at a time. */
-class Gatherer : public osmium::handler::Handler {
+/** @brief Gathers the ways libosmium reads, those `source` asks for, and hands them over a chunk at
+ * a time. */
+class Gatherer : public osmium::handler::Handler
+{
  public:
-  Gatherer(const WaySource& source, std::size_t chunk_ways, const std::function<void(Ways)>& on_chunk)
-      : _source(&source), _chunk_ways(chunk_ways), _on_chunk(&on_chunk) {}
+  Gatherer(
+      const WaySource& source, std::size_t chunk_ways, const std::function<void(Ways)>& on_chunk)
+      : _source(&source), _chunk_ways(chunk_ways), _on_chunk(&on_chunk)
+  {}
 
-  /** @brief Called by libosmium with each way, its nodes' positions filled in where the file has them. */
-  void way(const osmium::Way& from) {
+  /** @brief Called by libosmium with each way, its nodes' positions filled in where the file has
+   * them. */
+  void way(const osmium::Way& from)
+  {
     if ( ! wanted(from) ) {
       return;
     }
 
     const osmium::WayNodeList& nodes = from.nodes();
-    if ( nodes.size() < 2 || ! std::ranges::all_of(nodes, [](const osmium::NodeRef& node) { return node.location().valid(); }) ) {
+    if ( nodes.size() < 2 ||
+         ! std::ranges::all_of(
+             nodes, [](const osmium::NodeRef& node) { return node.location().valid(); }) )
+    {
       ++_read.without_nodes;
       return;
     }
@@ -88,8 +99,10 @@ class Gatherer : public osmium::handler::Handler {
     }
   }
 
-  /** @brief Hands over the ways gathered since the last chunk, if there are any: for the end of the file. */
-  void hand_over() {
+  /** @brief Hands over the ways gathered since the last chunk, if there are any: for the end of the
+   * file. */
+  void hand_over()
+  {
     if ( ! _chunk.empty() ) {
       (*_on_chunk)(std::exchange(_chunk, {}));
     }
@@ -104,32 +117,41 @@ class Gatherer : public osmium::handler::Handler {
   Ways                             _chunk;
   WayRead                          _read;
 
-  [[nodiscard]] bool wanted(const osmium::Way& way) const {
-    return _source->keys.empty() || std::ranges::any_of(_source->keys, [&](const std::string& key) { return way.tags().has_key(key.c_str()); });
+  [[nodiscard]] bool wanted(const osmium::Way& way) const
+  {
+    return _source->keys.empty() || std::ranges::any_of(_source->keys, [&](const std::string& key) {
+             return way.tags().has_key(key.c_str());
+           });
   }
 
  public:
-  Gatherer(const Gatherer&) = delete;
-  Gatherer(Gatherer&&) = delete;
+  Gatherer(const Gatherer&)            = delete;
+  Gatherer(Gatherer&&)                 = delete;
   Gatherer& operator=(const Gatherer&) = delete;
-  Gatherer& operator=(Gatherer&&) = delete;
-  ~Gatherer() = default;
+  Gatherer& operator=(Gatherer&&)      = delete;
+  ~Gatherer()                          = default;
 };
 
 }  // namespace
 
-WayRead read_ways(const WaySource& source, std::size_t chunk_ways, const std::function<void(Ways)>& on_chunk) {
+WayRead read_ways(
+    const WaySource& source, std::size_t chunk_ways, const std::function<void(Ways)>& on_chunk)
+{
   if ( chunk_ways == 0 ) {
     throw std::invalid_argument("a chunk of ways holds at least one");
   }
 
   osmium::io::Reader reader(source.path, NODES_AND_WAYS);
   if ( reader.header().has_multiple_object_versions() ) {
-    throw std::runtime_error("'" + source.path + "' holds a history, several versions of each way: only a file of the map as it is can be read");
+    throw std::runtime_error("'" +
+                             source.path +
+                             "' holds a history, several versions of each way: only a file of the "
+                             "map as it is can be read");
   }
 
-  // Positions by id, above zero and (as an editor numbers what it has not uploaded) below. `ignore_errors`: a node the file
-  // lacks stays without a position in its way, which `Gatherer::way` then leaves out.
+  // Positions by id, above zero and (as an editor numbers what it has not uploaded) below.
+  // `ignore_errors`: a node the file lacks stays without a position in its way, which
+  // `Gatherer::way` then leaves out.
   Positions                                                   positions;
   Positions                                                   negatives;
   osmium::handler::NodeLocationsForWays<Positions, Positions> positioner(positions, negatives);
@@ -139,7 +161,8 @@ WayRead read_ways(const WaySource& source, std::size_t chunk_ways, const std::fu
   try {
     osmium::apply(reader, positioner, gatherer);
     reader.close();
-  } catch ( const protozero::exception& error ) {  // a damaged PBF file: protozero's error is not a std::runtime_error
+  } catch ( const protozero::exception& error ) {  // a damaged PBF file: protozero's error is not a
+                                                   // std::runtime_error
     throw std::runtime_error("'" + source.path + "' is damaged: " + error.what());
   }
 
@@ -148,7 +171,8 @@ WayRead read_ways(const WaySource& source, std::size_t chunk_ways, const std::fu
   return gatherer.read();
 }
 
-Ways read_ways(const WaySource& source) {
+Ways read_ways(const WaySource& source)
+{
   Ways all;
 
   std::ignore = read_ways(source, ONE_CHUNK, [&all](Ways chunk) { all = std::move(chunk); });

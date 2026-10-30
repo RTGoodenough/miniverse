@@ -1,5 +1,8 @@
 #pragma once
 
+#include "schemacht/schema/table.hpp"
+#include "schemacht/util/compile_time.hpp"
+
 #include <concepts>
 #include <memory>
 #include <stdexcept>
@@ -10,33 +13,35 @@
 
 #include "miniverse/concepts/miniverse.hpp"
 #include "miniverse/reader.hpp"  // IWYU pragma: export
-#include "schemacht/schema/table.hpp"
-#include "schemacht/util/compile_time.hpp"
 
 /**
  * @file
- * A layer of a miniverse: a model under a name of the program's, stored in a table named at run time or read by a reader.
+ * A layer of a miniverse: a model under a name of the program's, stored in a table named at run
+ * time or read by a reader.
  */
 namespace miniverse {
 
 /**
- * @brief A layer of a miniverse: the model `model_t` under the name `name`, which the program asks for it by (`load<"roads">`),
- * stored in a table named while the program runs (from configuration, say), or read by a `Reader` (reader.hpp): a file, or
- * data of the program's own.
+ * @brief A layer of a miniverse: the model `model_t` under the name `name`, which the program asks
+ * for it by (`load<"roads">`), stored in a table named while the program runs (from configuration,
+ * say), or read by a `Reader` (reader.hpp): a file, or data of the program's own.
  *
  * @code
  * using Roads = miniverse::Layer<miniverse::RoadModel, "roads">;
  * using Elevation = miniverse::Layer<miniverse::RasterModel<std::int16_t>, "elevation">;
  *
- * miniverse::Miniverse world(conninfo, Roads("osm_roads"), Elevation());  // the second in a table called elevation
+ * miniverse::Miniverse world(conninfo, Roads("osm_roads"), Elevation());  // the second in a table
+ * called elevation
  * @endcode
  *
- * The name is the layer's in the program alone; two layers of one model are two names, in two tables of the same shape. The
- * table's name, or the reader, is all a layer holds; a model's settings (a raster's grid) belong to the table, see
- * `Miniverse::create_table`. A layer with a reader is only read.
+ * The name is the layer's in the program alone; two layers of one model are two names, in two
+ * tables of the same shape. The table's name, or the reader, is all a layer holds; a model's
+ * settings (a raster's grid) belong to the table, see `Miniverse::create_table`. A layer with a
+ * reader is only read.
  */
 template <LayerModel model_t, schemacht::util::CTString name>
-class Layer {
+class Layer
+{
  public:
   using model_type = model_t;
 
@@ -51,8 +56,8 @@ class Layer {
 
   /**
    * @brief The layer stored in `table`, a table in the connection's search path.
-   * @throws std::invalid_argument if `table` is not a valid table name (lowercase letters, digits and underscores, not starting
-   * with a digit, at most 63 bytes).
+   * @throws std::invalid_argument if `table` is not a valid table name (lowercase letters, digits
+   * and underscores, not starting with a digit, at most 63 bytes).
    */
   explicit Layer(std::string_view table) : _source(std::in_place_type<Table>, table) {}
 
@@ -60,15 +65,20 @@ class Layer {
    * @brief The layer stored in the table `table` of the PostgreSQL schema `schema_name`.
    * @throws std::invalid_argument if either is not a valid name, as above.
    */
-  Layer(std::string_view schema_name, std::string_view table) : _source(std::in_place_type<Table>, schema_name, table) {}
+  Layer(std::string_view schema_name, std::string_view table)
+      : _source(std::in_place_type<Table>, schema_name, table)
+  {}
 
   /**
    * @brief The layer read by `reader`, which the layer's copies and the loads that run share.
    * @throws std::invalid_argument if there is no reader.
    */
-  explicit Layer(std::shared_ptr<const Reader<model_t>> reader) : _source(std::move(reader)) {
+  explicit Layer(std::shared_ptr<const Reader<model_t>> reader) : _source(std::move(reader))
+  {
     if ( ! std::get<ReaderPtr>(_source) ) {
-      throw std::invalid_argument("a layer is a table or has a reader: " + std::string(NAME.view()) + " was given no reader");
+      throw std::invalid_argument("a layer is a table or has a reader: " +
+                                  std::string(NAME.view()) +
+                                  " was given no reader");
     }
   }
 
@@ -76,26 +86,32 @@ class Layer {
   [[nodiscard]] bool is_table() const noexcept { return std::holds_alternative<Table>(_source); }
 
   /**
-   * @return The layer's table, which the model's statements are aimed at (`.on(table)`); its name is `table().name()`.
+   * @return The layer's table, which the model's statements are aimed at (`.on(table)`); its name
+   * is `table().name()`.
    * @throws std::logic_error if the layer is not a table.
    */
-  [[nodiscard]] const schemacht::schema::Table<typename model_t::schema_type>& table() const {
+  [[nodiscard]] const schemacht::schema::Table<typename model_t::schema_type>& table() const
+  {
     if ( const Table* table = std::get_if<Table>(&_source) ) {
       return *table;
     }
 
-    throw std::logic_error("the layer " + std::string(NAME.view()) + ", read from " + source() + ", is not a table");
+    throw std::logic_error(
+        "the layer " + std::string(NAME.view()) + ", read from " + source() + ", is not a table");
   }
 
   /** @return The layer's reader; none, if the layer is a table. */
-  [[nodiscard]] std::shared_ptr<const Reader<model_t>> reader() const noexcept {
+  [[nodiscard]] std::shared_ptr<const Reader<model_t>> reader() const noexcept
+  {
     const ReaderPtr* reader = std::get_if<ReaderPtr>(&_source);
 
     return reader ? *reader : nullptr;
   }
 
-  /** @return Where the layer is, for a message: its table as a statement writes it (`"gis"."roads"`), or what its reader reads. */
-  [[nodiscard]] std::string source() const {
+  /** @return Where the layer is, for a message: its table as a statement writes it
+   * (`"gis"."roads"`), or what its reader reads. */
+  [[nodiscard]] std::string source() const
+  {
     if ( const Table* table = std::get_if<Table>(&_source) ) {
       return table->name().quoted();
     }
@@ -104,17 +120,17 @@ class Layer {
   }
 
  private:
-  using Table = schemacht::schema::Table<typename model_t::schema_type>;
+  using Table     = schemacht::schema::Table<typename model_t::schema_type>;
   using ReaderPtr = std::shared_ptr<const Reader<model_t>>;
 
   std::variant<Table, ReaderPtr> _source;
 
  public:
-  Layer(const Layer&) = default;
-  Layer(Layer&&) noexcept = default;
-  Layer& operator=(const Layer&) = default;
+  Layer(const Layer&)                = default;
+  Layer(Layer&&) noexcept            = default;
+  Layer& operator=(const Layer&)     = default;
   Layer& operator=(Layer&&) noexcept = default;
-  ~Layer() = default;
+  ~Layer()                           = default;
 };
 
 /** @brief Whether `layer_t` is a `Layer`: what a `Miniverse` is made of. */

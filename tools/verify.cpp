@@ -8,7 +8,8 @@
 
 namespace tool {
 
-void verify(const Table& table) {
+void verify(const Table& table)
+{
   with_model(table.model, [&]<typename model_t>(std::type_identity<model_t> /*model*/) {
     miniverse::Miniverse world(table.conninfo, layer_of<model_t>(table.name));
 

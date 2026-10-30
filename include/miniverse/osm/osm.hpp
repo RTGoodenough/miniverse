@@ -2,8 +2,8 @@
 
 /**
  * @file
- * All of the component `miniverse::osm`: OpenStreetMap files read with libosmium into layers (ways.hpp), and such a file as
- * a layer (road_file.hpp).
+ * All of the component `miniverse::osm`: OpenStreetMap files read with libosmium into layers
+ * (ways.hpp), and such a file as a layer (road_file.hpp).
  */
 
 #include "miniverse/osm/road_file.hpp"  // IWYU pragma: export

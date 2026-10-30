@@ -21,13 +21,18 @@ namespace {
 constexpr std::uint16_t RASTER_VERSION = 0;
 
 // A band's first byte: flags in the high bits, the pixel type in the low four.
-constexpr std::uint8_t OUT_DB_FLAG = 0x80U;
+constexpr std::uint8_t OUT_DB_FLAG     = 0x80U;
 constexpr std::uint8_t HAS_NODATA_FLAG = 0x40U;
 constexpr std::uint8_t PIXEL_TYPE_MASK = 0x0FU;
 
-[[nodiscard]] std::uint16_t dimension(std::size_t pixels, const char* what) {
+[[nodiscard]] std::uint16_t dimension(std::size_t pixels, const char* what)
+{
   if ( pixels > std::numeric_limits<std::uint16_t>::max() ) {
-    throw std::invalid_argument("wkb: a raster's " + std::string(what) + " of " + std::to_string(pixels) + " is more than WKB can hold (65535)");
+    throw std::invalid_argument("wkb: a raster's " +
+                                std::string(what) +
+                                " of " +
+                                std::to_string(pixels) +
+                                " is more than WKB can hold (65535)");
   }
 
   return static_cast<std::uint16_t>(pixels);
@@ -36,7 +41,8 @@ constexpr std::uint8_t PIXEL_TYPE_MASK = 0x0FU;
 }  // namespace
 
 template <Pixel pixel_t>
-std::vector<std::byte> write(const Raster<pixel_t>& raster) {
+std::vector<std::byte> write(const Raster<pixel_t>& raster)
+{
   raster.check_pixel_count();
 
   Writer out;
@@ -62,7 +68,8 @@ std::vector<std::byte> write(const Raster<pixel_t>& raster) {
 }
 
 template <Pixel pixel_t>
-Raster<pixel_t> read_raster(std::span<const std::byte> bytes) {
+Raster<pixel_t> read_raster(std::span<const std::byte> bytes)
+{
   Reader reader(bytes);
   reader.byte_order();
 
@@ -71,16 +78,17 @@ Raster<pixel_t> read_raster(std::span<const std::byte> bytes) {
   }
 
   if ( const auto bands = reader.number<std::uint16_t>(); bands != 1 ) {
-    malformed("a raster with " + std::to_string(bands) + " bands: only a raster of one band is read");
+    malformed(
+        "a raster with " + std::to_string(bands) + " bands: only a raster of one band is read");
   }
 
   Raster<pixel_t> raster;
   const auto      scale_x = reader.number<double>();
   const auto      scale_y = reader.number<double>();
-  raster.west = reader.number<double>();
-  raster.north = reader.number<double>();
-  const auto skew_x = reader.number<double>();
-  const auto skew_y = reader.number<double>();
+  raster.west             = reader.number<double>();
+  raster.north            = reader.number<double>();
+  const auto skew_x       = reader.number<double>();
+  const auto skew_y       = reader.number<double>();
 
   if ( skew_x != 0 || skew_y != 0 ) {
     malformed("the raster is skewed: only a raster that is north up, without skew, is read");
@@ -91,17 +99,20 @@ Raster<pixel_t> read_raster(std::span<const std::byte> bytes) {
   }
 
   if ( const auto srid = reader.number<std::int32_t>(); srid != WGS84_SRID ) {
-    malformed("the raster has SRID " + std::to_string(srid) + ", not " + std::to_string(WGS84_SRID));
+    malformed(
+        "the raster has SRID " + std::to_string(srid) + ", not " + std::to_string(WGS84_SRID));
   }
 
-  raster.pixel_width = scale_x;
+  raster.pixel_width  = scale_x;
   raster.pixel_height = -scale_y;
-  raster.width = reader.number<std::uint16_t>();
-  raster.height = reader.number<std::uint16_t>();
+  raster.width        = reader.number<std::uint16_t>();
+  raster.height       = reader.number<std::uint16_t>();
 
   const auto band = std::to_integer<std::uint8_t>(reader.byte());
   if ( (band & OUT_DB_FLAG) != 0 ) {
-    malformed("the band is out-db, in a file outside the database: only a band stored in the database is read");
+    malformed(
+        "the band is out-db, in a file outside the database: only a band stored in the database is "
+        "read");
   }
 
   if ( (band & HAS_NODATA_FLAG) == 0 ) {
@@ -109,10 +120,13 @@ Raster<pixel_t> read_raster(std::span<const std::byte> bytes) {
   }
 
   if ( (band & PIXEL_TYPE_MASK) != PixelType<pixel_t>::CODE ) {
-    malformed(
-        "the band's pixel type is number " + std::to_string(static_cast<unsigned>(band & PIXEL_TYPE_MASK)) + ", not " +
-        std::string(PixelType<pixel_t>::NAME) + " (number " + std::to_string(static_cast<unsigned>(PixelType<pixel_t>::CODE)) + ")"
-    );
+    malformed("the band's pixel type is number " +
+              std::to_string(static_cast<unsigned>(band & PIXEL_TYPE_MASK)) +
+              ", not " +
+              std::string(PixelType<pixel_t>::NAME) +
+              " (number " +
+              std::to_string(static_cast<unsigned>(PixelType<pixel_t>::CODE)) +
+              ")");
   }
 
   raster.nodata = reader.number<pixel_t>();
