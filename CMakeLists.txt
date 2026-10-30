@@ -115,7 +115,6 @@ if(GDAL_FOUND AND NOT MINIVERSE_BUILD_GDAL_CHOICE STREQUAL "OFF")
     src/gdal/dataset.cpp
     src/gdal/raster.cpp
     src/gdal/raster/source.cpp
-    src/gdal/raster/tiles.cpp
     src/gdal/vector.cpp
     src/gdal/vector/fields.cpp
     src/gdal/vector/filter.cpp

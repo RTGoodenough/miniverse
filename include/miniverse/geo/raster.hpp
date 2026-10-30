@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "miniverse/geo/concepts/raster.hpp"  // IWYU pragma: export
+#include "miniverse/geo/snap.hpp"
 #include "miniverse/geo/types.hpp"
 
 /**
@@ -61,17 +62,15 @@ struct Raster {
 
   /**
    * @return The pixel `position` lies in; nothing if it lies outside the raster, or is no number. A position on the line between
-   * two pixels is in the eastern or southern one. The raster's edges belong to its outer pixels, to a billionth of a pixel, so
-   * the corner of the area a raster was loaded for has a pixel.
+   * two pixels is in the eastern or southern one. The raster's edges belong to its outer pixels, to `EDGE_TOLERANCE` of a
+   * pixel, so the corner of the area a raster was loaded for has a pixel.
    */
   [[nodiscard]] std::optional<PixelPosition> pixel_at(const Point& position) const {
-    constexpr double ROUNDING = 1e-9;
-
     const double across = (position.x() - west) / pixel_width;
     const double down = (north - position.y()) / pixel_height;
 
-    const bool inside =
-        across >= -ROUNDING && across <= static_cast<double>(width) + ROUNDING && down >= -ROUNDING && down <= static_cast<double>(height) + ROUNDING;
+    const bool inside = across >= -EDGE_TOLERANCE && across <= static_cast<double>(width) + EDGE_TOLERANCE && down >= -EDGE_TOLERANCE &&
+                        down <= static_cast<double>(height) + EDGE_TOLERANCE;
     if ( width == 0 || height == 0 || ! inside ) {
       return std::nullopt;
     }

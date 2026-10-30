@@ -9,6 +9,7 @@
 #include <exception>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -17,8 +18,8 @@
 
 #include "gdal/common.hpp"
 #include "gdal/raster/source.hpp"
-#include "gdal/raster/tiles.hpp"
 #include "gdal/raster/warp.hpp"
+#include "gdal/raster/window.hpp"
 #include "miniverse/geo/concepts/raster.hpp"
 #include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/raster.hpp"
@@ -30,18 +31,12 @@ namespace miniverse::gdal {
 namespace {
 
 using detail::extent_of;
-using detail::in_both;
 using detail::opened;
 using detail::QuietErrors;
 using detail::reached_of;
 using detail::Scale;
 using detail::scale_of;
 using detail::tile_of;
-using detail::Tiles;
-using detail::tiles_meeting;
-using detail::tiles_of;
-using detail::Tiling;
-using detail::tiling_of;
 using detail::warp_into;
 using detail::window_of;
 
@@ -65,9 +60,9 @@ RasterRead read_raster(
   const QuietErrors          quiet;
   const GDALDatasetUniquePtr dataset = opened(source);
 
-  const geo::Box extent = extent_of(*dataset, source);
-  const Tiles    tiles = tiles_of(extent, tiling_of(grid));
-  const Scale    scale = scale_of(*dataset, extent, grid.pixels_per_degree);
+  const geo::Box       extent = extent_of(*dataset, source);
+  const geo::TileRange tiles = grid.tiles_covering(extent);
+  const Scale          scale = scale_of(*dataset, extent, grid.pixels_per_degree);
 
   // Capped so that a window's pixels fit GDAL's int: a whole file as one window asks for the most there is.
   const auto step =
@@ -124,10 +119,10 @@ void read_tiles_in(
   const QuietErrors          quiet;
   const GDALDatasetUniquePtr dataset = opened(source);
 
-  const geo::Box extent = extent_of(*dataset, source);
-  const Tiling   tiling = tiling_of(grid);
-  const Tiles    tiles = in_both(tiles_meeting(location, tiling), tiles_of(extent, tiling));
-  const Scale    scale = scale_of(*dataset, extent, grid.pixels_per_degree);
+  const geo::Box                extent = extent_of(*dataset, source);
+  const std::optional<geo::Box> box = geo::box_of(location);
+  const geo::TileRange          tiles = box ? grid.tiles_meeting(*box).meet(grid.tiles_covering(extent)) : geo::TileRange{};
+  const Scale                   scale = scale_of(*dataset, extent, grid.pixels_per_degree);
 
   const raster::Reach reach(location);
 
@@ -139,7 +134,7 @@ void read_tiles_in(
   std::vector<geo::Raster<pixel_t>> chunk;
   for ( std::int64_t row = tiles.first_row; row < tiles.end_row; ++row ) {
     for ( std::int64_t first = tiles.first_column; first < tiles.end_column; first += run ) {
-      const std::vector<std::int64_t> reached = reached_of(reach, {first, std::min(first + run, tiles.end_column), row, row + 1}, tiling);
+      const std::vector<std::int64_t> reached = reached_of(reach, {first, std::min(first + run, tiles.end_column), row, row + 1}, grid);
       if ( reached.empty() ) {
         continue;
       }

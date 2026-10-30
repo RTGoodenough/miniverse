@@ -5,6 +5,7 @@
 
 #include <utility>
 
+#include "miniverse/geo/snap.hpp"
 #include "miniverse/geo/types.hpp"
 
 namespace miniverse::raster {
@@ -14,11 +15,9 @@ Reach::Reach(geo::Polygon location) : _location(std::move(location)) {
 }
 
 bool Reach::into(const geo::Box& tile) const {
-  // How far into a tile a location must reach, in tiles: see the class.
-  constexpr double ROUNDING = 1e-9;
-
-  const double across = (tile.max_corner().x() - tile.min_corner().x()) * ROUNDING;
-  const double down = (tile.max_corner().y() - tile.min_corner().y()) * ROUNDING;
+  // The tile without its edges: how far in a location must reach, see the class.
+  const double across = (tile.max_corner().x() - tile.min_corner().x()) * geo::EDGE_TOLERANCE;
+  const double down = (tile.max_corner().y() - tile.min_corner().y()) * geo::EDGE_TOLERANCE;
 
   const geo::Box inside{
       {tile.min_corner().x() + across, tile.min_corner().y() + down},

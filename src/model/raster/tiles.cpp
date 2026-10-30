@@ -1,10 +1,6 @@
 #include "miniverse/model/raster/tiles.hpp"
 
-#include <boost/geometry/algorithms/envelope.hpp>  // IWYU pragma: keep
-#include <boost/geometry/geometries/box.hpp>
-
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <format>
@@ -15,42 +11,18 @@
 
 #include "miniverse/geo/grid.hpp"
 #include "miniverse/geo/raster.hpp"
+#include "miniverse/geo/snap.hpp"
 #include "miniverse/geo/types.hpp"
 
 namespace miniverse::raster {
 
 namespace {
 
-using geo::DEGREES_ACROSS;
-using geo::DEGREES_DOWN;
-
-// How far a position may be from a pixel's edge, in pixels, and a pixel size from another, relatively, and still count as on it.
-constexpr double ALIGNMENT_TOLERANCE = 1e-6;
-constexpr double SIZE_TOLERANCE = 1e-9;
-
 /** @brief Where a raster's north-west pixel lies, in pixels, in a frame that another raster shares. */
 struct PixelAt {
   std::int64_t column = 0;
   std::int64_t row = 0;
 };
-
-/** @return `value` as a whole number, if it is one to within `ALIGNMENT_TOLERANCE`. */
-[[nodiscard]] std::optional<std::int64_t> whole(double value) {
-  const double nearest = std::round(value);
-  if ( std::abs(value - nearest) > ALIGNMENT_TOLERANCE ) {
-    return std::nullopt;
-  }
-
-  return static_cast<std::int64_t>(nearest);
-}
-
-/** @return `value` rounded down, or to the nearest whole number if it is one already but for rounding error. */
-[[nodiscard]] std::int64_t floor_snapped(double value) { return whole(value).value_or(static_cast<std::int64_t>(std::floor(value))); }
-
-/** @return `value` rounded up, or to the nearest whole number if it is one already but for rounding error. */
-[[nodiscard]] std::int64_t ceil_snapped(double value) { return whole(value).value_or(static_cast<std::int64_t>(std::ceil(value))); }
-
-[[nodiscard]] bool same_size(double size, double other) { return std::abs(size - other) <= SIZE_TOLERANCE * std::abs(other); }
 
 /**
  * @brief Copies the pixels of `source` that have data into `target`, where they overlap: `source` at `source_at` and
@@ -96,25 +68,23 @@ std::vector<Tile<pixel_t>> cut(const geo::Raster<pixel_t>& raster, const geo::Gr
     );
   }
 
-  const auto   ppd = static_cast<std::int64_t>(grid.pixels_per_degree);
-  const double size = 1.0 / static_cast<double>(ppd);
-  if ( ! same_size(raster.pixel_width, size) || ! same_size(raster.pixel_height, size) ) {
+  const double size = grid.pixel_degrees();
+  if ( ! geo::same_size(raster.pixel_width, size) || ! geo::same_size(raster.pixel_height, size) ) {
     throw std::invalid_argument(
         "the raster's pixels are " + std::format("{}", raster.pixel_width) + " by " + std::format("{}", raster.pixel_height) +
         " degrees, not the grid's " + std::format("{}", size)
     );
   }
 
-  const std::optional<std::int64_t> first_column = whole((raster.west - geo::GRID_WEST) * static_cast<double>(ppd));
-  const std::optional<std::int64_t> first_row = whole((geo::GRID_NORTH - raster.north) * static_cast<double>(ppd));
-  if ( ! first_column || ! first_row ) {
+  const std::optional<geo::GridPixel> corner = grid.corner_pixel({raster.west, raster.north});
+  if ( ! corner ) {
     throw std::invalid_argument("the raster's corner is not on a corner of the grid's pixels");
   }
 
-  const PixelAt raster_at{.column = *first_column, .row = *first_row};
+  const PixelAt raster_at{.column = corner->column, .row = corner->row};
   const auto    width = static_cast<std::int64_t>(raster.width);
   const auto    height = static_cast<std::int64_t>(raster.height);
-  if ( raster_at.column < 0 || raster_at.row < 0 || raster_at.column + width > DEGREES_ACROSS * ppd || raster_at.row + height > DEGREES_DOWN * ppd ) {
+  if ( raster_at.column < 0 || raster_at.row < 0 || raster_at.column + width > grid.pixels_across() || raster_at.row + height > grid.pixels_down() ) {
     throw std::invalid_argument("the raster reaches past the world: longitude -180 to 180, latitude -90 to 90");
   }
 
@@ -125,9 +95,10 @@ std::vector<Tile<pixel_t>> cut(const geo::Raster<pixel_t>& raster, const geo::Gr
   // By ascending tile id: two overlapping pushes then lock their tiles in the same order, so neither can deadlock the other.
   for ( std::int64_t tile_row = raster_at.row / tile; tile_row * tile < raster_at.row + height; ++tile_row ) {
     for ( std::int64_t tile_column = raster_at.column / tile; tile_column * tile < raster_at.column + width; ++tile_column ) {
+      const geo::Point     tile_corner = grid.corner_of(tile_column * tile, tile_row * tile);
       geo::Raster<pixel_t> pixels{
-          .west = geo::GRID_WEST + (static_cast<double>(tile_column * tile) / static_cast<double>(ppd)),
-          .north = geo::GRID_NORTH - (static_cast<double>(tile_row * tile) / static_cast<double>(ppd)),
+          .west = tile_corner.x(),
+          .north = tile_corner.y(),
           .pixel_width = size,
           .pixel_height = size,
           .width = static_cast<std::size_t>(tile),
@@ -149,24 +120,17 @@ std::vector<Tile<pixel_t>> cut(const geo::Raster<pixel_t>& raster, const geo::Gr
 
 template <geo::Pixel pixel_t>
 geo::Raster<pixel_t> window(std::span<const geo::Raster<pixel_t>> tiles, const geo::Polygon& location) {
-  // Boost declares return_envelope in a detail header; algorithms/envelope.hpp is the public one.
-  const auto box = boost::geometry::return_envelope<boost::geometry::model::box<geo::Point>>(location);  // NOLINT(misc-include-cleaner)
-
-  if ( tiles.empty() || box.min_corner().x() > box.max_corner().x() ) {
+  const std::optional<geo::Box> box = geo::box_of(location);
+  if ( tiles.empty() || ! box ) {
     return {};
-  }
-
-  if ( ! std::isfinite(box.min_corner().x()) || ! std::isfinite(box.min_corner().y()) || ! std::isfinite(box.max_corner().x()) ||
-       ! std::isfinite(box.max_corner().y()) ) {
-    throw std::invalid_argument("the coordinates of a location must be finite numbers");
   }
 
   // The window, in pixels of the first tile's frame: the box, widened to whole pixels, and at least one pixel each way.
   const geo::Raster<pixel_t>& first = tiles.front();
-  const std::int64_t          west = floor_snapped((box.min_corner().x() - first.west) / first.pixel_width);
-  const std::int64_t          east = std::max(ceil_snapped((box.max_corner().x() - first.west) / first.pixel_width), west + 1);
-  const std::int64_t          north = floor_snapped((first.north - box.max_corner().y()) / first.pixel_height);
-  const std::int64_t          south = std::max(ceil_snapped((first.north - box.min_corner().y()) / first.pixel_height), north + 1);
+  const std::int64_t          west = geo::floor_snapped((box->min_corner().x() - first.west) / first.pixel_width);
+  const std::int64_t          east = std::max(geo::ceil_snapped((box->max_corner().x() - first.west) / first.pixel_width), west + 1);
+  const std::int64_t          north = geo::floor_snapped((first.north - box->max_corner().y()) / first.pixel_height);
+  const std::int64_t          south = std::max(geo::ceil_snapped((first.north - box->min_corner().y()) / first.pixel_height), north + 1);
 
   geo::Raster<pixel_t> cut{
       .west = first.west + (static_cast<double>(west) * first.pixel_width),
@@ -180,12 +144,13 @@ geo::Raster<pixel_t> window(std::span<const geo::Raster<pixel_t>> tiles, const g
   };
 
   for ( const geo::Raster<pixel_t>& tile : tiles ) {
-    if ( ! same_size(tile.pixel_width, first.pixel_width) || ! same_size(tile.pixel_height, first.pixel_height) || tile.nodata != first.nodata ) {
+    if ( ! geo::same_size(tile.pixel_width, first.pixel_width) || ! geo::same_size(tile.pixel_height, first.pixel_height) ||
+         tile.nodata != first.nodata ) {
       throw std::invalid_argument("the tiles loaded don't share a pixel size and a nodata value");
     }
 
-    const std::optional<std::int64_t> column = whole((tile.west - first.west) / first.pixel_width);
-    const std::optional<std::int64_t> tile_row = whole((first.north - tile.north) / first.pixel_height);
+    const std::optional<std::int64_t> column = geo::whole((tile.west - first.west) / first.pixel_width);
+    const std::optional<std::int64_t> tile_row = geo::whole((first.north - tile.north) / first.pixel_height);
     if ( ! column || ! tile_row ) {
       throw std::invalid_argument("the tiles loaded are not aligned to one grid of pixels");
     }

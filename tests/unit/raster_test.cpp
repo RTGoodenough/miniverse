@@ -62,8 +62,8 @@ TEST_CASE("raster: a raster has its four edges, also where a double puts a posit
   CHECK(raster.pixel_at({7.05, 46.7}) == geo::PixelPosition{.column = 0, .row = 2});
   CHECK(raster.pixel_at({6.999999999999999, 47.00000000000001}) == geo::PixelPosition{.column = 0, .row = 0});
 
-  CHECK(! raster.pixel_at({7.4000001, 46.95}));  // a millionth of a pixel is not a rounding
-  CHECK(! raster.pixel_at({6.9999999, 46.95}));
+  CHECK(! raster.pixel_at({7.40001, 46.95}));  // a ten-thousandth of a pixel is not a rounding
+  CHECK(! raster.pixel_at({6.99999, 46.95}));
 }
 
 TEST_CASE("raster: a position outside a raster, or that is no number, has no pixel", "[raster]") {

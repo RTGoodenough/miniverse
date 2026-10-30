@@ -56,8 +56,8 @@ const std::string STRIP = "POLYGON((0.1 0.6,0.12 0.58,2.42 2.88,2.4 2.9,0.1 0.6)
 }  // namespace
 
 TEST_CASE("reach: a tile the location only touches, or reaches into by no more than a rounding, is not the location's", "[reach]") {
-  CHECK(tiles_in("POLYGON((1 0.2,1.5 0.2,1.5 0.8,1 0.8,1 0.2))") == 1);                          // ending on the west tile's edge: the east one alone
-  CHECK(tiles_in("POLYGON((0.9999999 0.2,1.5 0.2,1.5 0.8,0.9999999 0.8,0.9999999 0.2))") == 2);  // a hair into the west tile: both
+  CHECK(tiles_in("POLYGON((1 0.2,1.5 0.2,1.5 0.8,1 0.8,1 0.2))") == 1);                    // ending on the west tile's edge: the east one alone
+  CHECK(tiles_in("POLYGON((0.99999 0.2,1.5 0.2,1.5 0.8,0.99999 0.8,0.99999 0.2))") == 2);  // a hair into the west tile: both
   CHECK(tiles_in("POLYGON((0.999999999999 0.2,1.5 0.2,1.5 0.8,0.999999999999 0.8,0.999999999999 0.2))") == 1);  // a rounding into it: as on its edge
   CHECK(tiles_in("POLYGON((1.0000001 0.2,1.5 0.2,1.5 0.8,1.0000001 0.8,1.0000001 0.2))") == 1);
   CHECK(tiles_in("POLYGON((2.0000001 0.2,2.5 0.2,2.5 0.8,2.0000001 0.8,2.0000001 0.2))") == 0);

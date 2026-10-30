@@ -19,7 +19,8 @@ include/miniverse/
   location.hpp           check_location: what a reader's load holds a polygon to, as a table's would refuse
   miniverse.hpp          umbrella: world.hpp plus the built-in models and geo types
   concepts/              LayerModel, WritesPlain, WritesSettings, WritesDatasets, HasOwnChunks, ChunkCallback
-  geo/                   one idea each: types.hpp (Boost.Geometry), grid.hpp, raster.hpp, wkb.hpp and raster_wkb.hpp,
+  geo/                   one idea each: types.hpp (Boost.Geometry), grid.hpp (the grid, where its tiles and pixels lie),
+                         snap.hpp (positions against pixel and tile edges), raster.hpp, wkb.hpp and raster_wkb.hpp,
                          column_types.hpp, operations.hpp (PostGIS tests); concepts/ under each area holds its concepts
   model/                 feature.hpp and way.hpp (what a load gives), the models feature_model.hpp, road_model.hpp,
                          raster_model.hpp; writes.hpp (the three ways a push treats the rows already there) and
